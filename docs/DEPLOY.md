@@ -14,6 +14,12 @@ Não confunda o Git do Sites com o repositório GitHub.
 - Publicador: agente/sessão com conector Sites autenticado e acesso ao projeto.
 - Estado e mídias de produção ficam no D1/R2, não no GitHub.
 
+## Primeiro deploy com login
+
+Configure OVERLAY_SETUP_TOKEN como segredo no Sites antes de publicar e entregue o código
+ao proprietário por canal privado. Nunca coloque esse valor no Git ou no manifesto.
+O cadastro inicial fica bloqueado sem esse código. Veja docs/AUTH.md.
+
 ## Fluxo operacional
 1. Desenvolver no OpenCode com qualquer modelo e enviar uma branch/PR.
 2. Executar a CI e integrar a alteração na main. Registrar o SHA completo aprovado.

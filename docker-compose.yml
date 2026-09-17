@@ -12,6 +12,7 @@ services:
       HOST: 0.0.0.0
       PORT: 4173
       OVERLAY_STATE_FILE: /app/.data/overlay-state.json
+      OVERLAY_SETUP_TOKEN: ${OVERLAY_SETUP_TOKEN:-}
     volumes:
       - overlay_studio_data:/app/.data
 

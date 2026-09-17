@@ -12,6 +12,10 @@ Aplicação web para controle de placar, escalações, eventos, patrocinadores e
 O GitHub executa testes e build; a publicação no GPT Sites é realizada pelo conector Sites.
 Um push na main não atualiza o Site automaticamente.
 
+## Primeiro acesso
+
+Leia [Autenticação e primeiro acesso](docs/AUTH.md). O cadastro inicial exige um código de instalação privado. No Sites ele é fornecido pelo responsável pela publicação; no Node/Docker aparece no terminal se não houver OVERLAY_SETUP_TOKEN configurado.
+
 ## Início rápido com Docker
 
 ### Requisitos
@@ -111,7 +115,7 @@ TECHNICAL_SPEC.md  Especificação técnica detalhada
 
 1. Edite os arquivos de `public/` para alterar interface e overlays.
 2. Edite `server.mjs` para mudar APIs ou persistência local.
-3. Execute `npm test` antes de publicar.
+3. Execute `npm run build` e `npm test` antes de publicar.
 4. Reconstrua o contêiner com `docker compose up -d --build`.
 
 Não edite `dist/` manualmente. Ele é recriado por `npm run build`.
@@ -145,7 +149,7 @@ O contêiner pode ser publicado em qualquer serviço que aceite Docker, como uma
 - suporte a uploads de até 50 MB;
 - HTTPS quando o painel for acessado pela internet.
 
-Para exposição pública, coloque a aplicação atrás de um proxy reverso com HTTPS e autenticação. O link de equipe usa um token de acesso, mas o painel administrativo local não implementa autenticação completa por usuário.
+O painel implementa login de administrador e as equipes têm credenciais próprias. Para exposição pública, use HTTPS. Configure o primeiro administrador conforme [docs/AUTH.md](docs/AUTH.md). Leituras dos overlays continuam públicas para o OBS.
 
 ## Atualizações
 

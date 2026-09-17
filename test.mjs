@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import vm from 'node:vm';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,7 +12,10 @@ const stylesheet = await fs.readFile(new URL('./public/styles.css', import.meta.
 const activeTimers = new Set();
 const broadcastChannels = new Map();
 const checks = [];
-const testStatePath = `/tmp/juventude-overlay-test-state-${process.pid}.json`;
+const testDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'juventude-overlay-test-'));
+const testStatePath = path.join(testDirectory, 'state.json');
+const setupToken = 'isolated-test-setup-token-0123456789';
+process.env.OVERLAY_SETUP_TOKEN = setupToken;
 process.env.OVERLAY_STATE_FILE = testStatePath;
 process.env.HOST = '127.0.0.1';
 const { server } = await import('./server.mjs');
@@ -158,7 +163,9 @@ try {
   verify('Match-state writes are rejected without an administrator session', unauthorizedWrite.status === 401);
   const adminStatusBefore = await (await fetch(`${baseURL}/api/auth/admin/status`)).json();
   verify('No administrator exists before the first setup call', adminStatusBefore.hasAdmins === false);
-  const adminSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123' }) });
+  const missingSetupCode = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'intruder', password: 'test-password' }) });
+  verify('Local initial setup requires the installation code', missingSetupCode.status === 403);
+  const adminSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123', setupToken }) });
   adminCookie = (adminSetup.headers.get('set-cookie') || '').split(';')[0];
   verify('The local server creates the first administrator and starts a session', adminSetup.status === 200 && adminCookie.startsWith('joa_admin='));
   const repeatSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'outro-admin', password: 'senha-teste-123' }) });
@@ -513,52 +520,65 @@ try {
   verify('Production worker serves the team registration portal route', (await worker.fetch(new Request('https://example.test/team?token=test'), {})).status === 200);
   verify('Production worker serves dedicated overlay management routes', (await worker.fetch(new Request('https://example.test/manage/scoreboard?room=principal'), {})).status === 200 && (await worker.fetch(new Request('https://example.test/manage/lineup?room=principal'), {})).status === 200);
   verify('Production worker serves stylesheet and JavaScript', (await worker.fetch(new Request('https://example.test/styles.css'), {})).status === 200 && (await worker.fetch(new Request('https://example.test/app.js'), {})).status === 200);
-  const workerUnauthorizedWrite = await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify({ updatedAt: 1 }), headers: { 'content-type': 'application/json' } }), {});
+  const workerUnauthorizedWrite = await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify({ updatedAt: 1 }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('Production worker rejects match-state writes without an administrator session', workerUnauthorizedWrite.status === 401);
-  const workerAdminSetup = await worker.fetch(new Request('https://example.test/api/auth/admin/setup', { method: 'POST', body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123' }), headers: { 'content-type': 'application/json' } }), {});
-  const workerAdminCookie = (workerAdminSetup.headers.get('set-cookie') || '').split(';')[0];
+  const initialSetupRequest = () => new Request('https://example.test/api/auth/admin/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'intruder', password: 'test-password' }) });
+  verify('Worker setup fails closed when no installation code is configured', (await worker.fetch(initialSetupRequest(), {})).status === 503);
+  verify('Worker setup rejects an unknown installation code', (await worker.fetch(initialSetupRequest(), { OVERLAY_SETUP_TOKEN: setupToken })).status === 403);
+  const workerAdminSetup = await worker.fetch(new Request('https://example.test/api/auth/admin/setup', { method: 'POST', body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123', setupToken }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
+  let workerAdminCookie = (workerAdminSetup.headers.get('set-cookie') || '').split(';')[0];
   verify('Production worker creates the first administrator and starts a session', workerAdminSetup.status === 200 && workerAdminCookie.startsWith('joa_admin='));
   const candidate = { updatedAt: Date.now(), home: { score: 4 } };
-  await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(candidate), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(candidate), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   const persisted = await (await worker.fetch(new Request('https://example.test/api/state'), {})).json();
   verify('Production worker synchronizes overlay state through its API', persisted.home.score === 4);
   const secondRoom = { updatedAt: Date.now() + 1, home: { score: 1 }, away: { score: 3 } };
-  await worker.fetch(new Request('https://example.test/api/state?room=final-futsal', { method: 'PUT', body: JSON.stringify(secondRoom), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  await worker.fetch(new Request('https://example.test/api/state?room=final-futsal', { method: 'PUT', body: JSON.stringify(secondRoom), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   const isolatedRoom = await (await worker.fetch(new Request('https://example.test/api/state?room=final-futsal'), {})).json();
   const unchangedPrimary = await (await worker.fetch(new Request('https://example.test/api/state?room=principal'), {})).json();
   verify('Independent match rooms cannot overwrite one another', isolatedRoom.home.score === 1 && unchangedPrimary.home.score === 4);
   const catalogCandidate = { updatedAt: Date.now() + 20, teams: [{ id: 'team-test', name: 'Time Teste', short: 'TST', color: '#8253cd', logo: '', roster: '9 Ana Souza', accessToken: 'token123', athletes: [{ id: 'ana-1', name: 'Ana Souza', number: '9', height: '1.75', photo: '' }] }] };
-  const catalogWrite = await worker.fetch(new Request('https://example.test/api/teams', { method: 'PUT', body: JSON.stringify(catalogCandidate), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
-  const teamCredentialsWrite = await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { method: 'PUT', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const catalogWrite = await worker.fetch(new Request('https://example.test/api/teams', { method: 'PUT', body: JSON.stringify(catalogCandidate), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
+  const teamCredentialsWrite = await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { method: 'PUT', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('An administrator can set login credentials for a registered team', teamCredentialsWrite.status === 200);
-  const teamLoginWrongPassword = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-errada' }), headers: { 'content-type': 'application/json' } }), {});
+  const teamLoginWrongPassword = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-errada' }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('Team login rejects an incorrect password', teamLoginWrongPassword.status === 401);
-  const teamLoginPaddedPassword = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: '  senha-time-123  ' }), headers: { 'content-type': 'application/json' } }), {});
+  const teamLoginPaddedPassword = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: '  senha-time-123  ' }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('Team login tolerates a password pasted with surrounding spaces', teamLoginPaddedPassword.status === 200);
-  const teamLogin = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json' } }), {});
-  const teamCookie = (teamLogin.headers.get('set-cookie') || '').split(';')[0];
+  const teamLogin = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
+  let teamCookie = (teamLogin.headers.get('set-cookie') || '').split(';')[0];
   verify('A team logs in with its own credentials and receives a scoped session', teamLogin.status === 200 && teamCookie.startsWith('joa_team='));
   const portalRead = await (await worker.fetch(new Request('https://example.test/api/team-portal?token=token123'), {})).json();
   const portalUpdate = await (await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ athletes: [{ id: 'ana-1', name: 'Ana Souza', number: '10', height: '1.76', photo: '', squadRole: 'reserve', position: 'ATA' }], staff: [{ id: 'coach', name: 'Carlos Silva', role: 'Treinador', photo: '' }, { id: 'staff-assistant', name: 'Paulo Lima', role: 'Auxiliar técnico', photo: '' }], coach: { name: 'Carlos Silva', photo: '' }, formation: '4-2-3-1' }), headers: { 'content-type': 'application/json', cookie: teamCookie } }), {})).json();
   verify('Production catalog and team portal share athletes and complete technical staff', catalogWrite.status === 200 && portalRead.team.athletes[0].height === '1.75' && portalUpdate.team.roster === '10 Ana Souza' && portalUpdate.team.athletes[0].squadRole === 'reserve' && portalUpdate.team.athletes[0].position === 'ATA' && portalUpdate.team.coach.name === 'Carlos Silva' && portalUpdate.team.staff.length === 2 && portalUpdate.team.staff[1].name === 'Paulo Lima' && portalUpdate.team.formation === '4-2-3-1');
-  const portalWriteByOtherTeam = await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ name: 'Invasão' }), headers: { 'content-type': 'application/json' } }), {});
+  const portalWriteByOtherTeam = await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ name: 'Invasão' }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('Team portal writes are rejected without a matching session', portalWriteByOtherTeam.status === 401);
   const teamCredentialsList = await (await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { headers: { cookie: workerAdminCookie } }), {})).json();
   verify('An administrator can list every team login on file', Array.isArray(teamCredentialsList.entries) && teamCredentialsList.entries.some(entry => entry.teamId === 'team-test' && entry.username === 'time-teste'));
-  const teamCredentialsDelete = await worker.fetch(new Request('https://example.test/api/auth/team/credentials?teamId=team-test', { method: 'DELETE', headers: { cookie: workerAdminCookie } }), {});
+  const teamCredentialsDelete = await worker.fetch(new Request('https://example.test/api/auth/team/credentials?teamId=team-test', { method: 'DELETE', headers: { cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('An administrator can revoke a team login', teamCredentialsDelete.status === 200);
-  const teamLoginAfterRevoke = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json' } }), {});
+  const teamLoginAfterRevoke = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('A revoked team login can no longer authenticate', teamLoginAfterRevoke.status === 401);
   const adminAccountsList = await (await worker.fetch(new Request('https://example.test/api/auth/admin/accounts', { headers: { cookie: workerAdminCookie } }), {})).json();
   verify('An administrator can list every administrator account', adminAccountsList.accounts.length === 1 && adminAccountsList.accounts[0].username === 'sala-admin');
-  const soleAdminDelete = await worker.fetch(new Request(`https://example.test/api/auth/admin/accounts?id=${adminAccountsList.accounts[0].id}`, { method: 'DELETE', headers: { cookie: workerAdminCookie } }), {});
+  const soleAdminDelete = await worker.fetch(new Request(`https://example.test/api/auth/admin/accounts?id=${adminAccountsList.accounts[0].id}`, { method: 'DELETE', headers: { cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('The last remaining administrator account cannot be removed', soleAdminDelete.status === 409);
-  const secondAdminCreate = await worker.fetch(new Request('https://example.test/api/auth/admin/accounts', { method: 'POST', body: JSON.stringify({ username: 'segundo-admin', password: 'senha-teste-456' }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const secondAdminCreate = await worker.fetch(new Request('https://example.test/api/auth/admin/accounts', { method: 'POST', body: JSON.stringify({ username: 'segundo-admin', password: 'senha-teste-456' }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   const secondAdminData = await secondAdminCreate.json();
   verify('An administrator can add another administrator account', secondAdminCreate.status === 200 && secondAdminData.accounts.length === 2);
   const firstAdminId = secondAdminData.accounts.find(account => account.username === 'sala-admin').id;
-  const firstAdminDelete = await worker.fetch(new Request(`https://example.test/api/auth/admin/accounts?id=${firstAdminId}`, { method: 'DELETE', headers: { cookie: workerAdminCookie } }), {});
+  const firstAdminDelete = await worker.fetch(new Request(`https://example.test/api/auth/admin/accounts?id=${firstAdminId}`, { method: 'DELETE', headers: { cookie: workerAdminCookie } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('An administrator account can be removed once another one remains', firstAdminDelete.status === 200 && (await firstAdminDelete.json()).accounts.length === 1);
+
+  const revokedAdmin = await worker.fetch(new Request('https://example.test/api/auth/admin/accounts', { headers: { cookie: workerAdminCookie } }), {});
+  verify('Removing an administrator also revokes their active cookie', revokedAdmin.status === 401);
+  const revokedTeam = await worker.fetch(new Request('https://example.test/api/auth/team/session', { headers: { cookie: teamCookie } }), {});
+  verify('Removing team credentials also revokes the active cookie', (await revokedTeam.json()).authenticated === false);
+  const replacementLogin = await worker.fetch(new Request('https://example.test/api/auth/admin/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'segundo-admin', password: 'senha-teste-456' }) }), {});
+  workerAdminCookie = replacementLogin.headers.get('set-cookie').split(';')[0];
+  await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { method: 'PUT', headers: { 'content-type': 'application/json', cookie: workerAdminCookie }, body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }) }), {});
+  const replacementTeamLogin = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }) }), {});
+  teamCookie = replacementTeamLogin.headers.get('set-cookie').split(';')[0];
 
   const objects = new Map();
   const bucket = {
@@ -595,10 +615,10 @@ try {
         args: [],
         bind(...args) { this.args = args; return this; },
         async run() {
-          if (sql.startsWith('INSERT INTO')) {
+          if (sql.startsWith('INSERT')) {
             const [room, payload, updatedAt] = this.args;
             const previous = rows.get(room);
-            if (!previous || Number(updatedAt) >= Number(previous.updated_at)) rows.set(room, { payload, updated_at: updatedAt });
+            if (!previous || (!sql.startsWith('INSERT OR IGNORE') && Number(updatedAt) >= Number(previous.updated_at))) rows.set(room, { payload, updated_at: updatedAt });
           }
           return { success: true };
         },
@@ -608,18 +628,40 @@ try {
   };
   const writer = (await import('./dist/server/index.js?writer=isolated')).default;
   const reader = (await import('./dist/server/index.js?reader=isolated')).default;
-  const writerAdminSetup = await writer.fetch(new Request('https://example.test/api/auth/admin/setup', { method: 'POST', body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123' }), headers: { 'content-type': 'application/json' } }), { DB: database });
+  const writerAdminSetup = await writer.fetch(new Request('https://example.test/api/auth/admin/setup', { method: 'POST', body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123', setupToken }), headers: { 'content-type': 'application/json' } }), { DB: database, OVERLAY_SETUP_TOKEN: setupToken });
   const writerAdminCookie = (writerAdminSetup.headers.get('set-cookie') || '').split(';')[0];
   const durableCandidate = { updatedAt: Date.now() + 50, sport: 'volleyball', home: { score: 22 }, away: { score: 19 } };
-  const writeResponse = await writer.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(durableCandidate), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database });
-  const durableRead = await (await reader.fetch(new Request('https://example.test/api/state'), { DB: database })).json();
+  const writeResponse = await writer.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(durableCandidate), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database, OVERLAY_SETUP_TOKEN: setupToken });
+  const durableRead = await (await reader.fetch(new Request('https://example.test/api/state'), { DB: database, OVERLAY_SETUP_TOKEN: setupToken })).json();
   verify('A control session and an isolated OBS worker share durable D1-backed state', writeResponse.status === 200 && durableRead.home.score === 22 && durableRead.away.score === 19);
-  const readerSessionCheck = await reader.fetch(new Request('https://example.test/api/auth/admin/session', { headers: { cookie: writerAdminCookie } }), { DB: database });
+  const readerSessionCheck = await reader.fetch(new Request('https://example.test/api/auth/admin/session', { headers: { cookie: writerAdminCookie } }), { DB: database, OVERLAY_SETUP_TOKEN: setupToken });
   verify('An isolated reader isolate verifies a session cookie signed by another isolate through the shared D1-backed secret', (await readerSessionCheck.json()).authenticated === true);
   const older = { updatedAt: durableCandidate.updatedAt - 5, home: { score: 0 } };
-  await reader.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(older), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database });
-  const protectedState = await (await writer.fetch(new Request('https://example.test/api/state'), { DB: database })).json();
+  await reader.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(older), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database, OVERLAY_SETUP_TOKEN: setupToken });
+  const protectedState = await (await writer.fetch(new Request('https://example.test/api/state'), { DB: database, OVERLAY_SETUP_TOKEN: setupToken })).json();
   verify('Older browser sessions cannot overwrite a newer shared scoreboard', protectedState.home.score === 22);
+  for (const room of ['auth-secret', 'admins', 'team-credentials', 'team-catalog', '__auth_secret__', '__admins__', '__team_credentials__', 'AUTH-SECRET']) {
+    for (const method of ['GET', 'PUT']) {
+      const options = { method, headers: { 'content-type': 'application/json', cookie: writerAdminCookie } };
+      if (method === 'PUT') options.body = JSON.stringify({ updatedAt: Date.now(), value: 'attack' });
+      const response = await writer.fetch(new Request('https://example.test/api/state?room=' + encodeURIComponent(room), options), { DB: database });
+      verify('Worker blocks private room ' + room + ' via ' + method, response.status === 403);
+      const localResponse = await fetch(baseURL + '/api/state?room=' + encodeURIComponent(room), { method });
+      verify('Node blocks private room ' + room + ' via ' + method, localResponse.status === 403);
+    }
+  }
+  // Independent isolates racing to create the secret must use the same winner.
+  const raceA = (await import('./dist/server/index.js?race=A')).default;
+  const raceB = (await import('./dist/server/index.js?race=B')).default;
+  rows.clear();
+  const raceRequest = username => new Request('https://example.test/api/auth/admin/setup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password: 'race-password-123', setupToken }) });
+  const raceResponses = await Promise.all([raceA.fetch(raceRequest('race-a'), { DB: database, OVERLAY_SETUP_TOKEN: setupToken }), raceB.fetch(raceRequest('race-b'), { DB: database, OVERLAY_SETUP_TOKEN: setupToken })]);
+  verify('Concurrent setup creates exactly one first administrator', raceResponses.filter(r => r.status === 200).length === 1 && raceResponses.filter(r => r.status === 409).length === 1);
+  const winningCookie = raceResponses.find(r => r.status === 200).headers.get('set-cookie').split(';')[0];
+  for (const isolated of [raceA, raceB]) {
+    const check = await isolated.fetch(new Request('https://example.test/api/auth/admin/session', { headers: { cookie: winningCookie } }), { DB: database });
+    verify('Racing isolates share one secret and validate the winning session', (await check.json()).authenticated === true);
+  }
   const hostingConfig = JSON.parse(await fs.readFile(new URL('./.openai/hosting.json', import.meta.url), 'utf8'));
   verify('The deployed site requests a durable D1 database binding', hostingConfig.d1 === 'DB');
   verify('The deployed site requests R2 storage for team badges and sponsor artwork', hostingConfig.r2 === 'BUCKET');
@@ -628,5 +670,5 @@ try {
 } finally {
   for (const timer of activeTimers) { clearTimeout(timer); clearInterval(timer); }
   await new Promise(resolve => server.close(resolve));
-  await fs.rm(testStatePath, { force: true });
+  await fs.rm(testDirectory, { recursive: true, force: true });
 }

@@ -27,9 +27,7 @@ git diff --check
 git diff --stat
 ```
 O build deve preceder os testes: a suíte também importa o Worker de dist/server/index.js.
-Os testes existentes usam um caminho /tmp e são executados na CI Ubuntu.
-No Windows, prefira WSL/Linux para a suíte enquanto esse caminho não for tornado portátil;
-não informe sucesso se o teste falhar por causa do ambiente.
+Os testes usam uma pasta temporária isolada e funcionam em Windows e Linux.
 Revise o diff e inclua a saída de dist/ regenerada junto com mudanças que afetem o build.
 
 Teste manualmente o fluxo alterado no painel e no OBS. Use uma room de teste.

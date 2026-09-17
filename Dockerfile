@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.description="Painel e overlays esportivos para OB
 WORKDIR /app
 
 COPY package.json ./
-COPY server.mjs ./
+COPY server.mjs auth.mjs ./
 COPY public ./public
 
 RUN mkdir -p /app/.data/assets && chown -R node:node /app

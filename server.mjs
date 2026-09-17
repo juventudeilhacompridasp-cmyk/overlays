@@ -28,6 +28,10 @@ if (!sharedStates.__auth_secret__) {
   await persist();
 }
 const AUTH_SECRET = sharedStates.__auth_secret__.value;
+const SETUP_TOKEN = process.env.OVERLAY_SETUP_TOKEN || auth.randomSecretHex();
+if (!process.env.OVERLAY_SETUP_TOKEN && sharedStates.__admins__.accounts.length === 0) {
+  process.stderr.write('Código de instalação local (primeiro administrador): ' + SETUP_TOKEN + '\n');
+}
 
 function normalizeUsername(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 40);
@@ -66,13 +70,13 @@ function clearSessionCookie(response, request, name) {
 async function getAdminSession(request) {
   const cookies = auth.parseCookies(request.headers.cookie);
   const payload = await auth.verifySession(cookies.joa_admin, AUTH_SECRET);
-  return payload && payload.kind === 'admin' ? payload : null;
+  return payload?.kind === 'admin' && sharedStates.__admins__.accounts.some(a => a.username === payload.username && a.id === payload.accountId) ? payload : null;
 }
 
 async function getTeamSession(request) {
   const cookies = auth.parseCookies(request.headers.cookie);
   const payload = await auth.verifySession(cookies.joa_team, AUTH_SECRET);
-  return payload && payload.kind === 'team' ? payload : null;
+  return payload?.kind === 'team' && sharedStates.__team_credentials__.entries.some(e => e.teamId === payload.teamId && e.username === payload.username && e.updatedAt === payload.credentialVersion) ? payload : null;
 }
 
 async function requireAdmin(request, response) {
@@ -118,13 +122,15 @@ const server = http.createServer(async (request, response) => {
     if (sharedStates.__admins__.accounts.length > 0) { sendJson(response, 409, { ok: false, error: 'Já existe um administrador configurado' }); return; }
     try {
       const candidate = JSON.parse(await readBody(request));
+      if (!auth.validSetupToken(candidate.setupToken, SETUP_TOKEN)) { sendJson(response, 403, { ok: false, error: 'Código de instalação inválido' }); return; }
       const username = normalizeUsername(candidate.username);
       if (username.length < 3 || !validPassword(candidate.password)) { sendJson(response, 400, { ok: false, error: 'Usuário ou senha inválidos' }); return; }
       const account = { id: crypto.randomUUID(), username, passwordHash: await auth.hashPassword(candidate.password), createdAt: Date.now() };
+      if (sharedStates.__admins__.accounts.length > 0) { sendJson(response, 409, { ok: false, error: 'Administrador já configurado' }); return; }
       sharedStates.__admins__.accounts.push(account);
       sharedStates.__admins__.updatedAt = Date.now();
       await persist();
-      await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username });
+      await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username, accountId: account.id });
       sendJson(response, 200, { ok: true, username });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
@@ -137,7 +143,7 @@ const server = http.createServer(async (request, response) => {
       const username = normalizeUsername(candidate.username);
       const account = sharedStates.__admins__.accounts.find(item => item.username === username);
       if (!account || !(await auth.verifyPassword(candidate.password, account.passwordHash))) { sendJson(response, 401, { ok: false, error: 'Usuário ou senha incorretos' }); return; }
-      await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username });
+      await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username, accountId: account.id });
       sendJson(response, 200, { ok: true, username });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
@@ -197,7 +203,7 @@ const server = http.createServer(async (request, response) => {
       const entry = sharedStates.__team_credentials__.entries.find(item => item.teamId === teamId && item.username === username);
       if (!entry || !(await auth.verifyPassword(candidate.password, entry.passwordHash))) { sendJson(response, 401, { ok: false, error: 'Usuário ou senha incorretos' }); return; }
       const team = sharedStates.__team_catalog__?.teams?.find(item => item.id === teamId);
-      await setSessionCookie(response, request, 'joa_team', { kind: 'team', teamId, username });
+      await setSessionCookie(response, request, 'joa_team', { kind: 'team', teamId, username, credentialVersion: entry.updatedAt });
       sendJson(response, 200, { ok: true, teamId, teamName: team?.name || '' });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
@@ -404,6 +410,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (url.pathname === '/api/state') {
+    if (auth.isReservedRoom(room)) { sendJson(response, 403, { ok: false, error: 'Sala reservada' }); return; }
     if (request.method === 'PUT') {
       if (!(await requireAdmin(request, response))) return;
       let body = '';

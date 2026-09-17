@@ -1107,10 +1107,10 @@ async function checkAdminSession() {
   render();
 }
 
-async function submitAdminAuth(mode, username, password) {
+async function submitAdminAuth(mode, username, password, setupToken) {
   try {
     const response = await fetch(mode === 'setup' ? '/api/auth/admin/setup' : '/api/auth/admin/login', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password, setupToken }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { adminSession = { ...adminSession, error: data.error || 'Não foi possível entrar.' }; render(); return; }
@@ -1719,7 +1719,7 @@ function renderAdminAuthGate() {
   if (adminSession.status === 'checking') return renderAuthWait('Verificando sessão…');
   const isSetup = adminSession.status === 'setup';
   return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state auth-card"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>${isSetup ? 'Criar administrador' : 'Entrar no painel'}</h1><p>${isSetup ? 'Defina o primeiro usuário e senha do painel administrativo.' : 'Informe seu usuário e senha para acessar o painel.'}</p>
-    <div class="auth-form"><div class="field"><label for="admin-username">Usuário</label><input id="admin-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="admin-password">Senha</label><input id="admin-password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" maxlength="200"></div>${adminSession.error ? `<p class="auth-error">${escapeHtml(adminSession.error)}</p>` : ''}<button class="button primary" data-action="${isSetup ? 'admin-setup-submit' : 'admin-login-submit'}" style="width:100%">${isSetup ? 'Criar administrador' : 'Entrar'}</button></div></section></main>`;
+    <div class="auth-form"><div class="field"><label for="admin-username">Usuário</label><input id="admin-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="admin-password">Senha</label><input id="admin-password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" maxlength="200"></div>${isSetup ? `<div class="field"><label for="admin-setup-token">Código de instalação</label><input id="admin-setup-token" type="password" autocomplete="off"><small>Use o código fornecido pelo responsável pela instalação.</small></div>` : ''}${adminSession.error ? `<p class="auth-error">${escapeHtml(adminSession.error)}</p>` : ''}<button class="button primary" data-action="${isSetup ? 'admin-setup-submit' : 'admin-login-submit'}" style="width:100%">${isSetup ? 'Criar administrador' : 'Entrar'}</button></div></section></main>`;
 }
 
 function renderTeamPortal() {
@@ -2028,7 +2028,7 @@ function handleAction(action, target) {
   if (action === 'admin-login-submit' || action === 'admin-setup-submit') {
     const username = document.getElementById('admin-username')?.value || '';
     const password = document.getElementById('admin-password')?.value || '';
-    submitAdminAuth(action === 'admin-setup-submit' ? 'setup' : 'login', username, password);
+    submitAdminAuth(action === 'admin-setup-submit' ? 'setup' : 'login', username, password, document.getElementById('admin-setup-token')?.value || '');
     return;
   }
   if (action === 'admin-logout') { logoutAdmin(); return; }
@@ -3005,7 +3005,7 @@ document.addEventListener('keydown', event => {
   }
   if (event.target.matches('input, textarea, select, [contenteditable="true"]')) {
     if (event.key === 'Enter' && drawer && event.target.tagName !== 'TEXTAREA') confirmEvent();
-    else if (event.key === 'Enter' && event.target.matches('#admin-username, #admin-password')) handleAction(adminSession.status === 'setup' ? 'admin-setup-submit' : 'admin-login-submit', { dataset: {} });
+    else if (event.key === 'Enter' && event.target.matches('#admin-username, #admin-password, #admin-setup-token')) handleAction(adminSession.status === 'setup' ? 'admin-setup-submit' : 'admin-login-submit', { dataset: {} });
     else if (event.key === 'Enter' && event.target.matches('#team-username, #team-password')) handleAction('team-login-submit', { dataset: {} });
     return;
   }

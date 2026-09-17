@@ -17,7 +17,7 @@ for (const filename of ['index.html', 'styles.css', 'app.js']) {
 }
 
 const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
-  .replace(/^export \{[\s\S]*\};\s*$/m, '');
+  .replace(/^export \{[^}]*\};\s*/gm, '');
 
 const worker = `${authModule}
 const assets = ${JSON.stringify(assetMap)};
@@ -56,12 +56,22 @@ async function persistState(env, room, candidate) {
   return readState(env, room);
 }
 
+async function insertPrivateOnce(env, key, candidate) {
+  if (!env?.DB) {
+    if (!fallbackStates.has(key)) fallbackStates.set(key, candidate);
+    return fallbackStates.get(key);
+  }
+  await ensureDatabase(env.DB);
+  await env.DB.prepare('INSERT OR IGNORE INTO overlay_state (room, payload, updated_at) VALUES (?, ?, ?)').bind(key, JSON.stringify(candidate), Number(candidate.updatedAt || 0)).run();
+  return readState(env, key);
+}
+
 async function getAuthSecret(env) {
   if (!authSecretPromise) {
     authSecretPromise = (async () => {
-      const existing = await readState(env, 'auth-secret');
+      const existing = await readState(env, '__auth_secret__');
       if (existing?.value) return existing.value;
-      const persisted = await persistState(env, 'auth-secret', { value: randomSecretHex(), updatedAt: Date.now() });
+      const persisted = await insertPrivateOnce(env, '__auth_secret__', { value: randomSecretHex(), updatedAt: Date.now() });
       return persisted.value;
     })();
   }
@@ -82,16 +92,18 @@ function unauthorized() {
   return Response.json({ ok: false, error: 'Autenticação necessária' }, { status: 401, headers: { 'cache-control': 'no-store' } });
 }
 
-async function getAdminSession(request, secret) {
+async function getAdminSession(request, secret, env) {
   const cookies = parseCookies(request.headers.get('cookie'));
   const payload = await verifySession(cookies.joa_admin, secret);
-  return payload && payload.kind === 'admin' ? payload : null;
+  const admins = await readState(env, '__admins__');
+  return payload?.kind === 'admin' && admins.accounts?.some(a => a.username === payload.username && a.id === payload.accountId) ? payload : null;
 }
 
-async function getTeamSession(request, secret) {
+async function getTeamSession(request, secret, env) {
   const cookies = parseCookies(request.headers.get('cookie'));
   const payload = await verifySession(cookies.joa_team, secret);
-  return payload && payload.kind === 'team' ? payload : null;
+  const credentials = await readState(env, '__team_credentials__');
+  return payload?.kind === 'team' && credentials.entries?.some(e => e.teamId === payload.teamId && e.username === payload.username && e.updatedAt === payload.credentialVersion) ? payload : null;
 }
 
 async function sessionCookieHeader(request, url, name, payload, secret) {
@@ -144,35 +156,38 @@ export default {
     if (url.pathname === '/health') return Response.json({ ok: true, service: 'juventude-overlay-studio' }, { headers: { 'cache-control': 'no-store' } });
 
     if (url.pathname === '/api/auth/admin/status') {
-      const admins = await readState(env, 'admins');
+      const admins = await readState(env, '__admins__');
       return Response.json({ hasAdmins: (admins?.accounts?.length || 0) > 0 }, { headers: { 'cache-control': 'no-store' } });
     }
     if (url.pathname === '/api/auth/admin/setup') {
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
       const secret = await getAuthSecret(env);
-      const admins = (await readState(env, 'admins')) || { accounts: [], updatedAt: 0 };
+      const admins = (await readState(env, '__admins__')) || { accounts: [], updatedAt: 0 };
       if ((admins.accounts || []).length > 0) return Response.json({ ok: false, error: 'Já existe um administrador configurado' }, { status: 409 });
+      if (!env?.OVERLAY_SETUP_TOKEN || env.OVERLAY_SETUP_TOKEN.length < 32) return Response.json({ ok: false, error: 'Cadastro inicial indisponível. Configure o código de instalação no servidor.' }, { status: 503 });
       try {
         const candidate = await request.json();
+        if (!validSetupToken(candidate.setupToken, env.OVERLAY_SETUP_TOKEN)) return Response.json({ ok: false, error: 'Código de instalação inválido' }, { status: 403 });
         const username = normalizeUsername(candidate.username);
         if (username.length < 3 || !validPassword(candidate.password)) return Response.json({ ok: false, error: 'Usuário ou senha inválidos' }, { status: 400 });
         admins.accounts = [{ id: crypto.randomUUID(), username, passwordHash: await hashPassword(candidate.password), createdAt: Date.now() }];
         admins.updatedAt = Date.now();
-        await persistState(env, 'admins', admins);
-        const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username }, secret);
+        const saved = await insertPrivateOnce(env, '__admins__', admins);
+        if (saved.accounts?.[0]?.id !== admins.accounts[0].id) return Response.json({ ok: false, error: 'Administrador já configurado' }, { status: 409 });
+        const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username, accountId: admins.accounts[0].id }, secret);
         return Response.json({ ok: true, username }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
     if (url.pathname === '/api/auth/admin/login') {
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
       const secret = await getAuthSecret(env);
-      const admins = await readState(env, 'admins');
+      const admins = await readState(env, '__admins__');
       try {
         const candidate = await request.json();
         const username = normalizeUsername(candidate.username);
         const account = admins?.accounts?.find(item => item.username === username);
         if (!account || !(await verifyPassword(candidate.password, account.passwordHash))) return Response.json({ ok: false, error: 'Usuário ou senha incorretos' }, { status: 401 });
-        const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username }, secret);
+        const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username, accountId: account.id }, secret);
         return Response.json({ ok: true, username }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
@@ -182,13 +197,13 @@ export default {
     }
     if (url.pathname === '/api/auth/admin/session') {
       const secret = await getAuthSecret(env);
-      const session = await getAdminSession(request, secret);
+      const session = await getAdminSession(request, secret, env);
       return Response.json({ authenticated: Boolean(session), username: session?.username || null }, { headers: { 'cache-control': 'no-store' } });
     }
     if (url.pathname === '/api/auth/admin/accounts') {
       const secret = await getAuthSecret(env);
-      if (!(await getAdminSession(request, secret))) return unauthorized();
-      const admins = (await readState(env, 'admins')) || { accounts: [], updatedAt: 0 };
+      if (!(await getAdminSession(request, secret, env))) return unauthorized();
+      const admins = (await readState(env, '__admins__')) || { accounts: [], updatedAt: 0 };
       if (request.method === 'GET') {
         return Response.json({ accounts: (admins.accounts || []).map(item => ({ id: item.id, username: item.username })) }, { headers: { 'cache-control': 'no-store' } });
       }
@@ -199,7 +214,7 @@ export default {
         if (remaining.length === admins.accounts.length) return Response.json({ ok: false, error: 'Administrador não encontrado.' }, { status: 404 });
         admins.accounts = remaining;
         admins.updatedAt = Date.now();
-        await persistState(env, 'admins', admins);
+        await persistState(env, '__admins__', admins);
         return Response.json({ ok: true, accounts: admins.accounts.map(item => ({ id: item.id, username: item.username })) }, { headers: { 'cache-control': 'no-store' } });
       }
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
@@ -210,14 +225,14 @@ export default {
         if ((admins.accounts || []).some(item => item.username === username)) return Response.json({ ok: false, error: 'Usuário já existe' }, { status: 409 });
         admins.accounts = [...(admins.accounts || []), { id: crypto.randomUUID(), username, passwordHash: await hashPassword(candidate.password), createdAt: Date.now() }];
         admins.updatedAt = Date.now();
-        await persistState(env, 'admins', admins);
+        await persistState(env, '__admins__', admins);
         return Response.json({ ok: true, accounts: admins.accounts.map(item => ({ id: item.id, username: item.username })) }, { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
     if (url.pathname === '/api/auth/team/login') {
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
       const secret = await getAuthSecret(env);
-      const credentials = await readState(env, 'team-credentials');
+      const credentials = await readState(env, '__team_credentials__');
       try {
         const candidate = await request.json();
         const teamId = String(candidate.teamId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
@@ -226,7 +241,7 @@ export default {
         if (!entry || !(await verifyPassword(candidate.password, entry.passwordHash))) return Response.json({ ok: false, error: 'Usuário ou senha incorretos' }, { status: 401 });
         const catalog = await readState(env, 'team-catalog');
         const team = catalog?.teams?.find(item => item.id === teamId);
-        const cookie = await sessionCookieHeader(request, url, 'joa_team', { kind: 'team', teamId, username }, secret);
+        const cookie = await sessionCookieHeader(request, url, 'joa_team', { kind: 'team', teamId, username, credentialVersion: entry.updatedAt }, secret);
         return Response.json({ ok: true, teamId, teamName: team?.name || '' }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
@@ -236,7 +251,7 @@ export default {
     }
     if (url.pathname === '/api/auth/team/session') {
       const secret = await getAuthSecret(env);
-      const session = await getTeamSession(request, secret);
+      const session = await getTeamSession(request, secret, env);
       const catalog = session ? await readState(env, 'team-catalog') : null;
       const team = catalog?.teams?.find(item => item.id === session?.teamId);
       return Response.json({ authenticated: Boolean(session), teamId: session?.teamId || null, teamName: team?.name || null }, { headers: { 'cache-control': 'no-store' } });
@@ -245,8 +260,8 @@ export default {
       const teamId = String(url.searchParams.get('teamId') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
       const secret = await getAuthSecret(env);
       if (request.method === 'PUT') {
-        if (!(await getAdminSession(request, secret))) return unauthorized();
-        const credentials = (await readState(env, 'team-credentials')) || { entries: [], updatedAt: 0 };
+        if (!(await getAdminSession(request, secret, env))) return unauthorized();
+        const credentials = (await readState(env, '__team_credentials__')) || { entries: [], updatedAt: 0 };
         try {
           const candidate = await request.json();
           const bodyTeamId = String(candidate.teamId || teamId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
@@ -256,22 +271,22 @@ export default {
           entries.push({ teamId: bodyTeamId, username, passwordHash: await hashPassword(candidate.password), updatedAt: Date.now() });
           credentials.entries = entries;
           credentials.updatedAt = Date.now();
-          await persistState(env, 'team-credentials', credentials);
+          await persistState(env, '__team_credentials__', credentials);
           return Response.json({ ok: true, teamId: bodyTeamId, username }, { headers: { 'cache-control': 'no-store' } });
         } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
       }
       if (request.method === 'DELETE') {
-        if (!(await getAdminSession(request, secret))) return unauthorized();
-        const credentials = (await readState(env, 'team-credentials')) || { entries: [], updatedAt: 0 };
+        if (!(await getAdminSession(request, secret, env))) return unauthorized();
+        const credentials = (await readState(env, '__team_credentials__')) || { entries: [], updatedAt: 0 };
         const before = (credentials.entries || []).length;
         credentials.entries = (credentials.entries || []).filter(item => item.teamId !== teamId);
         if (credentials.entries.length === before) return Response.json({ ok: false, error: 'Acesso não encontrado.' }, { status: 404 });
         credentials.updatedAt = Date.now();
-        await persistState(env, 'team-credentials', credentials);
+        await persistState(env, '__team_credentials__', credentials);
         return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } });
       }
-      if (!(await getAdminSession(request, secret))) return unauthorized();
-      const credentials = await readState(env, 'team-credentials');
+      if (!(await getAdminSession(request, secret, env))) return unauthorized();
+      const credentials = await readState(env, '__team_credentials__');
       if (teamId) {
         const entry = credentials?.entries?.find(item => item.teamId === teamId);
         return Response.json({ teamId, username: entry?.username || null, hasPassword: Boolean(entry) }, { headers: { 'cache-control': 'no-store' } });
@@ -282,7 +297,7 @@ export default {
     if (url.pathname === '/api/teams') {
       if (request.method === 'PUT') {
         const secret = await getAuthSecret(env);
-        if (!(await getAdminSession(request, secret))) return unauthorized();
+        if (!(await getAdminSession(request, secret, env))) return unauthorized();
         try {
           const candidate = await request.json();
           if (!Array.isArray(candidate.teams)) return new Response('Invalid team catalog', { status: 400 });
@@ -297,8 +312,8 @@ export default {
       if (!team) return new Response('Team not found', { status: 404 });
       if (request.method === 'PUT') {
         const secret = await getAuthSecret(env);
-        const admin = await getAdminSession(request, secret);
-        const teamSession = admin ? null : await getTeamSession(request, secret);
+        const admin = await getAdminSession(request, secret, env);
+        const teamSession = admin ? null : await getTeamSession(request, secret, env);
         if (!admin && !(teamSession && teamSession.teamId === team.id)) return unauthorized();
         try {
           const candidate = await request.json();
@@ -353,8 +368,8 @@ export default {
       const key = 'team-portals/' + team.id + '/' + athleteId;
       if (request.method === 'PUT') {
         const secret = await getAuthSecret(env);
-        const admin = await getAdminSession(request, secret);
-        const teamSession = admin ? null : await getTeamSession(request, secret);
+        const admin = await getAdminSession(request, secret, env);
+        const teamSession = admin ? null : await getTeamSession(request, secret, env);
         if (!admin && !(teamSession && teamSession.teamId === team.id)) return unauthorized();
         const length = Number(request.headers.get('content-length') || 0);
         if (length > 5000000) return new Response('Asset too large', { status: 413 });
@@ -386,10 +401,10 @@ export default {
         const secret = await getAuthSecret(env);
         if (assetRoom === 'team-portals') {
           const ownerId = assetName.replace(/-logo$/, '');
-          const admin = await getAdminSession(request, secret);
-          const teamSession = admin ? null : await getTeamSession(request, secret);
+          const admin = await getAdminSession(request, secret, env);
+          const teamSession = admin ? null : await getTeamSession(request, secret, env);
           if (!admin && !(teamSession && teamSession.teamId === ownerId)) return unauthorized();
-        } else if (!(await getAdminSession(request, secret))) return unauthorized();
+        } else if (!(await getAdminSession(request, secret, env))) return unauthorized();
         const length = Number(request.headers.get('content-length') || 0);
         const maxLength = assetName === 'sponsors-wide-video' ? 50000000 : assetName.endsWith('-lineup-media') ? 25000000 : assetName.endsWith('-wide') ? 8000000 : 5000000;
         if (length > maxLength) return new Response('Asset too large', { status: 413 });
@@ -405,9 +420,10 @@ export default {
       return new Response(object.body, { headers });
     }
     if (url.pathname === '/api/state') {
+      if (isReservedRoom(room)) return Response.json({ ok: false, error: 'Sala reservada' }, { status: 403 });
       if (request.method === 'PUT') {
         const secret = await getAuthSecret(env);
-        if (!(await getAdminSession(request, secret))) return unauthorized();
+        if (!(await getAdminSession(request, secret, env))) return unauthorized();
         try {
           const candidate = await request.json();
           const state = await persistState(env, room, candidate);

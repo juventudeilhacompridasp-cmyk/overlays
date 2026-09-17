@@ -124,3 +124,17 @@ export {
   parseCookies,
   serializeCookie,
 };
+
+// Private records must never be accessible through a user-selected match room.
+function isReservedRoom(room) {
+  return ['authsecret', 'admins', 'teamcredentials', 'teamcatalog'].includes(String(room).toLowerCase().replace(/[^a-z0-9]/g, ''));
+}
+
+function validSetupToken(candidate, expected) {
+  if (typeof candidate !== 'string' || typeof expected !== 'string' || expected.length < 32 || candidate.length !== expected.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < expected.length; i++) mismatch |= candidate.charCodeAt(i) ^ expected.charCodeAt(i);
+  return mismatch === 0;
+}
+
+export { isReservedRoom, validSetupToken };
