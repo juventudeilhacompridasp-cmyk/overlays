@@ -18,7 +18,7 @@ const isPreview = location.pathname === '/preview';
 const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
 const managementModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
-const teamPortalToken = initialParams.get('token') || '';
+const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
 const outputLayer = new URLSearchParams(location.search).get('layer') || 'all';
 const outputCustomId = new URLSearchParams(location.search).get('id') || '';
 const app = document.getElementById('app');
@@ -41,6 +41,7 @@ const icons = {
   copy: '<svg viewBox="0 0 18 18" fill="none"><rect x="6" y="6" width="9" height="9" rx="1.3" stroke="currentColor" stroke-width="1.4"/><path d="M12 6V4.3C12 3.6 11.4 3 10.7 3H4.3C3.6 3 3 3.6 3 4.3v6.4c0 .7.6 1.3 1.3 1.3H6" stroke="currentColor" stroke-width="1.4"/></svg>',
   external: '<svg viewBox="0 0 18 18" fill="none"><path d="M10 3h5v5M15 3L8 10M14 10v4.2c0 .5-.4.8-.8.8H3.8a.8.8 0 01-.8-.8V4.8c0-.5.4-.8.8-.8H8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close: '<svg viewBox="0 0 18 18" fill="none"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+  lock: '<svg viewBox="0 0 18 18" fill="none"><rect x="4" y="8" width="10" height="7" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M6 8V5.5a3 3 0 016 0V8" stroke="currentColor" stroke-width="1.4"/></svg>',
 };
 
 const MANAGEMENT_MODULES = [
@@ -52,8 +53,9 @@ const MANAGEMENT_MODULES = [
   { key: 'builder', label: 'Builder de Overlays', caption: 'Crie saídas independentes sem desenvolvimento', layer: 'custom', icon: icons.layers },
   { key: 'pregame', label: 'Resumo pré-jogo', caption: 'Consulta rápida para narração', layer: 'all', icon: icons.list },
   { key: 'report', label: 'Relatório', caption: 'Histórico completo da partida', layer: 'all', icon: icons.text },
-  { key: 'teams', label: 'Times', caption: 'Elencos, escudos e acessos', layer: 'all', icon: icons.list },
+  { key: 'teams', label: 'Times', caption: 'Elencos e escudos', layer: 'all', icon: icons.list },
   { key: 'appearance', label: 'Aparência', caption: 'Estilos, posições e animações', layer: 'all', icon: icons.eye },
+  { key: 'access', label: 'Usuários/Acessos', caption: 'Administradores do painel e usuários dos times', layer: 'all', icon: icons.lock },
 ];
 
 const defaultRoster = [
@@ -418,6 +420,12 @@ let pushTimeout = null;
 let teamCatalogPushTimeout = null;
 let teamPortalTeam = null;
 let teamPortalStatus = isTeamPortal ? 'loading' : 'idle';
+let adminSession = { status: isAdminPanel ? 'checking' : 'idle', username: null, error: '' };
+let teamSession = { status: isTeamPortal ? 'checking' : 'idle', teamId: null, teamName: null, error: '' };
+let teamLoginTeams = [];
+let accessAdmins = [];
+let accessTeamCredentials = [];
+let accessStatus = 'idle';
 let lastClock = '';
 let syncStatus = 'connecting';
 let lastSyncAt = 0;
@@ -790,7 +798,9 @@ function renderSportScorebug() {
   const cardType = state.scoreboardCard?.type === 'red' ? 'red' : 'yellow';
   const cardOffset = motionOffset(cardExiting ? state.scoreboardCard?.exitStartsAt : state.scoreboardCard?.shownAt, cardExiting ? 450 : 420);
   const cardOverlay = cardActive ? `<div class="scorebug-card-notice card-${cardType}${cardEntering ? ' is-entering' : ''}${cardExiting ? ' is-exiting' : ''}" style="--card-team-color:${safeColor(cardTeam?.color)};--card-motion-offset:${cardOffset}ms"><i aria-hidden="true"></i><div><small>${cardType === 'red' ? 'CARTÃO VERMELHO' : 'CARTÃO AMARELO'}</small><strong>${escapeHtml(state.scoreboardCard.name)}</strong></div><span>${escapeHtml(cardTeam?.short || '')}</span></div>` : '';
-  return `<div class="scorebug scorebug-${escapeHtml(state.sport)} scorebug-layout-${layout} scorebug-style-${style} scorebug-shadow-${shadow}${transitionClass}${morphClass}${recoveryClass}" style="--scoreboard-motion-duration:${transitionDuration}ms;--scoreboard-motion-offset:${scoreboardMotionOffset}ms;--scoreboard-morph-duration:${morphDuration}ms;--scoreboard-morph-offset:${scoreboardMorphOffset}ms;--scoreboard-recovery-offset:${recoveryOffset}ms" data-overlay="scoreboard" data-sport="${escapeHtml(state.sport)}" data-layout="${layout}">${home}${score}${away}${status}${goalOverlay}${cardOverlay}</div>`;
+  const competition = String(state.competition || '').trim();
+  const competitionLabel = competition ? `<div class="scorebug-competition" title="${escapeHtml(competition)}">${escapeHtml(competition)}</div>` : '';
+  return `<div class="scorebug scorebug-${escapeHtml(state.sport)} scorebug-layout-${layout} scorebug-style-${style} scorebug-shadow-${shadow}${transitionClass}${morphClass}${recoveryClass}" style="--scoreboard-motion-duration:${transitionDuration}ms;--scoreboard-motion-offset:${scoreboardMotionOffset}ms;--scoreboard-morph-duration:${morphDuration}ms;--scoreboard-morph-offset:${scoreboardMorphOffset}ms;--scoreboard-recovery-offset:${recoveryOffset}ms" data-overlay="scoreboard" data-sport="${escapeHtml(state.sport)}" data-layout="${layout}">${home}${score}${away}${status}${goalOverlay}${cardOverlay}${competitionLabel}</div>`;
 }
 
 function renderSponsorOverlay() {
@@ -1035,11 +1045,111 @@ async function pollTeamCatalog() {
   } catch {}
 }
 
-async function initializeTeamPortal() {
-  if (!isTeamPortal) return;
-  if (!teamPortalToken) { teamPortalStatus = 'invalid'; render(); return; }
+async function loadTeamLoginTeams() {
   try {
-    const response = await fetch(`/api/team-portal?token=${encodeURIComponent(teamPortalToken)}&ts=${Date.now()}`, { cache: 'no-store' });
+    const response = await fetch('/api/teams', { cache: 'no-store' });
+    const data = response.ok ? await response.json() : { teams: [] };
+    teamLoginTeams = Array.isArray(data.teams) ? data.teams.map(team => ({ id: team.id, name: team.name })) : [];
+  } catch { teamLoginTeams = []; }
+}
+
+async function checkTeamSession() {
+  if (!isTeamPortal) return;
+  await loadTeamLoginTeams();
+  try {
+    const response = await fetch('/api/auth/team/session', { cache: 'no-store' });
+    const data = response.ok ? await response.json() : { authenticated: false };
+    if (data.authenticated) {
+      teamSession = { status: 'authenticated', teamId: data.teamId, teamName: data.teamName, error: '' };
+      render();
+      initializeTeamPortal();
+      return;
+    }
+    teamSession = { status: 'login', teamId: null, teamName: null, error: '' };
+  } catch {
+    teamSession = { status: 'login', teamId: null, teamName: null, error: 'Falha ao verificar a sessão.' };
+  }
+  render();
+}
+
+async function submitTeamLogin(teamIdValue, username, password) {
+  try {
+    const response = await fetch('/api/auth/team/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: teamIdValue, username, password }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { teamSession = { ...teamSession, error: data.error || 'Não foi possível entrar.' }; render(); return; }
+    teamSession = { status: 'authenticated', teamId: data.teamId, teamName: data.teamName, error: '' };
+    render();
+    initializeTeamPortal();
+  } catch {
+    teamSession = { ...teamSession, error: 'Falha de conexão.' };
+    render();
+  }
+}
+
+async function logoutTeamPortal() {
+  try { await fetch('/api/auth/team/logout', { method: 'POST' }); } catch {}
+  location.reload();
+}
+
+async function checkAdminSession() {
+  if (!isAdminPanel) return;
+  try {
+    const statusResponse = await fetch('/api/auth/admin/status', { cache: 'no-store' });
+    const statusData = statusResponse.ok ? await statusResponse.json() : { hasAdmins: true };
+    if (!statusData.hasAdmins) { adminSession = { status: 'setup', username: null, error: '' }; render(); return; }
+    const response = await fetch('/api/auth/admin/session', { cache: 'no-store' });
+    const data = response.ok ? await response.json() : { authenticated: false };
+    adminSession = { status: data.authenticated ? 'authenticated' : 'login', username: data.username || null, error: '' };
+    if (data.authenticated) loadAccessData();
+  } catch {
+    adminSession = { status: 'login', username: null, error: 'Falha ao verificar a sessão.' };
+  }
+  render();
+}
+
+async function submitAdminAuth(mode, username, password) {
+  try {
+    const response = await fetch(mode === 'setup' ? '/api/auth/admin/setup' : '/api/auth/admin/login', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { adminSession = { ...adminSession, error: data.error || 'Não foi possível entrar.' }; render(); return; }
+    adminSession = { status: 'authenticated', username: data.username, error: '' };
+    render();
+    loadAccessData();
+  } catch {
+    adminSession = { ...adminSession, error: 'Falha de conexão.' };
+    render();
+  }
+}
+
+async function logoutAdmin() {
+  try { await fetch('/api/auth/admin/logout', { method: 'POST' }); } catch {}
+  location.reload();
+}
+
+async function loadAccessData() {
+  if (managementModule !== 'access') return;
+  accessStatus = 'loading';
+  render();
+  try {
+    const [adminsResponse, credentialsResponse] = await Promise.all([
+      fetch('/api/auth/admin/accounts', { cache: 'no-store' }),
+      fetch('/api/auth/team/credentials', { cache: 'no-store' }),
+    ]);
+    accessAdmins = adminsResponse.ok ? (await adminsResponse.json()).accounts || [] : [];
+    accessTeamCredentials = credentialsResponse.ok ? (await credentialsResponse.json()).entries || [] : [];
+    accessStatus = 'ready';
+  } catch {
+    accessStatus = 'error';
+  }
+  render();
+}
+
+async function initializeTeamPortal() {
+  if (!isTeamPortal || teamSession.status !== 'authenticated') return;
+  try {
+    const response = await fetch(`/api/team-portal?team=${encodeURIComponent(teamSession.teamId)}&ts=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const remoteTeam = (await response.json()).team;
     teamPortalTeam = remoteTeam ? normalizeTeamCatalog([remoteTeam])[0] : null;
@@ -1051,13 +1161,14 @@ async function initializeTeamPortal() {
 }
 
 async function saveTeamPortal() {
-  if (!teamPortalTeam || !teamPortalToken) return;
+  if (!teamPortalTeam || teamSession.status !== 'authenticated') return;
   teamPortalStatus = 'saving';
   render();
   try {
-    const response = await fetch(`/api/team-portal?token=${encodeURIComponent(teamPortalToken)}`, {
+    const response = await fetch(`/api/team-portal?team=${encodeURIComponent(teamSession.teamId)}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: teamPortalTeam.name, short: teamPortalTeam.short, color: teamPortalTeam.color, logo: teamPortalTeam.logo, athletes: teamPortalTeam.athletes, staff: teamPortalTeam.staff, coach: teamPortalTeam.coach, formation: teamPortalTeam.formation }),
     });
+    if (response.status === 401) { teamSession = { status: 'login', teamId: null, teamName: null, error: 'Sessão expirada. Entre novamente.' }; render(); return; }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     teamPortalTeam = normalizeTeamCatalog([(await response.json()).team])[0];
     teamPortalStatus = 'saved';
@@ -1072,7 +1183,7 @@ async function saveTeamPortal() {
 async function uploadTeamPresentationPhoto(team, subjectId, file) {
   if (!team || !file) return null;
   if (file.size > 5_000_000) { toast('Escolha uma foto de até 5 MB.'); return null; }
-  const response = await fetch(`/api/team-athlete-photo?token=${encodeURIComponent(team.accessToken)}&athlete=${encodeURIComponent(subjectId)}`, { method: 'PUT', headers: { 'content-type': file.type || 'image/png' }, body: file });
+  const response = await fetch(`/api/team-athlete-photo?team=${encodeURIComponent(team.id)}&athlete=${encodeURIComponent(subjectId)}`, { method: 'PUT', headers: { 'content-type': file.type || 'image/png' }, body: file });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const result = await response.json();
   return `${result.url}${String(result.url).includes('?') ? '&' : '?'}v=${Date.now()}`;
@@ -1238,10 +1349,32 @@ function renderTeamsTab() {
         <div class="field"><label for="catalog-team-short">Sigla no placar compacto · 3 letras</label><input id="catalog-team-short" data-catalog-field="short" data-catalog-id="${escapeHtml(selected.id)}" maxlength="3" value="${escapeHtml(selected.short)}"></div>
         <div class="field"><label>Escudo PNG ou JPG</label><input data-catalog-logo="${escapeHtml(selected.id)}" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="padding:7px;font-size:10px"></div>
         <div class="field roster-editor"><label for="catalog-team-roster">Relação de atletas · número e nome</label><textarea id="catalog-team-roster" data-catalog-field="roster" data-catalog-id="${escapeHtml(selected.id)}">${escapeHtml(teamRosterText(selected))}</textarea></div>
-        <div class="team-access-box"><div><strong>Área da equipe</strong><small>Envie este link ao responsável para cadastrar número, altura e foto dos atletas.</small></div><button class="button subtle" data-action="copy-team-portal" data-value="${escapeHtml(selected.id)}">${icons.copy} Copiar link</button></div>
+        <div class="team-access-box"><div><strong>Acesso da equipe em /team</strong><small>Defina o usuário e a senha em <a href="${escapeHtml(moduleUrl('access'))}">Usuários/Acessos</a>.</small></div></div>
         <button class="button danger-button" data-action="remove-team" data-value="${escapeHtml(selected.id)}" ${teamCatalog.length <= 1 ? 'disabled' : ''}>Remover time do cadastro</button>
       </div>
     </div><p class="help-text">As alterações do time entram na partida atual e ficam disponíveis para as próximas transmissões.</p>`;
+}
+
+function renderAccessModule() {
+  if (accessStatus === 'loading' || accessStatus === 'idle') return '<div class="module-section"><div class="portal-empty">Carregando acessos…</div></div>';
+  if (accessStatus === 'error') return '<div class="module-section"><div class="portal-empty">Não foi possível carregar os acessos. Recarregue a página.</div></div>';
+  const adminRows = accessAdmins.map(account => `<article class="access-row access-row-compact"><div><strong>${escapeHtml(account.username)}</strong><small>Acesso completo ao painel</small></div><button class="button square subtle" data-action="remove-admin-account" data-value="${escapeHtml(account.id)}" ${accessAdmins.length <= 1 ? 'disabled' : ''} aria-label="Remover ${escapeHtml(account.username)}">${icons.close}</button></article>`).join('') || '<div class="portal-empty">Nenhum administrador cadastrado.</div>';
+  const credentialByTeam = new Map(accessTeamCredentials.map(entry => [entry.teamId, entry]));
+  const teamRows = teamCatalog.map(team => {
+    const entry = credentialByTeam.get(team.id);
+    const id = escapeHtml(team.id);
+    return `<article class="access-row"><div class="access-row-head"><div><strong>${escapeHtml(team.name)}</strong><small class="${entry ? 'access-linked' : ''}">${entry ? `Usuário vinculado: ${escapeHtml(entry.username)}` : 'Nenhum usuário vinculado'}</small></div>${entry ? `<button class="button square subtle" data-action="remove-team-credentials" data-value="${id}" aria-label="Remover acesso de ${escapeHtml(team.name)}">${icons.close}</button>` : ''}</div>
+      <div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="${entry ? escapeHtml(entry.username) : 'ex: gestor.time'}"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"></div></div>
+      <button class="button subtle access-row-save" data-action="set-team-credentials" data-value="${id}">${entry ? 'Atualizar acesso' : 'Vincular acesso'}</button></article>`;
+  }).join('') || '<div class="portal-empty">Nenhum time cadastrado.</div>';
+  return `<div class="module-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas com acesso completo ao painel e a todos os times cadastrados.</p></div></div>
+    <div class="team-catalog"><div class="team-catalog-head"><div><strong>${accessAdmins.length} administrador${accessAdmins.length === 1 ? '' : 'es'}</strong><small>É necessário manter pelo menos um administrador ativo.</small></div></div>
+      <div class="access-list">${adminRows}</div>
+      <div class="field-row"><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"></div></div>
+      <button class="button primary access-row-save" data-action="add-admin-account">+ Adicionar administrador</button></div></div>
+    <div class="module-section"><div class="section-header"><div><h3 class="section-title">Usuários dos times</h3><p class="help-text">Cada time acessa <strong>/team</strong> com o usuário e a senha vinculados aqui para cadastrar atletas, fotos e comissão técnica.</p></div></div>
+      <div class="team-catalog"><div class="team-catalog-head"><div><strong>${teamCatalog.length} time${teamCatalog.length === 1 ? '' : 's'} cadastrado${teamCatalog.length === 1 ? '' : 's'}</strong><small>Salvar novamente substitui o usuário e a senha anteriores do time.</small></div></div>
+        <div class="access-list">${teamRows}</div></div></div>`;
 }
 
 function staffRoleOptions(selectedRole) {
@@ -1519,6 +1652,7 @@ function renderModuleControls(key) {
   if (key === 'builder') return renderOverlayBuilder();
   if (key === 'pregame') return renderPregameModule();
   if (key === 'report') return renderReportModule();
+  if (key === 'access') return renderAccessModule();
   let content = '';
   if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
   else if (moduleTab === 'settings') content = key === 'sponsor-bar' ? renderSponsorBarSettings() : `<div class="module-section">${key === 'scoreboard' ? overlayStyleControl('scoreboardStyle','Estilo do placar') + renderAppearanceComponent('Placar','Tamanho, fonte e posição','scoreboard') + renderPeriodStyleControls() + renderChampionshipTheme() : key === 'lineup' ? overlayStyleControl('photoLineupStyle','Estilo da apresentação') + renderAppearanceComponent('Escalação','Tamanho, fonte e posição','photoLineup') : key === 'sponsors' ? overlayStyleControl('sponsorStyle','Estilo dos patrocinadores') + renderAppearanceComponent('Patrocinador','Logo, banner ou nome','sponsor') : overlayStyleControl('eventStyle','Estilo dos eventos') + renderAppearanceComponent('Eventos','Cartões, substituições e lower thirds','event')}</div>`;
@@ -1553,28 +1687,47 @@ function renderModuleHub() {
 }
 
 function renderManagementSidebar(activeKey = 'overview') {
-  const links = MANAGEMENT_MODULES.map((item, index) => `${index === 0 ? '<span class="module-sidebar-label">Overlays</span>' : index === 4 ? '<span class="module-sidebar-label module-sidebar-label-spaced">Configuração</span>' : ''}<a class="${activeKey === item.key ? 'active' : ''}" href="${escapeHtml(moduleUrl(item.key))}">${item.icon}<span>${escapeHtml(item.label)}</span></a>`).join('');
+  const groupLabels = { scoreboard: 'Overlays', pregame: 'Partida', teams: 'Configuração' };
+  const links = MANAGEMENT_MODULES.map(item => `${groupLabels[item.key] ? `<span class="module-sidebar-label ${item.key === 'scoreboard' ? '' : 'module-sidebar-label-spaced'}">${groupLabels[item.key]}</span>` : ''}<a class="${activeKey === item.key ? 'active' : ''}" href="${escapeHtml(moduleUrl(item.key))}">${item.icon}<span>${escapeHtml(item.label)}</span></a>`).join('');
   return `<aside class="module-sidebar" aria-label="Navegação dos overlays"><a class="module-sidebar-overview ${activeKey === 'overview' ? 'active' : ''}" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.monitor}<span>Visão geral</span></a>${links}<a class="module-sidebar-home ${activeKey === 'hub' ? 'active' : ''}" href="${escapeHtml(moduleUrl())}">${icons.layers}<span>Central de módulos</span></a></aside>`;
 }
 
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
-  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.crown}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Overlay Studio</span></span></a><div class="top-actions"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.label)}</h1><p>${escapeHtml(module.caption)}</p></div><a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a></header>${module.key === 'builder' ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.crown}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Overlay Studio</span></span></a><div class="top-actions"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.label)}</h1><p>${escapeHtml(module.caption)}</p></div><a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a></header>${module.key === 'builder' || module.key === 'access' ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
 function renderApp() {
-  return `<div class="studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.crown}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Overlay Studio</span></span></a><div class="top-actions"><div class="status-row sync-status" data-sync-status="${syncStatus}"><i class="live-dot"></i><span data-sync-label>${syncStatus === 'online' ? 'Sincronizado' : 'Conectando…'}</span><span class="status-time" data-clock>${clockText()}</span></div><a class="button" href="${escapeHtml(moduleUrl())}">${icons.layers} Módulos</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button></div></header>
+  return `<div class="studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.crown}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Overlay Studio</span></span></a><div class="top-actions"><div class="status-row sync-status" data-sync-status="${syncStatus}"><i class="live-dot"></i><span data-sync-label>${syncStatus === 'online' ? 'Sincronizado' : 'Conectando…'}</span><span class="status-time" data-clock>${clockText()}</span></div><a class="button" href="${escapeHtml(moduleUrl())}">${icons.layers} Módulos</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header>
     <main class="module-workspace dashboard-workspace">${renderManagementSidebar('overview')}<div class="workspace dashboard-main"><div class="page-head"><div><div class="eyebrow">Central de transmissão · ${escapeHtml(currentSport().label)}</div><h1 class="page-title">Controle da partida</h1><p class="page-caption">${escapeHtml(state.competition)} · ${escapeHtml(state.venue)}</p></div><div class="match-tools"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><button class="button subtle" data-action="undo" ${state._backup ? '' : 'disabled'}>↶ Desfazer</button><button class="button" data-action="new-match">Nova partida</button></div></div>${renderSportSwitcher()}
       <div class="workspace-grid"><div class="control-column">${renderControls()}${renderEvents()}</div><div class="preview-column">${renderMonitor()}${renderThemes()}</div></div>
     </div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
+function renderAuthWait(message) {
+  return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>${escapeHtml(message)}</h1><p>Aguarde um instante.</p></section></main>`;
+}
+
+function renderTeamAuthGate() {
+  if (teamSession.status === 'checking') return renderAuthWait('Verificando sessão…');
+  const options = teamLoginTeams.map(team => `<option value="${escapeHtml(team.id)}">${escapeHtml(team.name)}</option>`).join('');
+  return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state auth-card"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>Acesso da equipe</h1><p>Selecione a equipe e informe o usuário e a senha cadastrados pela organização.</p>
+    <div class="auth-form"><div class="field"><label for="team-select">Equipe</label><select id="team-select">${options || '<option value="">Nenhuma equipe cadastrada</option>'}</select></div><div class="field"><label for="team-username">Usuário</label><input id="team-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="team-password">Senha</label><input id="team-password" type="password" autocomplete="current-password" maxlength="200"></div>${teamSession.error ? `<p class="auth-error">${escapeHtml(teamSession.error)}</p>` : ''}<button class="button primary" data-action="team-login-submit" style="width:100%">Entrar</button></div></section></main>`;
+}
+
+function renderAdminAuthGate() {
+  if (adminSession.status === 'checking') return renderAuthWait('Verificando sessão…');
+  const isSetup = adminSession.status === 'setup';
+  return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state auth-card"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>${isSetup ? 'Criar administrador' : 'Entrar no painel'}</h1><p>${isSetup ? 'Defina o primeiro usuário e senha do painel administrativo.' : 'Informe seu usuário e senha para acessar o painel.'}</p>
+    <div class="auth-form"><div class="field"><label for="admin-username">Usuário</label><input id="admin-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="admin-password">Senha</label><input id="admin-password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" maxlength="200"></div>${adminSession.error ? `<p class="auth-error">${escapeHtml(adminSession.error)}</p>` : ''}<button class="button primary" data-action="${isSetup ? 'admin-setup-submit' : 'admin-login-submit'}" style="width:100%">${isSetup ? 'Criar administrador' : 'Entrar'}</button></div></section></main>`;
+}
+
 function renderTeamPortal() {
   if (teamPortalStatus === 'loading') return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>Carregando cadastro…</h1><p>Aguarde enquanto buscamos os dados da equipe.</p></section></main>`;
-  if (teamPortalStatus === 'invalid' || !teamPortalTeam) return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>Link não encontrado</h1><p>Solicite ao responsável pela transmissão um novo link de acesso da equipe.</p></section></main>`;
+  if (teamPortalStatus === 'invalid' || !teamPortalTeam) return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><h1>Equipe não encontrada</h1><p>Fale com o responsável pela transmissão para verificar seu acesso.</p><button class="button subtle" data-action="team-logout" style="margin-top:16px">Sair</button></section></main>`;
   const athletes = Array.isArray(teamPortalTeam.athletes) ? teamPortalTeam.athletes : [];
   const statusLabel = teamPortalStatus === 'saving' ? 'Salvando…' : teamPortalStatus === 'saved' ? 'Dados salvos' : teamPortalStatus === 'error' ? 'Erro ao salvar' : 'Alterações salvas manualmente';
-  return `<main class="team-portal-shell"><section class="team-portal-card"><header class="team-portal-head"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><span class="portal-status portal-status-${escapeHtml(teamPortalStatus)}">${statusLabel}</span></header><div class="team-portal-team"><div class="portal-team-logo">${teamPortalTeam.logo ? `<img src="${escapeHtml(teamPortalTeam.logo)}" alt="Escudo de ${escapeHtml(teamPortalTeam.name)}">` : escapeHtml(teamPortalTeam.short)}</div><div><span>Cadastro da escalação</span><h1>${escapeHtml(teamPortalTeam.name)}</h1><p>Preencha os dados usados nas apresentações individuais, escalação geral e Mídia Kit.</p></div></div>
+  return `<main class="team-portal-shell"><section class="team-portal-card"><header class="team-portal-head"><div class="portal-brand">${icons.crown}<strong>Juventude Overlay Studio</strong></div><div style="display:flex;align-items:center;gap:10px"><span class="portal-status portal-status-${escapeHtml(teamPortalStatus)}">${statusLabel}</span><button class="button square subtle" data-action="team-logout" aria-label="Sair">${icons.close}</button></div></header><div class="team-portal-team"><div class="portal-team-logo">${teamPortalTeam.logo ? `<img src="${escapeHtml(teamPortalTeam.logo)}" alt="Escudo de ${escapeHtml(teamPortalTeam.name)}">` : escapeHtml(teamPortalTeam.short)}</div><div><span>Cadastro da escalação</span><h1>${escapeHtml(teamPortalTeam.name)}</h1><p>Preencha os dados usados nas apresentações individuais, escalação geral e Mídia Kit.</p></div></div>
     <section class="portal-team-settings"><div class="field"><label>Nome da equipe</label><input data-portal-team-field="name" maxlength="80" value="${escapeHtml(teamPortalTeam.name)}"></div><div class="field"><label>Sigla (3 letras)</label><input data-portal-team-field="short" maxlength="3" value="${escapeHtml(teamPortalTeam.short)}"></div><div class="field"><label>Cor principal</label><input type="color" data-portal-team-field="color" value="${safeColor(teamPortalTeam.color)}"></div><label class="sponsor-upload-button">${teamPortalTeam.logo ? 'Trocar escudo' : 'Enviar escudo'}<input type="file" data-portal-team-logo accept="image/png,image/jpeg,image/webp,image/svg+xml"></label></section>
     <section class="portal-coach"><div class="portal-athlete-photo">${teamPortalTeam.coach?.photo ? `<img src="${escapeHtml(teamPortalTeam.coach.photo)}" alt="Foto de ${escapeHtml(teamPortalTeam.coach.name)}">` : '<span>TC</span>'}<label>${teamPortalTeam.coach?.photo ? 'Trocar foto' : 'Enviar foto'}<input type="file" data-portal-coach-photo accept="image/png,image/jpeg,image/webp"></label></div><label><span>Treinador</span><input data-portal-coach-name maxlength="100" value="${escapeHtml(teamPortalTeam.coach?.name || 'Treinador')}" placeholder="Nome do treinador"></label><label><span>Esquema tático</span><select data-portal-formation>${Object.keys(FORMATIONS).map(value => `<option value="${value}" ${teamPortalTeam.formation === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label></section>
     ${renderStaffManager(teamPortalTeam, true)}
@@ -1628,7 +1781,7 @@ function renderEventDrawer() {
 function outputFingerprint(layer) {
   const common = { sport: state.sport, theme: state.theme, customPrimary: state.customPrimary, customAccent: state.customAccent, championshipTheme: state.championshipTheme, typeface: state.typeface };
   const appearanceFor = prefix => Object.fromEntries(Object.entries(state.appearance || {}).filter(([key]) => key.startsWith(prefix) || (prefix === 'scoreboard' && (key.startsWith('goal') || key === 'cardDisplayMode'))));
-  if (layer === 'scoreboard') return JSON.stringify({ ...common, appearance: appearanceFor('scoreboard'), home: state.home, away: state.away, clock: state.clock, period: state.period, extraTime: state.extraTime, sportData: state.sportData, visible: state.visible.scoreboard, goal: state.goalGraphic ? { ...state.goalGraphic, exiting: undefined } : null, card: state.scoreboardCard ? { ...state.scoreboardCard, exiting: undefined } : null });
+  if (layer === 'scoreboard') return JSON.stringify({ ...common, competition: state.competition, appearance: appearanceFor('scoreboard'), home: state.home, away: state.away, clock: state.clock, period: state.period, extraTime: state.extraTime, sportData: state.sportData, visible: state.visible.scoreboard, goal: state.goalGraphic ? { ...state.goalGraphic, exiting: undefined } : null, card: state.scoreboardCard ? { ...state.scoreboardCard, exiting: undefined } : null });
   if (layer === 'event') return JSON.stringify({ ...common, appearance: appearanceFor('event'), activeEvent: state.activeEvent });
   if (layer === 'sponsor') return JSON.stringify({ ...common, appearance: appearanceFor('sponsor'), visible: state.visible.sponsor, sponsors: state.sponsors.map(sponsor => ({ id: sponsor.id, name: sponsor.name, banner: sponsor.banner, logo: sponsor.logo })), activeSponsorIndex: state.activeSponsorIndex });
   if (layer === 'sponsor-bar') return JSON.stringify({ ...common, appearance: { sponsorBarDuration: state.appearance?.sponsorBarDuration, sponsorBarAnimationSpeed: state.appearance?.sponsorBarAnimationSpeed, sponsorBarTransition: state.appearance?.sponsorBarTransition, sponsorBarFit: state.appearance?.sponsorBarFit, sponsorBarScale: state.appearance?.sponsorBarScale, sponsorBarOpacity: state.appearance?.sponsorBarOpacity, sponsorBarRadius: state.appearance?.sponsorBarRadius, sponsorBarBackground: state.appearance?.sponsorBarBackground }, visible: state.visible.sponsorBar, items: state.sponsorBarItems, activeSponsorIndex: state.sponsorBarActiveIndex, mode: state.sponsorBarMode, video: state.sponsorBarVideo });
@@ -1695,11 +1848,13 @@ function render() {
   if (isOutput) { renderIsolatedOutput(); return; }
   const remembered = rememberFocusedField();
   if (isTeamPortal) {
-    app.innerHTML = renderTeamPortal();
-  } else if (isManagement) {
-    app.innerHTML = renderModuleApp();
+    app.innerHTML = teamSession.status === 'authenticated' ? renderTeamPortal() : renderTeamAuthGate();
   } else if (isPreview) {
     app.innerHTML = `<div class="full-preview-stage">${renderPreviewBackground()}${previewCompositeMarkup()}<div class="safe-guides"><i></i><i></i></div><div class="monitor-label">VISUALIZAÇÃO COMPLETA · ${escapeHtml(currentSport().label.toUpperCase())} · SALA ${escapeHtml(ROOM_ID)}</div></div>`;
+  } else if (isAdminPanel && adminSession.status !== 'authenticated') {
+    app.innerHTML = renderAdminAuthGate();
+  } else if (isManagement) {
+    app.innerHTML = renderModuleApp();
   } else app.innerHTML = renderApp();
   if (remembered?.selector) {
     const replacement = document.querySelector(remembered.selector);
@@ -1870,6 +2025,21 @@ function confirmEvent() {
 }
 
 function handleAction(action, target) {
+  if (action === 'admin-login-submit' || action === 'admin-setup-submit') {
+    const username = document.getElementById('admin-username')?.value || '';
+    const password = document.getElementById('admin-password')?.value || '';
+    submitAdminAuth(action === 'admin-setup-submit' ? 'setup' : 'login', username, password);
+    return;
+  }
+  if (action === 'admin-logout') { logoutAdmin(); return; }
+  if (action === 'team-login-submit') {
+    const teamIdValue = document.getElementById('team-select')?.value || '';
+    const username = document.getElementById('team-username')?.value || '';
+    const password = document.getElementById('team-password')?.value || '';
+    submitTeamLogin(teamIdValue, username, password);
+    return;
+  }
+  if (action === 'team-logout') { logoutTeamPortal(); return; }
   if (action === 'module-tab') { moduleTab = target.dataset.value; render(); return; }
   if (action === 'add-custom-overlay') {
     const id = `overlay-${Date.now().toString(36)}`;
@@ -2019,10 +2189,57 @@ function handleAction(action, target) {
     toast('Time removido do cadastro.');
     return;
   }
-  if (action === 'copy-team-portal') {
-    const team = teamCatalog.find(item => item.id === target.dataset.value);
-    if (!team) return;
-    copyText(`${location.origin}/team?token=${encodeURIComponent(team.accessToken)}`);
+  if (action === 'set-team-credentials') {
+    const teamIdValue = target.dataset.value;
+    const username = document.getElementById(`access-username-${teamIdValue}`)?.value || '';
+    const password = document.getElementById(`access-password-${teamIdValue}`)?.value || '';
+    if (username.trim().length < 3 || password.trim().length < 8) { toast('Informe usuário (mín. 3 letras) e senha (mín. 8 caracteres).'); return; }
+    fetch('/api/auth/team/credentials', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: teamIdValue, username, password }) })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (ok) accessTeamCredentials = [...accessTeamCredentials.filter(entry => entry.teamId !== teamIdValue), { teamId: teamIdValue, username: data.username, updatedAt: Date.now() }];
+        toast(ok ? `Acesso de "${data.username}" salvo para a equipe.` : (data.error || 'Falha ao salvar acesso da equipe.'));
+        render();
+      })
+      .catch(() => toast('Falha ao salvar acesso da equipe.'));
+    return;
+  }
+  if (action === 'remove-team-credentials') {
+    const teamIdValue = target.dataset.value;
+    fetch(`/api/auth/team/credentials?teamId=${encodeURIComponent(teamIdValue)}`, { method: 'DELETE' })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (ok) accessTeamCredentials = accessTeamCredentials.filter(entry => entry.teamId !== teamIdValue);
+        toast(ok ? 'Acesso da equipe removido.' : (data.error || 'Falha ao remover acesso da equipe.'));
+        render();
+      })
+      .catch(() => toast('Falha ao remover acesso da equipe.'));
+    return;
+  }
+  if (action === 'add-admin-account') {
+    const username = document.getElementById('access-admin-username')?.value || '';
+    const password = document.getElementById('access-admin-password')?.value || '';
+    if (username.trim().length < 3 || password.trim().length < 8) { toast('Informe usuário (mín. 3 letras) e senha (mín. 8 caracteres).'); return; }
+    fetch('/api/auth/admin/accounts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (ok) accessAdmins = data.accounts;
+        toast(ok ? 'Administrador adicionado.' : (data.error || 'Falha ao adicionar administrador.'));
+        render();
+      })
+      .catch(() => toast('Falha ao adicionar administrador.'));
+    return;
+  }
+  if (action === 'remove-admin-account') {
+    const id = target.dataset.value;
+    fetch(`/api/auth/admin/accounts?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (ok) accessAdmins = data.accounts;
+        toast(ok ? 'Administrador removido.' : (data.error || 'Falha ao remover administrador.'));
+        render();
+      })
+      .catch(() => toast('Falha ao remover administrador.'));
     return;
   }
   if (action === 'portal-add-athlete') {
@@ -2607,7 +2824,7 @@ app.addEventListener('change', event => {
     const athleteIdValue = target.dataset.portalAthletePhoto;
     teamPortalStatus = 'saving';
     render();
-    fetch(`/api/team-athlete-photo?token=${encodeURIComponent(teamPortalToken)}&athlete=${encodeURIComponent(athleteIdValue)}`, { method: 'PUT', headers: { 'content-type': file.type || 'image/png' }, body: file })
+    fetch(`/api/team-athlete-photo?team=${encodeURIComponent(teamSession.teamId)}&athlete=${encodeURIComponent(athleteIdValue)}`, { method: 'PUT', headers: { 'content-type': file.type || 'image/png' }, body: file })
       .then(response => { if (!response.ok) throw new Error(); return response.json(); })
       .then(result => {
         const athlete = teamPortalTeam?.athletes?.find(item => item.id === athleteIdValue);
@@ -2788,6 +3005,8 @@ document.addEventListener('keydown', event => {
   }
   if (event.target.matches('input, textarea, select, [contenteditable="true"]')) {
     if (event.key === 'Enter' && drawer && event.target.tagName !== 'TEXTAREA') confirmEvent();
+    else if (event.key === 'Enter' && event.target.matches('#admin-username, #admin-password')) handleAction(adminSession.status === 'setup' ? 'admin-setup-submit' : 'admin-login-submit', { dataset: {} });
+    else if (event.key === 'Enter' && event.target.matches('#team-username, #team-password')) handleAction('team-login-submit', { dataset: {} });
     return;
   }
   if (event.code === 'Space') { event.preventDefault(); toggleClock(); }
@@ -2809,8 +3028,9 @@ if (isOutput) { document.body.classList.add('overlay-output', 'obs-render-mode')
 else if (isPreview) document.body.classList.add('preview-output');
 else if (isTeamPortal) document.body.classList.add('team-portal-output');
 render();
-if (isTeamPortal) initializeTeamPortal();
+if (isTeamPortal) checkTeamSession();
 else {
+  if (isAdminPanel) checkAdminSession();
   initializeSharedState();
   initializeTeamCatalog();
   setInterval(pollServer, isOutput || isPreview ? 320 : 800);
@@ -2959,4 +3179,8 @@ setInterval(() => {
   }
 }, 250);
 
-window.__overlayStudio = { getState: () => structuredClone(state), outputLayer, isOutput, isPreview };
+window.__overlayStudio = {
+  getState: () => structuredClone(state), outputLayer, isOutput, isPreview,
+  setAdminSession(status, username) { adminSession = { status, username: username || null, error: '' }; render(); },
+  setTeamSession(status, teamId, teamName) { teamSession = { status, teamId: teamId || null, teamName: teamName || null, error: '' }; render(); },
+};

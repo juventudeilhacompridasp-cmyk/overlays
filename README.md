@@ -7,6 +7,7 @@ Aplicação web para controle de placar, escalações, eventos, patrocinadores e
 - [AGENTS.md](AGENTS.md): padrões obrigatórios para as IAs.
 - [Guia de desenvolvimento](docs/DEVELOPMENT.md): OpenCode, branches e validação.
 - [Fluxo de deploy](docs/DEPLOY.md): publicação de commits aprovados no GPT Sites.
+- [CHANGELOG.md](CHANGELOG.md): histórico de mudanças por PR. Adicione uma entrada a cada push relevante.
 
 O GitHub executa testes e build; a publicação no GPT Sites é realizada pelo conector Sites.
 Um push na main não atualiza o Site automaticamente.
