@@ -1,0 +1,43 @@
+name: Validate project
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Check JavaScript syntax
+        run: |
+          node --check public/app.js
+          node --check server.mjs
+          node --check build.mjs
+          node --check test.mjs
+      - name: Build Worker and assets
+        run: npm run build
+      - name: Run existing tests
+        run: npm test
+      - name: Verify Worker entrypoint
+        run: node --input-type=module -e "const { default:w } = await import('./dist/server/index.js'); if (typeof w.fetch !== 'function') process.exit(1)"
+      - name: Check generated files are committed
+        run: git diff --exit-code -- dist/
+      - name: Check whitespace
+        run: git diff --check

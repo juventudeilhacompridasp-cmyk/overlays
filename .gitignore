@@ -3,3 +3,9 @@ node_modules/
 artifacts/
 .data/
 *.log
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+.sites-runtime/
