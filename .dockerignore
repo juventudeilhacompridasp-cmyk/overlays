@@ -1,0 +1,11 @@
+.git
+.github
+.openai
+.sites-runtime
+.data
+dist
+node_modules
+npm-debug.log*
+*.tar
+*.tar.gz
+*.zip

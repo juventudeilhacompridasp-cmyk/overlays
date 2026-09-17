@@ -1,0 +1,20 @@
+services:
+  overlay-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: juventude-overlay-studio
+    restart: unless-stopped
+    ports:
+      - "${OVERLAY_PORT:-4173}:4173"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4173
+      OVERLAY_STATE_FILE: /app/.data/overlay-state.json
+    volumes:
+      - overlay_studio_data:/app/.data
+
+volumes:
+  overlay_studio_data:
+    name: juventude_overlay_studio_data
