@@ -15,6 +15,8 @@ process.env.OVERLAY_STATE_FILE = testStatePath;
 process.env.HOST = '127.0.0.1';
 const { server } = await import('./server.mjs');
 if (!server.listening) await once(server, 'listening');
+const baseOrigin = new URL(baseURL).origin;
+let adminCookie = '';
 
 function verify(name, predicate) {
   assert.ok(predicate, name);
@@ -88,7 +90,15 @@ function makeRuntime(pathname = '/?room=principal', options = {}) {
     JSON,
     structuredClone,
     console,
-    fetch(input, init) { return fetch(new URL(input, location.origin), init); },
+    fetch(input, init = {}) {
+      const target = new URL(input, location.origin);
+      if (adminCookie && target.origin === baseOrigin) {
+        const headers = new Headers(init.headers || {});
+        headers.set('cookie', adminCookie);
+        return fetch(target, { ...init, headers });
+      }
+      return fetch(target, init);
+    },
     setTimeout(callback, ms) { const timer = setTimeout(callback, ms); activeTimers.add(timer); return timer; },
     clearTimeout(timer) { clearTimeout(timer); activeTimers.delete(timer); },
     setInterval(callback, ms) { const timer = setInterval(callback, ms); activeTimers.add(timer); return timer; },
@@ -103,6 +113,7 @@ function makeRuntime(pathname = '/?room=principal', options = {}) {
   if (options.broadcast !== false) sandbox.BroadcastChannel = FakeChannel;
 
   vm.runInNewContext(script, sandbox, { filename: 'public/app.js' });
+  sandbox.__overlayStudio?.setAdminSession?.('authenticated', 'sala-admin');
 
   function click(action, value) {
     const target = {
@@ -143,19 +154,33 @@ try {
   verify('Full-screen preview route returns HTTP 200', (await fetch(`${baseURL}/preview`)).status === 200);
   verify('Dedicated management routes return the application shell', (await fetch(`${baseURL}/manage/lineup?room=principal`)).status === 200 && (await fetch(`${baseURL}/manage/scoreboard?room=principal`)).status === 200);
   verify('Unknown routes return HTTP 404', (await fetch(`${baseURL}/missing-route`)).status === 404);
-  const probeWrite = await fetch(`${baseURL}/api/state?room=probe`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ updatedAt: 1, ok: true }) });
+  const unauthorizedWrite = await fetch(`${baseURL}/api/state?room=probe`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ updatedAt: 1, ok: true }) });
+  verify('Match-state writes are rejected without an administrator session', unauthorizedWrite.status === 401);
+  const adminStatusBefore = await (await fetch(`${baseURL}/api/auth/admin/status`)).json();
+  verify('No administrator exists before the first setup call', adminStatusBefore.hasAdmins === false);
+  const adminSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123' }) });
+  adminCookie = (adminSetup.headers.get('set-cookie') || '').split(';')[0];
+  verify('The local server creates the first administrator and starts a session', adminSetup.status === 200 && adminCookie.startsWith('joa_admin='));
+  const repeatSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'outro-admin', password: 'senha-teste-123' }) });
+  verify('A second setup call is rejected once an administrator exists', repeatSetup.status === 409);
+  const wrongLogin = await fetch(`${baseURL}/api/auth/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sala-admin', password: 'senha-errada' }) });
+  verify('Admin login rejects an incorrect password', wrongLogin.status === 401);
+  const probeWrite = await fetch(`${baseURL}/api/state?room=probe`, { method: 'PUT', headers: { 'content-type': 'application/json', cookie: adminCookie }, body: JSON.stringify({ updatedAt: 1, ok: true }) });
   const probeRead = await (await fetch(`${baseURL}/api/state?room=probe`)).json();
-  verify('Room-aware local state endpoint accepts and returns state', probeWrite.ok && probeRead.ok === true);
+  verify('Room-aware local state endpoint accepts and returns state for an authenticated administrator', probeWrite.ok && probeRead.ok === true);
 
   const dashboard = makeRuntime('/?room=principal');
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
-  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 10);
+  verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));
+  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 11);
   const lineupModule = makeRuntime('/manage/lineup?room=module-lineup', { broadcast: false });
   verify('Dedicated routes share the same navigation and mark the selected overlay', lineupModule.app.innerHTML.includes('aria-label="Navegação dos overlays"') && /class="active" href="[^"]*\/manage\/lineup/.test(lineupModule.app.innerHTML));
   verify('Lineup module combines dedicated controls, isolated preview, and OBS URL access', lineupModule.app.innerHTML.includes('Direção da apresentação') && lineupModule.app.innerHTML.includes('Prévia isolada') && lineupModule.app.innerHTML.includes('data-value="photo-lineup"'));
   const sponsorBarModule = makeRuntime('/manage/sponsor-bar?room=module-sponsor-bar', { broadcast: false });
   verify('Sponsor bar has its own management route and 1500 × 200 media controls', sponsorBarModule.app.innerHTML.includes('Barra de Patrocinadores') && sponsorBarModule.app.innerHTML.includes('data-sponsor-wide-image') && sponsorBarModule.app.innerHTML.includes('data-value="sponsor-bar"'));
+  const scoreboardModule = makeRuntime('/manage/scoreboard?room=module-scoreboard', { broadcast: false });
+  verify('Scoreboard shows the configured competition above the score', scoreboardModule.app.innerHTML.includes('class="scorebug-competition"') && scoreboardModule.app.innerHTML.includes('Campeonato Municipal de Futebol 2026') && stylesheet.includes('.scorebug-competition'));
   sponsorBarModule.click('overlay-sponsor-bar');
   verify('Sponsor bar visibility is independent from the legacy sponsor overlay', sponsorBarModule.getState().visible.sponsorBar && !sponsorBarModule.getState().visible.sponsor);
   const separateSponsorBarOutput = makeRuntime('/overlay?layer=sponsor-bar&room=module-sponsor-bar', { broadcast: false });
@@ -175,6 +200,9 @@ try {
   const builderModule = makeRuntime('/manage/builder?room=module-builder', { broadcast: false });
   builderModule.click('add-custom-overlay');
   verify('Overlay builder creates independent configurable outputs', builderModule.getState().customOverlays.length === 1 && builderModule.app.innerHTML.includes('data-custom-field="width"') && builderModule.app.innerHTML.includes('copy-custom-url'));
+  const accessModule = makeRuntime('/manage/access?room=module-access', { broadcast: false });
+  await delay(300);
+  verify('Access module lists administrators and per-team credential controls', accessModule.app.innerHTML.includes('Administradores do painel') && accessModule.app.innerHTML.includes('Usuários dos times') && accessModule.app.innerHTML.includes('data-action="add-admin-account"'));
   const reportModule = makeRuntime('/manage/report?room=module-report', { broadcast: false });
   reportModule.click('finish-match');
   const finalReport = reportModule.getState().completedReports[0];
@@ -217,7 +245,7 @@ try {
 
   dashboard.click('tab', 'teams');
   verify('Teams editor exposes names and badge uploads', dashboard.app.innerHTML.includes('Nome da equipe') && dashboard.app.innerHTML.includes('Escudo PNG ou JPG'));
-  verify('Reusable team catalog exposes match selectors and a team portal link', dashboard.app.innerHTML.includes('Cadastro de times') && dashboard.app.innerHTML.includes('data-match-team="home"') && dashboard.app.innerHTML.includes('data-action="copy-team-portal"'));
+  verify('Reusable team catalog exposes match selectors and points to the Access module for team logins', dashboard.app.innerHTML.includes('Cadastro de times') && dashboard.app.innerHTML.includes('data-match-team="home"') && dashboard.app.innerHTML.includes('/manage/access'));
   dashboard.input({ team: 'home', teamField: 'name' }, 'Juventude Ilha');
   dashboard.input({ team: 'home', teamField: 'short' }, 'jec');
   verify('Team names and abbreviations update in real time', dashboard.getState().home.name === 'Juventude Ilha' && dashboard.getState().home.short === 'JEC');
@@ -485,20 +513,52 @@ try {
   verify('Production worker serves the team registration portal route', (await worker.fetch(new Request('https://example.test/team?token=test'), {})).status === 200);
   verify('Production worker serves dedicated overlay management routes', (await worker.fetch(new Request('https://example.test/manage/scoreboard?room=principal'), {})).status === 200 && (await worker.fetch(new Request('https://example.test/manage/lineup?room=principal'), {})).status === 200);
   verify('Production worker serves stylesheet and JavaScript', (await worker.fetch(new Request('https://example.test/styles.css'), {})).status === 200 && (await worker.fetch(new Request('https://example.test/app.js'), {})).status === 200);
+  const workerUnauthorizedWrite = await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify({ updatedAt: 1 }), headers: { 'content-type': 'application/json' } }), {});
+  verify('Production worker rejects match-state writes without an administrator session', workerUnauthorizedWrite.status === 401);
+  const workerAdminSetup = await worker.fetch(new Request('https://example.test/api/auth/admin/setup', { method: 'POST', body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123' }), headers: { 'content-type': 'application/json' } }), {});
+  const workerAdminCookie = (workerAdminSetup.headers.get('set-cookie') || '').split(';')[0];
+  verify('Production worker creates the first administrator and starts a session', workerAdminSetup.status === 200 && workerAdminCookie.startsWith('joa_admin='));
   const candidate = { updatedAt: Date.now(), home: { score: 4 } };
-  await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(candidate), headers: { 'content-type': 'application/json' } }), {});
+  await worker.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(candidate), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
   const persisted = await (await worker.fetch(new Request('https://example.test/api/state'), {})).json();
   verify('Production worker synchronizes overlay state through its API', persisted.home.score === 4);
   const secondRoom = { updatedAt: Date.now() + 1, home: { score: 1 }, away: { score: 3 } };
-  await worker.fetch(new Request('https://example.test/api/state?room=final-futsal', { method: 'PUT', body: JSON.stringify(secondRoom), headers: { 'content-type': 'application/json' } }), {});
+  await worker.fetch(new Request('https://example.test/api/state?room=final-futsal', { method: 'PUT', body: JSON.stringify(secondRoom), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
   const isolatedRoom = await (await worker.fetch(new Request('https://example.test/api/state?room=final-futsal'), {})).json();
   const unchangedPrimary = await (await worker.fetch(new Request('https://example.test/api/state?room=principal'), {})).json();
   verify('Independent match rooms cannot overwrite one another', isolatedRoom.home.score === 1 && unchangedPrimary.home.score === 4);
   const catalogCandidate = { updatedAt: Date.now() + 20, teams: [{ id: 'team-test', name: 'Time Teste', short: 'TST', color: '#8253cd', logo: '', roster: '9 Ana Souza', accessToken: 'token123', athletes: [{ id: 'ana-1', name: 'Ana Souza', number: '9', height: '1.75', photo: '' }] }] };
-  const catalogWrite = await worker.fetch(new Request('https://example.test/api/teams', { method: 'PUT', body: JSON.stringify(catalogCandidate), headers: { 'content-type': 'application/json' } }), {});
+  const catalogWrite = await worker.fetch(new Request('https://example.test/api/teams', { method: 'PUT', body: JSON.stringify(catalogCandidate), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const teamCredentialsWrite = await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { method: 'PUT', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  verify('An administrator can set login credentials for a registered team', teamCredentialsWrite.status === 200);
+  const teamLoginWrongPassword = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-errada' }), headers: { 'content-type': 'application/json' } }), {});
+  verify('Team login rejects an incorrect password', teamLoginWrongPassword.status === 401);
+  const teamLoginPaddedPassword = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: '  senha-time-123  ' }), headers: { 'content-type': 'application/json' } }), {});
+  verify('Team login tolerates a password pasted with surrounding spaces', teamLoginPaddedPassword.status === 200);
+  const teamLogin = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json' } }), {});
+  const teamCookie = (teamLogin.headers.get('set-cookie') || '').split(';')[0];
+  verify('A team logs in with its own credentials and receives a scoped session', teamLogin.status === 200 && teamCookie.startsWith('joa_team='));
   const portalRead = await (await worker.fetch(new Request('https://example.test/api/team-portal?token=token123'), {})).json();
-  const portalUpdate = await (await worker.fetch(new Request('https://example.test/api/team-portal?token=token123', { method: 'PUT', body: JSON.stringify({ athletes: [{ id: 'ana-1', name: 'Ana Souza', number: '10', height: '1.76', photo: '', squadRole: 'reserve', position: 'ATA' }], staff: [{ id: 'coach', name: 'Carlos Silva', role: 'Treinador', photo: '' }, { id: 'staff-assistant', name: 'Paulo Lima', role: 'Auxiliar técnico', photo: '' }], coach: { name: 'Carlos Silva', photo: '' }, formation: '4-2-3-1' }), headers: { 'content-type': 'application/json' } }), {})).json();
+  const portalUpdate = await (await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ athletes: [{ id: 'ana-1', name: 'Ana Souza', number: '10', height: '1.76', photo: '', squadRole: 'reserve', position: 'ATA' }], staff: [{ id: 'coach', name: 'Carlos Silva', role: 'Treinador', photo: '' }, { id: 'staff-assistant', name: 'Paulo Lima', role: 'Auxiliar técnico', photo: '' }], coach: { name: 'Carlos Silva', photo: '' }, formation: '4-2-3-1' }), headers: { 'content-type': 'application/json', cookie: teamCookie } }), {})).json();
   verify('Production catalog and team portal share athletes and complete technical staff', catalogWrite.status === 200 && portalRead.team.athletes[0].height === '1.75' && portalUpdate.team.roster === '10 Ana Souza' && portalUpdate.team.athletes[0].squadRole === 'reserve' && portalUpdate.team.athletes[0].position === 'ATA' && portalUpdate.team.coach.name === 'Carlos Silva' && portalUpdate.team.staff.length === 2 && portalUpdate.team.staff[1].name === 'Paulo Lima' && portalUpdate.team.formation === '4-2-3-1');
+  const portalWriteByOtherTeam = await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ name: 'Invasão' }), headers: { 'content-type': 'application/json' } }), {});
+  verify('Team portal writes are rejected without a matching session', portalWriteByOtherTeam.status === 401);
+  const teamCredentialsList = await (await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { headers: { cookie: workerAdminCookie } }), {})).json();
+  verify('An administrator can list every team login on file', Array.isArray(teamCredentialsList.entries) && teamCredentialsList.entries.some(entry => entry.teamId === 'team-test' && entry.username === 'time-teste'));
+  const teamCredentialsDelete = await worker.fetch(new Request('https://example.test/api/auth/team/credentials?teamId=team-test', { method: 'DELETE', headers: { cookie: workerAdminCookie } }), {});
+  verify('An administrator can revoke a team login', teamCredentialsDelete.status === 200);
+  const teamLoginAfterRevoke = await worker.fetch(new Request('https://example.test/api/auth/team/login', { method: 'POST', body: JSON.stringify({ teamId: 'team-test', username: 'time-teste', password: 'senha-time-123' }), headers: { 'content-type': 'application/json' } }), {});
+  verify('A revoked team login can no longer authenticate', teamLoginAfterRevoke.status === 401);
+  const adminAccountsList = await (await worker.fetch(new Request('https://example.test/api/auth/admin/accounts', { headers: { cookie: workerAdminCookie } }), {})).json();
+  verify('An administrator can list every administrator account', adminAccountsList.accounts.length === 1 && adminAccountsList.accounts[0].username === 'sala-admin');
+  const soleAdminDelete = await worker.fetch(new Request(`https://example.test/api/auth/admin/accounts?id=${adminAccountsList.accounts[0].id}`, { method: 'DELETE', headers: { cookie: workerAdminCookie } }), {});
+  verify('The last remaining administrator account cannot be removed', soleAdminDelete.status === 409);
+  const secondAdminCreate = await worker.fetch(new Request('https://example.test/api/auth/admin/accounts', { method: 'POST', body: JSON.stringify({ username: 'segundo-admin', password: 'senha-teste-456' }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const secondAdminData = await secondAdminCreate.json();
+  verify('An administrator can add another administrator account', secondAdminCreate.status === 200 && secondAdminData.accounts.length === 2);
+  const firstAdminId = secondAdminData.accounts.find(account => account.username === 'sala-admin').id;
+  const firstAdminDelete = await worker.fetch(new Request(`https://example.test/api/auth/admin/accounts?id=${firstAdminId}`, { method: 'DELETE', headers: { cookie: workerAdminCookie } }), {});
+  verify('An administrator account can be removed once another one remains', firstAdminDelete.status === 200 && (await firstAdminDelete.json()).accounts.length === 1);
 
   const objects = new Map();
   const bucket = {
@@ -508,24 +568,24 @@ try {
       return item ? { body: item.data, httpEtag: 'test-etag', writeHttpMetadata(headers) { headers.set('content-type', item.type); } } : null;
     },
   };
-  const badgeUpload = await worker.fetch(new Request('https://example.test/api/assets/principal/home-logo', { method: 'PUT', body: new Uint8Array([1,2,3]), headers: { 'content-type': 'image/png' } }), { BUCKET: bucket });
+  const badgeUpload = await worker.fetch(new Request('https://example.test/api/assets/principal/home-logo', { method: 'PUT', body: new Uint8Array([1,2,3]), headers: { 'content-type': 'image/png', cookie: workerAdminCookie } }), { BUCKET: bucket });
   const badgeRead = await worker.fetch(new Request('https://example.test/api/assets/principal/home-logo'), { BUCKET: bucket });
   verify('Team badges are stored separately from live scoreboard state', badgeUpload.status === 200 && badgeRead.status === 200 && badgeRead.headers.get('content-type') === 'image/png');
-  const sponsorUpload = await worker.fetch(new Request('https://example.test/api/assets/principal/sponsor-banner', { method: 'PUT', body: new Uint8Array([4,5,6]), headers: { 'content-type': 'image/webp' } }), { BUCKET: bucket });
+  const sponsorUpload = await worker.fetch(new Request('https://example.test/api/assets/principal/sponsor-banner', { method: 'PUT', body: new Uint8Array([4,5,6]), headers: { 'content-type': 'image/webp', cookie: workerAdminCookie } }), { BUCKET: bucket });
   const sponsorRead = await worker.fetch(new Request('https://example.test/api/assets/principal/sponsor-banner'), { BUCKET: bucket });
   verify('16:9 sponsor artwork is stored and served independently', sponsorUpload.status === 200 && sponsorRead.status === 200 && sponsorRead.headers.get('content-type') === 'image/webp');
-  const lineupMediaUpload = await worker.fetch(new Request('https://example.test/api/assets/principal/sponsor-1-lineup-media', { method: 'PUT', body: new Uint8Array([0,0,0,24]), headers: { 'content-type': 'video/mp4' } }), { BUCKET: bucket });
+  const lineupMediaUpload = await worker.fetch(new Request('https://example.test/api/assets/principal/sponsor-1-lineup-media', { method: 'PUT', body: new Uint8Array([0,0,0,24]), headers: { 'content-type': 'video/mp4', cookie: workerAdminCookie } }), { BUCKET: bucket });
   const lineupMediaRead = await worker.fetch(new Request('https://example.test/api/assets/principal/sponsor-1-lineup-media'), { BUCKET: bucket });
   verify('Dedicated sponsor video media is persisted and served with its video type', lineupMediaUpload.status === 200 && lineupMediaRead.status === 200 && lineupMediaRead.headers.get('content-type') === 'video/mp4');
-  const athletePhotoUpload = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?token=token123&athlete=ana-1', { method: 'PUT', body: new Uint8Array([7,8,9]), headers: { 'content-type': 'image/jpeg' } }), { BUCKET: bucket });
-  const athletePhotoRead = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?token=token123&athlete=ana-1'), { BUCKET: bucket });
+  const athletePhotoUpload = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?team=team-test&athlete=ana-1', { method: 'PUT', body: new Uint8Array([7,8,9]), headers: { 'content-type': 'image/jpeg', cookie: teamCookie } }), { BUCKET: bucket });
+  const athletePhotoRead = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?team=team-test&athlete=ana-1'), { BUCKET: bucket });
   const catalogAfterPhoto = await (await worker.fetch(new Request('https://example.test/api/teams'), { BUCKET: bucket })).json();
   verify('Uploaded athlete photos persist immediately and use a valid cache-safe URL', athletePhotoUpload.status === 200 && athletePhotoRead.status === 200 && athletePhotoRead.headers.get('content-type') === 'image/jpeg' && catalogAfterPhoto.teams[0].athletes[0].photo.includes('&v=') && !catalogAfterPhoto.teams[0].athletes[0].photo.includes('ana-1?v='));
-  const staffPhotoUpload = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?token=token123&athlete=staff-assistant', { method: 'PUT', body: new Uint8Array([9,8,7]), headers: { 'content-type': 'image/webp' } }), { BUCKET: bucket });
+  const staffPhotoUpload = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?team=team-test&athlete=staff-assistant', { method: 'PUT', body: new Uint8Array([9,8,7]), headers: { 'content-type': 'image/webp', cookie: teamCookie } }), { BUCKET: bucket });
   const catalogAfterStaffPhoto = await (await worker.fetch(new Request('https://example.test/api/teams'), { BUCKET: bucket })).json();
   verify('Technical staff photos share the durable presentation asset flow', staffPhotoUpload.status === 200 && catalogAfterStaffPhoto.teams[0].staff[1].photo.includes('staff-assistant') && catalogAfterStaffPhoto.teams[0].staff[1].photo.includes('&v='));
-  const coachPhotoUpload = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?token=token123&athlete=coach', { method: 'PUT', body: new Uint8Array([10,11,12]), headers: { 'content-type': 'image/webp' } }), { BUCKET: bucket });
-  const coachPhotoRead = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?token=token123&athlete=coach'), { BUCKET: bucket });
+  const coachPhotoUpload = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?team=team-test&athlete=coach', { method: 'PUT', body: new Uint8Array([10,11,12]), headers: { 'content-type': 'image/webp', cookie: teamCookie } }), { BUCKET: bucket });
+  const coachPhotoRead = await worker.fetch(new Request('https://example.test/api/team-athlete-photo?team=team-test&athlete=coach'), { BUCKET: bucket });
   verify('Coach photos use the same protected presentation asset flow', coachPhotoUpload.status === 200 && coachPhotoRead.status === 200 && coachPhotoRead.headers.get('content-type') === 'image/webp');
 
   const rows = new Map();
@@ -548,12 +608,16 @@ try {
   };
   const writer = (await import('./dist/server/index.js?writer=isolated')).default;
   const reader = (await import('./dist/server/index.js?reader=isolated')).default;
+  const writerAdminSetup = await writer.fetch(new Request('https://example.test/api/auth/admin/setup', { method: 'POST', body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123' }), headers: { 'content-type': 'application/json' } }), { DB: database });
+  const writerAdminCookie = (writerAdminSetup.headers.get('set-cookie') || '').split(';')[0];
   const durableCandidate = { updatedAt: Date.now() + 50, sport: 'volleyball', home: { score: 22 }, away: { score: 19 } };
-  const writeResponse = await writer.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(durableCandidate), headers: { 'content-type': 'application/json' } }), { DB: database });
+  const writeResponse = await writer.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(durableCandidate), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database });
   const durableRead = await (await reader.fetch(new Request('https://example.test/api/state'), { DB: database })).json();
   verify('A control session and an isolated OBS worker share durable D1-backed state', writeResponse.status === 200 && durableRead.home.score === 22 && durableRead.away.score === 19);
+  const readerSessionCheck = await reader.fetch(new Request('https://example.test/api/auth/admin/session', { headers: { cookie: writerAdminCookie } }), { DB: database });
+  verify('An isolated reader isolate verifies a session cookie signed by another isolate through the shared D1-backed secret', (await readerSessionCheck.json()).authenticated === true);
   const older = { updatedAt: durableCandidate.updatedAt - 5, home: { score: 0 } };
-  await reader.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(older), headers: { 'content-type': 'application/json' } }), { DB: database });
+  await reader.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(older), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database });
   const protectedState = await (await writer.fetch(new Request('https://example.test/api/state'), { DB: database })).json();
   verify('Older browser sessions cannot overwrite a newer shared scoreboard', protectedState.home.score === 22);
   const hostingConfig = JSON.parse(await fs.readFile(new URL('./.openai/hosting.json', import.meta.url), 'utf8'));
