@@ -40,6 +40,7 @@ function makeRuntime(pathname = '/?room=principal', options = {}) {
   const copied = [];
   const opened = [];
   const printed = [];
+  const bodyElements = new Set();
 
   class FakeChannel {
     constructor(name) {
@@ -62,16 +63,17 @@ function makeRuntime(pathname = '/?room=principal', options = {}) {
     body: {
       classList: { add(...values) { values.forEach(value => classes.add(value)); } },
       dataset: {},
-      append() {},
+      append(element) { bodyElements.add(element); },
     },
     getElementById(id) { return id === 'app' ? app : form.get(id) || null; },
     querySelector(selector) {
+      if (selector === '[data-emergency-hide-all]') return [...bodyElements].find(element => element.dataset.emergencyHideAll) || null;
       if (selector === '.toast') return null;
       return null;
     },
     querySelectorAll() { return []; },
     createElement() {
-      const element = { className: '', textContent: '', style: {}, remove() {}, select() {} };
+      const element = { className: '', textContent: '', style: {}, remove() { bodyElements.delete(this); }, select() {} };
       Object.defineProperty(element, 'dataset', { value: {}, writable: false });
       return element;
     },
@@ -179,10 +181,21 @@ try {
   verify('Room-aware local state endpoint accepts and returns state for an authenticated administrator', probeWrite.ok && probeRead.ok === true);
 
   const dashboard = makeRuntime('/?room=principal');
+  const emergencyButton = () => dashboard.sandbox.document.querySelector('[data-emergency-hide-all]');
+  verify('Authenticated Super Admin sees the emergency hide-all button', Boolean(emergencyButton()));
+  for (const status of ['checking', 'setup', 'login']) {
+    dashboard.sandbox.__overlayStudio.setAdminSession(status, null);
+    verify(`Emergency hide-all button is absent during ${status}`, !emergencyButton());
+  }
   dashboard.sandbox.__overlayStudio.setAdminSession('login', null);
   verify('Admin login screen offers a direct link to the team access login', dashboard.app.innerHTML.includes('href="/team"') && dashboard.app.innerHTML.includes('Acesso da equipe') && dashboard.app.innerHTML.includes('Juventude Esporte Clube'));
   verify('Brand mark renders the official crest image, not an inline icon', dashboard.app.innerHTML.includes('<img class="brand-mark" src="/brand-logo.png"'));
   dashboard.sandbox.__overlayStudio.setAdminSession('authenticated', 'sala-admin');
+  verify('Emergency hide-all button returns after administrator login', Boolean(emergencyButton()));
+  for (const route of ['/team', '/preview', '/overlay']) {
+    const runtime = makeRuntime(`${route}?room=emergency-button-test`, { broadcast: false });
+    verify(`Emergency hide-all button is absent from ${route}`, !runtime.sandbox.document.querySelector('[data-emergency-hide-all]'));
+  }
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
   verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Organização', 'Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));

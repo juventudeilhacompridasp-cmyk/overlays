@@ -2233,7 +2233,12 @@ function rememberFocusedField() {
 }
 
 function ensureEmergencyButton() {
-  if (isOutput || isPreview || isTeamPortal || document.querySelector('[data-emergency-hide-all]')) return;
+  const existing = document.querySelector('[data-emergency-hide-all]');
+  if (!isAdminPanel || adminSession.status !== 'authenticated') {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
   const button = document.createElement('button');
   button.className = 'emergency-hide-all';
   button.textContent = 'DESATIVAR TODOS';
@@ -2514,6 +2519,7 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'hide-all') {
+    if (!isAdminPanel || adminSession.status !== 'authenticated') return;
     commit(draft => {
       const now = Date.now();
       if (draft.visible.scoreboard) draft.scoreboardTransition = { type: 'exit', startedAt: now, expiresAt: now + scoreboardTransitionDuration() };

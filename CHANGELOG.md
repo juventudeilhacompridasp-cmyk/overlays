@@ -26,6 +26,15 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+## [29] - 2026-09-18
+
+### Segurança
+- O botão flutuante "DESATIVAR TODOS" só aparece nos painéis com sessão administrativa
+  (Super Admin) autenticada. É removido ao sair e não aparece no login, cadastro inicial,
+  portais de equipes, prévias ou fontes OBS. A ação também verifica a sessão no cliente;
+  a API mantém a exigência existente de autenticação administrativa para gravar o estado.
+  Nenhuma rota, formato de estado ou permissão de leitura dos overlays foi alterada.
+
 ### Adicionado
 - Na tela **Usuários/Acessos**, os campos de senha (administradores e usuários dos times)
   ganharam um botão "gerar senha" que preenche o campo com uma senha aleatória de 8 caracteres
