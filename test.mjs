@@ -373,7 +373,7 @@ try {
   dashboard.input({ appearance: 'photoLineupStyle' }, 'glass');
   verify('Overlay style variations update live state independently', dashboard.getState().appearance.eventStyle === 'block' && dashboard.getState().appearance.photoLineupStyle === 'glass');
   verify('Photo-lineup appearance controls include surface, rounding, sponsor count, and sponsor bar size', dashboard.app.innerHTML.includes('Acabamento da escalação com fotos') && dashboard.app.innerHTML.includes('data-appearance="photoLineupSurface"') && dashboard.app.innerHTML.includes('data-appearance="photoLineupSponsorCount"') && dashboard.app.innerHTML.includes('data-appearance="photoLineupSponsorBarSize"'));
-  verify('Scoreboard styling panel exposes four visual foundations and fine controls', (dashboard.app.innerHTML.match(/class="scoreboard-style-choice /g) || []).length === 4 && dashboard.app.innerHTML.includes('Opacidade da superfície') && dashboard.app.innerHTML.includes('Espessura do destaque'));
+  verify('Scoreboard styling panel exposes seven visual foundations and fine controls', (dashboard.app.innerHTML.match(/class="scoreboard-style-choice /g) || []).length === 7 && dashboard.app.innerHTML.includes('Opacidade da superfície') && dashboard.app.innerHTML.includes('Espessura do destaque'));
   dashboard.click('scoreboard-style', 'glass');
   dashboard.input({ appearance: 'scoreboardRadius' }, '12', 'range');
   dashboard.input({ appearance: 'scoreboardSurface' }, '76', 'range');
@@ -381,6 +381,15 @@ try {
   dashboard.input({ appearance: 'scoreboardShadow' }, 'strong');
   verify('Scoreboard finish, radius, opacity, accent, and shadow are independently configurable', dashboard.getState().appearance.scoreboardStyle === 'glass' && dashboard.getState().appearance.scoreboardRadius === 12 && dashboard.getState().appearance.scoreboardSurface === 76 && dashboard.getState().appearance.scoreboardAccent === 5 && dashboard.getState().appearance.scoreboardShadow === 'strong');
   verify('Scoreboard style controls are emitted into the live graphic', dashboard.app.innerHTML.includes('scorebug-style-glass') && dashboard.app.innerHTML.includes('scorebug-shadow-strong') && dashboard.app.innerHTML.includes('--scoreboard-radius:12px') && dashboard.app.innerHTML.includes('--scoreboard-surface:76%') && dashboard.app.innerHTML.includes('--scoreboard-accent:5px'));
+  for (const key of ['neon', 'ribbon', 'gradient']) {
+    dashboard.click('scoreboard-style', key);
+    verify(`New scoreboard style "${key}" is selectable and renders its own class into the live graphic`, dashboard.getState().appearance.scoreboardStyle === key && dashboard.app.innerHTML.includes(`scorebug-style-${key}`));
+  }
+  for (const key of ['elastic', 'glitch']) {
+    dashboard.input({ appearance: 'scoreboardAnimation' }, key);
+    verify(`New scoreboard transition "${key}" is selectable`, dashboard.getState().appearance.scoreboardAnimation === key);
+  }
+  verify('New scoreboard styles and transitions ship real CSS keyframes, not just markers', ['scorebug-style-neon', 'scorebug-style-ribbon', 'scorebug-style-gradient'].every(cls => stylesheet.includes(`.${cls}`)) && ['score-elastic-in', 'score-glitch-in'].every(name => stylesheet.includes(`@keyframes ${name}`)));
   verify('Sponsor settings accept multiple named 16:9 banners', dashboard.app.innerHTML.includes('Patrocinadores cadastrados') && dashboard.app.innerHTML.includes('data-sponsor-banner') && dashboard.app.innerHTML.includes('1920 × 1080'));
   dashboard.input({ appearance: 'sponsorFormat' }, 'banner-name');
   verify('Sponsor banner and name can be shown together', dashboard.getState().appearance.sponsorFormat === 'banner-name' && dashboard.app.innerHTML.includes('sponsor-banner-with-name') && dashboard.app.innerHTML.includes('data-format="banner-name"'));
