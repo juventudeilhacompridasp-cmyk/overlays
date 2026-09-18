@@ -64,6 +64,21 @@ async function persistState(env, room, candidate) {
   return readState(env, room);
 }
 
+async function persistStateIfCurrent(env, room, candidate, expectedUpdatedAt) {
+  if (!env?.DB) {
+    const current = fallbackStates.get(room) || {};
+    if (Number(current.updatedAt || 0) !== Number(expectedUpdatedAt || 0)) return { ok: false, state: current };
+    fallbackStates.set(room, candidate);
+    return { ok: true, state: candidate };
+  }
+  await ensureDatabase(env.DB);
+  const result = Number(expectedUpdatedAt || 0) === 0
+    ? await env.DB.prepare('INSERT OR IGNORE INTO overlay_state (room, payload, updated_at) VALUES (?, ?, ?)').bind(room, JSON.stringify(candidate), Number(candidate.updatedAt || 0)).run()
+    : await env.DB.prepare('UPDATE overlay_state SET payload = ?, updated_at = ? WHERE room = ? AND updated_at = ?').bind(JSON.stringify(candidate), Number(candidate.updatedAt || 0), room, Number(expectedUpdatedAt || 0)).run();
+  if (Number(result?.meta?.changes || 0) < 1) return { ok: false, state: await readState(env, room) };
+  return { ok: true, state: candidate };
+}
+
 async function insertPrivateOnce(env, key, candidate) {
   if (!env?.DB) {
     if (!fallbackStates.has(key)) fallbackStates.set(key, candidate);
@@ -352,11 +367,15 @@ export default {
       const secret = await getAuthSecret(env);
       const admin = await getAdminSession(request, secret, env);
       if (!admin) return unauthorized();
-      const store = await getOperations(env);
+      let store = await getOperations(env);
       if (request.method === 'GET') return Response.json(store, { headers: { 'cache-control': 'no-store' } });
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
       try {
         const candidate = await request.json();
+        const baseUpdatedAt = Number(candidate.baseUpdatedAt || 0);
+        const current = await getOperations(env);
+        if (baseUpdatedAt !== Number(current.updatedAt || 0)) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: current }, { status: 409 });
+        store = structuredClone(current);
         const action = String(candidate.action || '');
         if (action === 'upsert-championship') {
           const item = candidate.item || {};
@@ -375,7 +394,8 @@ export default {
         } else if (action === 'upsert-match') {
           const item = candidate.item || {};
           const id = safeId(item.id, 'partida-' + Date.now().toString(36));
-          const roomId = safeId(item.room || id, id).slice(0, 48);
+          const previous = store.matches.find(entry => entry.id === id);
+          const roomId = safeId(previous?.room || item.room || id, id).slice(0, 48);
           if (store.matches.some(entry => entry.room === roomId && entry.id !== id)) return Response.json({ ok: false, error: 'Já existe uma partida usando esta sala.' }, { status: 409 });
           const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room: roomId, updatedAt: Date.now() };
           if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) return Response.json({ ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }, { status: 400 });
@@ -396,7 +416,8 @@ export default {
           return Response.json({ ok: false, error: 'Ação inválida.' }, { status: 400 });
         }
         store.updatedAt = Date.now();
-        await persistState(env, '__operations__', store);
+        const persisted = await persistStateIfCurrent(env, '__operations__', store, baseUpdatedAt);
+        if (!persisted.ok) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: normalizeOperations(persisted.state) }, { status: 409 });
         return Response.json({ ok: true, operations: store }, { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
@@ -435,7 +456,13 @@ export default {
         try {
           const candidate = await request.json();
           if (!Array.isArray(candidate.teams)) return new Response('Invalid team catalog', { status: 400 });
-          return Response.json(await persistState(env, 'team-catalog', candidate), { headers: { 'cache-control': 'no-store' } });
+          const baseUpdatedAt = Number(candidate.baseUpdatedAt || 0);
+          const current = await readState(env, 'team-catalog');
+          if (baseUpdatedAt !== Number(current.updatedAt || 0)) return Response.json({ ok: false, error: 'Catálogo atualizado por outro administrador.', catalog: current }, { status: 409 });
+          delete candidate.baseUpdatedAt;
+          const persisted = await persistStateIfCurrent(env, 'team-catalog', candidate, baseUpdatedAt);
+          if (!persisted.ok) return Response.json({ ok: false, error: 'Catálogo atualizado por outro administrador.', catalog: persisted.state }, { status: 409 });
+          return Response.json(persisted.state, { headers: { 'cache-control': 'no-store' } });
         } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
       }
       return Response.json(await hydrateLegacyTeamPhotos(env, await readState(env, 'team-catalog')), { headers: { 'cache-control': 'no-store' } });

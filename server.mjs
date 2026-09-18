@@ -307,7 +307,7 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === '/api/operations') {
     const admin = await requireAdmin(request, response);
     if (!admin) return;
-    const store = operationsStore();
+    let store = operationsStore();
     if (request.method === 'GET') {
       sendJson(response, 200, store);
       return;
@@ -315,6 +315,12 @@ const server = http.createServer(async (request, response) => {
     if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
     try {
       const candidate = JSON.parse(await readBody(request));
+      const current = operationsStore();
+      if (Number(candidate.baseUpdatedAt || 0) !== Number(current.updatedAt || 0)) {
+        sendJson(response, 409, { ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: current });
+        return;
+      }
+      store = structuredClone(current);
       const action = String(candidate.action || '');
       if (action === 'upsert-championship') {
         const item = candidate.item || {};
@@ -333,7 +339,8 @@ const server = http.createServer(async (request, response) => {
       } else if (action === 'upsert-match') {
         const item = candidate.item || {};
         const id = safeId(item.id, `partida-${Date.now().toString(36)}`);
-        const room = safeId(item.room || id, id).slice(0, 48);
+        const previous = store.matches.find(entry => entry.id === id);
+        const room = safeId(previous?.room || item.room || id, id).slice(0, 48);
         if (store.matches.some(entry => entry.room === room && entry.id !== id)) { sendJson(response, 409, { ok: false, error: 'Já existe uma partida usando esta sala.' }); return; }
         const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room, updatedAt: Date.now() };
         if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) { sendJson(response, 400, { ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }); return; }
@@ -355,6 +362,7 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       store.updatedAt = Date.now();
+      sharedStates.__operations__ = store;
       await persist();
       sendJson(response, 200, { ok: true, operations: store });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
@@ -396,10 +404,10 @@ const server = http.createServer(async (request, response) => {
         const candidate = JSON.parse(body);
         if (!Array.isArray(candidate.teams)) throw new Error('Invalid team catalog');
         const current = sharedStates.__team_catalog__;
-        if (!current || Number(candidate.updatedAt || 0) >= Number(current.updatedAt || 0)) {
-          sharedStates.__team_catalog__ = candidate;
-          await persist();
-        }
+        if (Number(candidate.baseUpdatedAt || 0) !== Number(current?.updatedAt || 0)) { sendJson(response, 409, { ok: false, error: 'Catálogo atualizado por outro administrador.', catalog: current || {} }); return; }
+        delete candidate.baseUpdatedAt;
+        sharedStates.__team_catalog__ = candidate;
+        await persist();
         response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
         response.end(JSON.stringify(sharedStates.__team_catalog__));
       } catch { response.writeHead(400).end('Invalid JSON'); }
