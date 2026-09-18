@@ -246,6 +246,11 @@ try {
   verify('Score-only output includes the scoreboard', separateScoreOutput.app.innerHTML.includes('data-overlay="scoreboard"'));
   verify('Score-only output excludes lower-thirds', !separateScoreOutput.app.innerHTML.includes('data-overlay="event"'));
   verify('OBS output activates transparent-background and optimized render modes', separateScoreOutput.classes.has('overlay-output') && separateScoreOutput.classes.has('obs-render-mode') && stylesheet.includes('background: transparent !important'));
+  const freshMotionStart = Date.now() - 300;
+  verify('A transition never before painted on an OBS output plays from its first frame', separateScoreOutput.sandbox.motionOffset(freshMotionStart, 1000) === 0);
+  await delay(30);
+  const resumedOffset = separateScoreOutput.sandbox.motionOffset(freshMotionStart, 1000);
+  verify('The same transition re-rendered later (e.g. because unrelated content changed) resumes instead of restarting from frame 0', resumedOffset < 0 && resumedOffset > -1000);
   const fullPreview = makeRuntime('/preview', { broadcast: false });
   await delay(120);
   verify('Full preview uses a complete 16:9 broadcast stage', fullPreview.classes.has('preview-output') && fullPreview.app.innerHTML.includes('full-preview-stage'));
@@ -511,7 +516,8 @@ try {
   verify('Responsive layouts are defined for tablets and phones', stylesheet.includes('@media (max-width: 800px)') && stylesheet.includes('@media (max-width: 490px)'));
   verify('Stable overlays animate only while explicitly entering or exiting', stylesheet.includes('.event-banner.is-entering') && stylesheet.includes('.lineup-banner.is-entering') && stylesheet.includes('.photo-lineup.is-entering') && !/\.event-banner \{[^}]*animation:/s.test(stylesheet) && !/\.lineup-banner \{[^}]*animation:/s.test(stylesheet) && !/\.photo-lineup \{[^}]*animation:/s.test(stylesheet));
   verify('Animation timelines preserve progress when another overlay rerenders', stylesheet.includes('--scoreboard-motion-offset') && stylesheet.includes('--event-motion-offset') && stylesheet.includes('--lineup-motion-offset') && stylesheet.includes('--photo-lineup-motion-offset') && stylesheet.includes('--sponsor-motion-offset') && stylesheet.includes('--goal-phase-offset'));
-  verify('OBS outputs play complete transitions instead of jumping into a delayed midpoint', script.includes('if (isOutput) return 0') && script.includes("classList.add('overlay-output', 'obs-render-mode')"));
+  verify('OBS outputs track already-painted transitions so re-renders resume them instead of restarting from a delayed midpoint', script.includes('seenMotionStarts') && script.includes("classList.add('overlay-output', 'obs-render-mode')"));
+  verify('OBS performance mode normalizes every entrance/exit easing so no per-style curve (steps, overshoot) leaks into the lightweight swapped keyframes', /\.obs-render-mode \.scorebug\.is-entering\[class\*="scorebug-animation-"\] \{ animation-name: obs-enter-left; animation-timing-function: cubic-bezier\([^)]+\); \}/.test(stylesheet));
   verify('OBS performance mode replaces expensive effects with compositor-only animations', stylesheet.includes('@keyframes obs-enter-left') && stylesheet.includes('.obs-render-mode [data-overlay] * { filter: none !important; backdrop-filter: none !important; }') && stylesheet.includes('contain: layout paint style'));
   verify('OBS output keeps mounted elements when only an animation lifecycle finishes', script.includes('const shouldRender = !previous || previous.content !== fingerprint') && script.includes('outputAnimationFingerprint'));
   verify('Lineup sponsor banner fills a 1500 × 200 block without sponsor name text', stylesheet.includes('aspect-ratio: 7.5 / 1') && stylesheet.includes('.photo-lineup-sponsor img, .photo-lineup-sponsor video { width: 100%; height: 100%') && !script.includes('photo-lineup-sponsor">${media}<strong>'));

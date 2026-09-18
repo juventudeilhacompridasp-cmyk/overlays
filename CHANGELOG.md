@@ -67,6 +67,51 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
   servidor. A tela principal de cada partida (`/?room=...`) também ganhou um resumo compacto
   "Resumo da partida" (placar, contagem de eventos por tipo e quantos overlays estão no ar) logo
   abaixo do seletor de modalidade.
+- **Escudos dos times no placar**: novo botão "Escudos dos times no placar" (aba Partida e módulo
+  dedicado `/manage/scoreboard`) liga/desliga a exibição do escudo enviado em cada equipe dentro
+  do placar da transmissão (`appearance.scoreboardShowBadge`, `false` por padrão — nenhuma sala
+  existente muda de aparência sem ação do usuário). Sem escudo cadastrado, mostra as iniciais da
+  equipe sobre a cor do time como alternativa. O campo é validado e persistido como os demais
+  campos de `appearance`; não há mudança de rota ou de contrato de estado além do novo campo.
+- **Dois novos layouts de placar**, além de Compacto e Aberto: **Cartão** (escudo em destaque,
+  nome completo da equipe, moldura em formato de pílula) e **Duelo** (divisão diagonal nas cores
+  de cada equipe, siglas de 3 letras, visual mais dramático). Selecionáveis no mesmo controle
+  "Formato do placar" da aba Partida e do módulo `/manage/scoreboard`
+  (`appearance.scoreboardLayout` passa a aceitar `compact`, `expanded`, `card` ou `duel`, com
+  fallback para `compact` em salas antigas ou valores inválidos). A transição animada suave
+  (morph) continua restrita à troca entre Compacto ↔ Aberto, como antes; a troca envolvendo
+  Cartão ou Duelo troca o layout diretamente, sem a animação de expansão/contração.
+
+### Corrigido
+- **Transições cortadas nas saídas do OBS (`/overlay?...`)**: identificadas duas causas raiz e
+  as duas foram corrigidas.
+  1. Cada saída isolada (`/overlay?layer=...`) só substitui o HTML de um placar/lower
+     third/patrocinador quando o conteúdo daquela camada muda OU quando a animação em
+     andamento muda de identidade (`outputFingerprint`/`outputAnimationFingerprint`,
+     comportamento já existente). O problema: quando uma troca de conteúdo *não relacionada*
+     (ex.: o operador altera o placar ou outro campo) forçava a recriação do elemento
+     enquanto uma transição de entrada/saída daquela MESMA camada ainda estava em andamento,
+     `motionOffset()` sempre devolvia `0` para saídas OBS (`isOutput`), fazendo a animação
+     reiniciar do zero a cada nova renderização em vez de continuar de onde parou — visível
+     como um "corte"/soluço no meio da transição. Agora `motionOffset()` guarda, em
+     `seenMotionStarts`, os horários de início (`startedAt`) de transições já pintadas: a
+     primeira renderização de uma transição nova continua começando do quadro zero (evita o
+     corte inicial "no meio" que esse comportamento já corrigia antes), mas qualquer
+     renderização seguinte da mesma transição agora retoma pelo tempo decorrido real, sem
+     reiniciar a animação CSS. O mapa é limpo periodicamente (a cada 250 ms, entradas com
+     mais de 30 s) para não crescer indefinidamente em transmissões longas.
+  2. O modo de performance do OBS (`.obs-render-mode`) já trocava os keyframes de cada estilo
+     de transição (montagem, deslizamento, zoom, virada 3D, elástico, glitch) por versões mais
+     leves baseadas só em `transform`/`opacity` (`obs-enter-*`/`obs-exit-*`), mas só substituía
+     `animation-name` — a curva de aceleração (`animation-timing-function`) de cada estilo
+     original continuava valendo, incluindo `steps(7,end)` do estilo "Glitch digital" (que por
+     design pula entre quadros, ficando muito mais perceptível sem o efeito visual original que
+     o acompanhava) e a curva com "overshoot" do estilo "Elástico". Agora cada regra
+     `.obs-render-mode` que troca o keyframe também fixa uma curva suave
+     (`cubic-bezier(.16,1,.3,1)` na entrada, `cubic-bezier(.7,0,.84,0)` na saída), então
+     qualquer estilo de transição escolhido pelo operador chega fluido no OBS, independente da
+     curva original daquele estilo. Nenhuma opção de transição foi removida; o comportamento
+     fora do OBS (painel, prévia `/preview`) não muda.
 
 ## [27] - 2026-09-18
 

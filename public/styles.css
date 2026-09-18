@@ -448,6 +448,22 @@ a { color: inherit; }
 .scorebug-layout-compact .scorebug-team-name { letter-spacing: .09em; }
 .scorebug-layout-expanded .scorebug-team { width: 20cqw; min-width: 20cqw; justify-content: flex-start; }
 .scorebug-layout-expanded .scorebug-team-name { overflow: hidden; font-size: max(8px, 1.62cqw); text-overflow: ellipsis; white-space: nowrap; }
+.scorebug-badge { width: 1.9cqw; height: 1.9cqw; min-width: 14px; min-height: 14px; display: grid; place-items: center; overflow: hidden; border-radius: 50%; background: color-mix(in srgb, var(--team-color, var(--overlay-primary)) 32%, #14131a); }
+.scorebug-badge img { width: 92%; height: 92%; object-fit: contain; }
+.scorebug-badge-fallback { color: #fff; font-family: var(--scoreboard-font, var(--display)); font-size: clamp(7px, .82cqw, 12px); font-weight: 800; letter-spacing: .02em; }
+.scorebug-layout-compact .scorebug-badge { width: 1.55cqw; height: 1.55cqw; }
+.scorebug-layout-card { overflow: hidden; border-bottom-width: 0; border-radius: 999px; box-shadow: 0 10px 26px rgba(0,0,0,.32); }
+.scorebug-layout-card .scorebug-team { width: 15.5cqw; min-width: 15.5cqw; padding: 0 1.1cqw 0 .5cqw; justify-content: flex-start; }
+.scorebug-layout-card .scorebug-team:first-child { border-radius: 999px 0 0 999px; }
+.scorebug-layout-card .scorebug-badge { width: 2.5cqw; height: 2.5cqw; min-width: 19px; min-height: 19px; border: 2px solid color-mix(in srgb, var(--team-color, var(--overlay-accent)) 75%, white); box-shadow: 0 0 0 3px rgba(0,0,0,.22); }
+.scorebug-layout-card .scorebug-team-name { overflow: hidden; font-size: max(8px, 1.4cqw); text-overflow: ellipsis; white-space: nowrap; }
+.scorebug-layout-card .scorebug-clock { border-radius: 0 999px 999px 0; }
+.scorebug-layout-duel { overflow: hidden; border-bottom-width: 0; }
+.scorebug-layout-duel .scorebug-team { position: relative; min-width: 9.8cqw; padding: 0 1.15cqw; background: color-mix(in srgb, var(--team-color, var(--overlay-primary)) 52%, #0c0b10); clip-path: polygon(0 0, 100% 0, 86% 100%, 0 100%); }
+.scorebug-layout-duel .scorebug-team:last-child { clip-path: polygon(14% 0, 100% 0, 100% 100%, 0 100%); margin-left: -1.7cqw; }
+.scorebug-layout-duel .scorebug-badge { background: rgba(0,0,0,.35); }
+.scorebug-layout-duel .scorebug-team-name { font-weight: 800; letter-spacing: .08em; }
+.scorebug-layout-duel .scorebug-goals, .scorebug-layout-duel .scorebug-divider { background: var(--overlay-dark); }
 .scorebug.is-morphing { will-change: transform, filter; }
 .scorebug.is-morphing.morph-to-expanded { animation: score-layout-expand var(--scoreboard-morph-duration, 720ms) cubic-bezier(.16,1,.3,1) both; animation-delay: var(--scoreboard-morph-offset, 0ms); }
 .scorebug.is-morphing.morph-to-compact { animation: score-layout-contract var(--scoreboard-morph-duration, 720ms) cubic-bezier(.16,1,.3,1) both; animation-delay: var(--scoreboard-morph-offset, 0ms); }
@@ -758,47 +774,52 @@ a { color: inherit; }
 @keyframes obs-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes obs-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
-.obs-render-mode .scorebug.is-entering[class*="scorebug-animation-"] { animation-name: obs-enter-left; }
-.obs-render-mode .scorebug.is-exiting[class*="scorebug-animation-"] { animation-name: obs-exit-left; }
-.obs-render-mode .scorebug.is-entering.scorebug-animation-assemble > :not(.scorebug-goal-celebration):not(.scorebug-card-notice) { animation-name: obs-enter-scale; }
-.obs-render-mode .scorebug.is-exiting.scorebug-animation-assemble > :not(.scorebug-goal-celebration):not(.scorebug-card-notice) { animation-name: obs-exit-scale; }
-.obs-render-mode .scorebug.is-morphing { animation-name: obs-enter-scale; }
+/* Per-style easings (assemble/glitch/elastic/...) are tuned for a full-quality browser
+   and include steps() and overshoot curves that read as dropped frames once the keyframe
+   itself is swapped for the lighter obs-enter-*/obs-exit-* ones below. Forcing one smooth
+   ease pair here, on the same rules that already win the animation-name cascade, keeps
+   every entrance/exit style interpolating cleanly regardless of which one was picked. */
+.obs-render-mode .scorebug.is-entering[class*="scorebug-animation-"] { animation-name: obs-enter-left; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .scorebug.is-exiting[class*="scorebug-animation-"] { animation-name: obs-exit-left; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .scorebug.is-entering.scorebug-animation-assemble > :not(.scorebug-goal-celebration):not(.scorebug-card-notice) { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .scorebug.is-exiting.scorebug-animation-assemble > :not(.scorebug-goal-celebration):not(.scorebug-card-notice) { animation-name: obs-exit-scale; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .scorebug.is-morphing { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
 .obs-render-mode .scorebug.is-morphing .scorebug-team-name,
-.obs-render-mode .scorebug.is-morphing .scorebug-dot { animation-name: obs-fade; }
-.obs-render-mode .event-banner.is-entering { animation-name: obs-enter-left; }
-.obs-render-mode .event-banner.is-exiting { animation-name: obs-exit-left; }
+.obs-render-mode .scorebug.is-morphing .scorebug-dot { animation-name: obs-fade; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .event-banner.is-entering { animation-name: obs-enter-left; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .event-banner.is-exiting { animation-name: obs-exit-left; animation-timing-function: cubic-bezier(.7,0,.84,0); }
 .obs-render-mode .event-banner.is-entering::after { display: none; animation: none; }
-.obs-render-mode .sponsor-banner.is-entering[class*="sponsor-animation-"] { animation-name: obs-enter-right; }
-.obs-render-mode .sponsor-banner.is-exiting[class*="sponsor-animation-"] { animation-name: obs-exit-right; }
+.obs-render-mode .sponsor-banner.is-entering[class*="sponsor-animation-"] { animation-name: obs-enter-right; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .sponsor-banner.is-exiting[class*="sponsor-animation-"] { animation-name: obs-exit-right; animation-timing-function: cubic-bezier(.7,0,.84,0); }
 .obs-render-mode .lineup-banner.is-entering,
-.obs-render-mode .photo-lineup.is-entering { animation-name: obs-enter-left; }
+.obs-render-mode .photo-lineup.is-entering { animation-name: obs-enter-left; animation-timing-function: cubic-bezier(.16,1,.3,1); }
 .obs-render-mode .lineup-banner.is-exiting,
-.obs-render-mode .photo-lineup.is-exiting { animation-name: obs-exit-left; }
+.obs-render-mode .photo-lineup.is-exiting { animation-name: obs-exit-left; animation-timing-function: cubic-bezier(.7,0,.84,0); }
 .obs-render-mode .photo-lineup.is-stage-changing .photo-lineup-body > *,
 .obs-render-mode .photo-lineup-stage-individual.is-stage-changing .lineup-spotlight-photo,
 .obs-render-mode .photo-lineup-stage-individual.is-stage-changing .lineup-spotlight-number,
-.obs-render-mode .photo-lineup-stage-individual.is-stage-changing .lineup-spotlight-copy > * { animation-name: obs-enter-scale; }
+.obs-render-mode .photo-lineup-stage-individual.is-stage-changing .lineup-spotlight-copy > * { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
 .obs-render-mode .photo-lineup-stage-individual.is-stage-changing .lineup-spotlight::before { display: none; animation: none; }
 .obs-render-mode .scorebug-goal-celebration.is-entering,
 .obs-render-mode .scorebug-card-notice.is-entering,
-.obs-render-mode .goal-phase-team .goal-team-only { animation-name: obs-enter-scale; }
+.obs-render-mode .goal-phase-team .goal-team-only { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
 .obs-render-mode .scorebug-goal-celebration.is-exiting,
-.obs-render-mode .scorebug-card-notice.is-exiting { animation-name: obs-exit-scale; }
-.obs-render-mode .scorebug.is-recovering > :not(.scorebug-goal-celebration):not(.scorebug-card-notice) { animation-name: obs-enter-scale; }
+.obs-render-mode .scorebug-card-notice.is-exiting { animation-name: obs-exit-scale; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .scorebug.is-recovering > :not(.scorebug-goal-celebration):not(.scorebug-card-notice) { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
 .obs-render-mode .goal-animation-typewriter span,
 .obs-render-mode .goal-animation-bounce span,
-.obs-render-mode .goal-animation-sweep .goal-word-in-scoreboard { animation-name: obs-enter-scale; }
+.obs-render-mode .goal-animation-sweep .goal-word-in-scoreboard { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
 .obs-render-mode .goal-animation-sweep::after { display: none; animation: none; }
-.obs-render-mode .sponsor-wide-bar.is-entering { animation-name: obs-fade; }
-.obs-render-mode .sponsor-wide-bar.is-exiting { animation-name: obs-fade-out; }
-.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-slide { animation-name: obs-enter-right; }
-.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-slide { animation-name: obs-exit-right; }
-.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-zoom { animation-name: obs-enter-scale; }
-.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-zoom { animation-name: obs-exit-scale; }
-.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-flip { animation-name: obs-enter-scale; }
-.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-flip { animation-name: obs-exit-scale; }
-.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-elastic { animation-name: obs-enter-scale; }
-.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-elastic { animation-name: obs-exit-scale; }
+.obs-render-mode .sponsor-wide-bar.is-entering { animation-name: obs-fade; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .sponsor-wide-bar.is-exiting { animation-name: obs-fade-out; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-slide { animation-name: obs-enter-right; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-slide { animation-name: obs-exit-right; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-zoom { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-zoom { animation-name: obs-exit-scale; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-flip { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-flip { animation-name: obs-exit-scale; animation-timing-function: cubic-bezier(.7,0,.84,0); }
+.obs-render-mode .sponsor-wide-bar.is-entering.sponsor-animation-elastic { animation-name: obs-enter-scale; animation-timing-function: cubic-bezier(.16,1,.3,1); }
+.obs-render-mode .sponsor-wide-bar.is-exiting.sponsor-animation-elastic { animation-name: obs-exit-scale; animation-timing-function: cubic-bezier(.7,0,.84,0); }
 
 /* Builder: every custom overlay is a self-contained OBS surface. */
 .overlay-output[data-output-layer="custom"] .broadcast-layer { overflow: hidden; }

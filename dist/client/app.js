@@ -245,7 +245,7 @@ function freshSportData() {
 
 function defaultAppearance() {
   return {
-    scoreboardScale: 100, scoreboardFont: 100, scoreboardTypeface: 'rajdhani', scoreboardX: 4, scoreboardY: 7, scoreboardLayout: 'compact', scoreboardStyle: 'classic', scoreboardRadius: 4, scoreboardSurface: 100, scoreboardAccent: 2, scoreboardShadow: 'soft', scoreboardAnimation: 'assemble', scoreboardAnimationSpeed: 100,
+    scoreboardScale: 100, scoreboardFont: 100, scoreboardTypeface: 'rajdhani', scoreboardX: 4, scoreboardY: 7, scoreboardLayout: 'compact', scoreboardShowBadge: false, scoreboardStyle: 'classic', scoreboardRadius: 4, scoreboardSurface: 100, scoreboardAccent: 2, scoreboardShadow: 'soft', scoreboardAnimation: 'assemble', scoreboardAnimationSpeed: 100,
     eventScale: 100, eventFont: 100, eventTypeface: 'rajdhani', eventX: 2, eventY: 72, eventPosition: 'left', eventStyle: 'broadcast',
     lineupScale: 100, lineupFont: 100, lineupTypeface: 'rajdhani', lineupX: 7, lineupY: 18, lineupStyle: 'panel',
     photoLineupScale: 100, photoLineupFont: 100, photoLineupTypeface: 'rajdhani', photoLineupX: 7, photoLineupY: 12, photoLineupSurface: 96, photoLineupRadius: 2, photoLineupSponsorCount: 6, photoLineupSponsorBarSize: 100, photoLineupIndividualDuration: 3, photoLineupPanelDuration: 5, photoLineupStyle: 'editorial',
@@ -537,12 +537,34 @@ function sponsorBarMotionDuration(appearance = state.appearance) {
   return Math.round(680 * (100 / speed));
 }
 
+// OBS receives state by polling. The very first time a given transition (identified
+// by its startedAt) is painted, replaying from a negative delay made that first frame
+// jump into the middle of the transition and look clipped — so it plays from frame 0.
+// But unrelated content changes (a score edit, a settings tweak) can force the isolated
+// layer to re-render while that SAME transition is still in flight; without this map,
+// motionOffset used to return 0 again on every such re-render, restarting the CSS
+// animation from scratch and making it look cut/stuttered mid-playback. Once a
+// startedAt has been seen, later renders resume it from the real elapsed time instead.
+const seenMotionStarts = new Map();
+
+function pruneSeenMotionStarts() {
+  if (seenMotionStarts.size < 200) return;
+  const cutoff = Date.now() - 30000;
+  for (const [startedAt, firstSeenAt] of seenMotionStarts) {
+    if (firstSeenAt < cutoff) seenMotionStarts.delete(startedAt);
+  }
+}
+
 function motionOffset(startedAt, maximum) {
-  // OBS receives state by polling. Replaying from a negative delay made the first
-  // visible frame jump into the middle of the transition and look clipped.
-  // Isolated browser outputs mount each changed layer once, so they can safely
-  // play the complete GPU animation from its first frame.
-  if (isOutput) return 0;
+  const key = Number(startedAt || 0);
+  if (isOutput) {
+    if (!key) return 0;
+    if (!seenMotionStarts.has(key)) {
+      seenMotionStarts.set(key, Date.now());
+      return 0;
+    }
+    return -Math.min(Math.max(0, Date.now() - key), maximum);
+  }
   return -Math.min(Math.max(0, Date.now() - Number(startedAt || Date.now())), maximum);
 }
 
@@ -726,6 +748,13 @@ function badge(team, compact = false) {
   return `<div class="team-badge" style="--team-color:${safeColor(team.color)}">${escapeHtml(team.short.slice(0, compact ? 1 : 2))}</div>`;
 }
 
+function scorebugBadge(team) {
+  if (team.logo) {
+    return `<span class="scorebug-badge" style="--team-color:${safeColor(team.color)}"><img src="${escapeHtml(team.logo)}" alt="Escudo ${escapeHtml(team.name)}"></span>`;
+  }
+  return `<span class="scorebug-badge scorebug-badge-fallback" style="--team-color:${safeColor(team.color)}">${escapeHtml((team.short || '').slice(0, 2).toUpperCase())}</span>`;
+}
+
 function eventPhase() {
   if (!state.activeEvent || !state.eventExpiresAt) return state.activeEvent ? 'visible' : 'hidden';
   const now = Date.now();
@@ -777,24 +806,33 @@ function previewCompositeMarkup() {
   return ['scoreboard','event','sponsor','sponsor-bar','lineup','photo-lineup'].map(layer => overlayMarkup(layer)).join('');
 }
 
+const SCOREBOARD_LAYOUTS = [
+  ['compact', 'Compacto', '3 letras + placar + tempo'],
+  ['expanded', 'Aberto', 'Nome completo das equipes'],
+  ['card', 'Cartão', 'Escudo em destaque e nome completo'],
+  ['duel', 'Duelo', 'Divisão diagonal nas cores das equipes'],
+];
+
 function renderTeamScorebug(team, key, options = {}) {
   const volleyball = state.sportData.volleyball;
   const basketball = state.sportData.basketball;
   const hasServe = state.sport === 'volleyball' && volleyball.serve === key;
   const hasPossession = state.sport === 'basketball' && basketball.possession === key;
   const name = options.expanded ? team.name.toUpperCase() : team.short.slice(0, 3).toUpperCase();
-  return `<div class="scorebug-team ${hasServe || hasPossession ? 'has-possession' : ''}">${options.expanded ? `<i class="scorebug-dot" style="--dot-color:${safeColor(team.color)}"></i>` : ''}<span class="scorebug-team-name">${escapeHtml(name)}</span>${hasServe ? '<i class="serve-indicator" title="Saque">●</i>' : ''}${hasPossession ? '<i class="possession-arrow" title="Posse">◀</i>' : ''}${options.showSets ? `<span class="scorebug-sets">${volleyball.sets[key]}</span>` : ''}</div>`;
+  return `<div class="scorebug-team ${hasServe || hasPossession ? 'has-possession' : ''}" style="--team-color:${safeColor(team.color)}">${options.showBadge ? scorebugBadge(team) : ''}${options.expanded ? `<i class="scorebug-dot" style="--dot-color:${safeColor(team.color)}"></i>` : ''}<span class="scorebug-team-name">${escapeHtml(name)}</span>${hasServe ? '<i class="serve-indicator" title="Saque">●</i>' : ''}${hasPossession ? '<i class="possession-arrow" title="Posse">◀</i>' : ''}${options.showSets ? `<span class="scorebug-sets">${volleyball.sets[key]}</span>` : ''}</div>`;
 }
 
 function renderSportScorebug() {
   const appearance = state.appearance || defaultAppearance();
-  const layout = appearance.scoreboardLayout === 'expanded' ? 'expanded' : 'compact';
+  const layout = SCOREBOARD_LAYOUTS.some(([value]) => value === appearance.scoreboardLayout) ? appearance.scoreboardLayout : 'compact';
+  const showBadge = Boolean(appearance.scoreboardShowBadge);
+  const nameExpanded = layout === 'expanded' || layout === 'card';
   const volleyball = state.sportData.volleyball;
   const futsal = state.sportData.futsal;
   const basketball = state.sportData.basketball;
   const showSets = state.sport === 'volleyball';
-  const home = renderTeamScorebug(state.home, 'home', { showSets, expanded: layout === 'expanded' });
-  const away = renderTeamScorebug(state.away, 'away', { showSets, expanded: layout === 'expanded' });
+  const home = renderTeamScorebug(state.home, 'home', { showSets, expanded: nameExpanded, showBadge });
+  const away = renderTeamScorebug(state.away, 'away', { showSets, expanded: nameExpanded, showBadge });
   const periodLabel = currentSport().periods.find(([value]) => value === state.period)?.[1] || state.period;
   const extraTime = Math.max(0, Number(state.extraTime || 0));
   let status = `<div class="scorebug-status-group"><div class="scorebug-clock"><span data-clock>${clockText()}</span>${extraTime ? `<b class="scorebug-extra" style="--extra-scale:${clampNumber(appearance.extraTimeScale,60,160,100) / 100}">+${extraTime}</b>` : ''}</div><div class="scorebug-period" style="--period-scale:${clampNumber(appearance.periodScale,60,160,100) / 100};--period-font:${clampNumber(appearance.periodFont,60,160,100) / 100};--period-surface:${clampNumber(appearance.periodSurface,55,100,100) / 100}"><span>${escapeHtml(periodLabel)}</span>${extraTime ? `<small>ACRÉSCIMO +${extraTime}</small>` : '<small>PERÍODO</small>'}</div></div>`;
@@ -1479,12 +1517,18 @@ function renderPeriodStyleControls() {
   return `<section class="goal-settings"><div class="section-header"><div><h3 class="section-title">Período e acréscimos</h3><p class="help-text">Estilização independente dos blocos à direita do relógio.</p></div></div>${appearanceRange('periodScale','Tamanho do bloco de período',appearance.periodScale,60,160,'%')}${appearanceRange('periodFont','Tamanho da fonte',appearance.periodFont,60,160,'%')}${appearanceRange('periodSurface','Opacidade da superfície',appearance.periodSurface,55,100,'%')}${appearanceRange('extraTimeScale','Tamanho dos acréscimos',appearance.extraTimeScale,60,160,'%')}</section>`;
 }
 
+function renderScoreboardLayoutControl() {
+  const layout = SCOREBOARD_LAYOUTS.some(([value]) => value === state.appearance?.scoreboardLayout) ? state.appearance.scoreboardLayout : 'compact';
+  const showBadge = Boolean(state.appearance?.scoreboardShowBadge);
+  return `<div class="scoreboard-layout-control"><span>Formato do placar</span><div role="group" aria-label="Formato do placar">${SCOREBOARD_LAYOUTS.map(([value, label, caption]) => `<button class="layout-choice ${layout === value ? 'active' : ''}" data-action="scoreboard-layout" data-value="${value}" aria-pressed="${layout === value}"><strong>${label}</strong><small>${caption}</small></button>`).join('')}</div></div>
+    <div class="photo-lineup-option"><div><strong>Escudos dos times no placar</strong><small>Exibe o escudo enviado em cada equipe, com fallback nas siglas.</small></div><button class="button subtle ${showBadge ? 'active' : ''}" data-action="toggle-scoreboard-badge" aria-pressed="${showBadge}">${showBadge ? 'Exibindo' : 'Oculto'}</button></div>`;
+}
+
 function renderMatchTab() {
   const sport = currentSport();
   const unit = sport.scoring.toLowerCase();
-  const scoreboardLayout = state.appearance?.scoreboardLayout === 'expanded' ? 'expanded' : 'compact';
   return `<div class="field"><label for="competition">Competição</label><input id="competition" data-field="competition" value="${escapeHtml(state.competition)}"></div>
-    <div class="scoreboard-layout-control"><span>Formato do placar</span><div role="group" aria-label="Formato do placar"><button class="layout-choice ${scoreboardLayout === 'compact' ? 'active' : ''}" data-action="scoreboard-layout" data-value="compact" aria-pressed="${scoreboardLayout === 'compact'}"><strong>Compacto</strong><small>3 letras + placar + tempo</small></button><button class="layout-choice ${scoreboardLayout === 'expanded' ? 'active' : ''}" data-action="scoreboard-layout" data-value="expanded" aria-pressed="${scoreboardLayout === 'expanded'}"><strong>Aberto</strong><small>Nome completo das equipes</small></button></div></div>
+    ${renderScoreboardLayoutControl()}
     <div class="scoreboard-control"><div class="teams-grid">
       <div>${badge(state.home)}<div class="team-short-name">${escapeHtml(state.home.name)}${state.sport === 'volleyball' && state.sportData.volleyball.serve === 'home' ? ' · ●' : ''}</div><div class="score-controls"><button class="goal-control" data-action="score-home-minus" aria-label="Diminuir ${unit} mandante">−</button><span class="score-number" data-score="home">${state.home.score}</span><button class="goal-control" data-action="score-home-plus" aria-label="Aumentar ${unit} mandante">+</button></div></div>
       <span class="score-x">×</span>
@@ -1794,8 +1838,7 @@ function moduleUrl(key = '') {
 
 function renderScoreboardModuleControls() {
   const sport = currentSport();
-  const layout = state.appearance?.scoreboardLayout === 'expanded' ? 'expanded' : 'compact';
-  return `<div class="module-section"><div class="field"><label for="competition">Competição</label><input id="competition" data-field="competition" value="${escapeHtml(state.competition)}"></div><div class="scoreboard-layout-control"><span>Formato do placar</span><div role="group" aria-label="Formato do placar"><button class="layout-choice ${layout === 'compact' ? 'active' : ''}" data-action="scoreboard-layout" data-value="compact"><strong>Compacto</strong><small>Siglas de 3 letras</small></button><button class="layout-choice ${layout === 'expanded' ? 'active' : ''}" data-action="scoreboard-layout" data-value="expanded"><strong>Aberto</strong><small>Nomes completos</small></button></div></div><div class="scoreboard-control"><div class="teams-grid"><div>${badge(state.home)}<div class="team-short-name">${escapeHtml(state.home.name)}</div><div class="score-controls"><button class="goal-control" data-action="score-home-minus">−</button><span class="score-number">${state.home.score}</span><button class="goal-control" data-action="score-home-plus">+</button></div></div><span class="score-x">×</span><div>${badge(state.away)}<div class="team-short-name">${escapeHtml(state.away.name)}</div><div class="score-controls"><button class="goal-control" data-action="score-away-minus">−</button><span class="score-number">${state.away.score}</span><button class="goal-control" data-action="score-away-plus">+</button></div></div></div></div>${renderSportMetrics()}<div class="tiny-label">${sport.duration ? 'Cronômetro regressivo' : 'Cronômetro da partida'}</div><div class="clock-box"><span class="clock-time" data-clock>${clockText()}</span><div class="clock-buttons"><button class="button square ${state.clock.running ? '' : 'primary'}" data-action="clock-toggle">${state.clock.running ? icons.pause : icons.play}</button><button class="button square" data-action="clock-back">−1</button><button class="button square" data-action="clock-forward">+1</button><button class="button square" data-action="clock-reset">${icons.refresh}</button></div></div><div class="period-buttons">${sport.periods.map(([value,label]) => `<button class="period-button ${state.period === value ? 'active' : ''}" data-action="period" data-value="${value}">${label}</button>`).join('')}</div></div>`;
+  return `<div class="module-section"><div class="field"><label for="competition">Competição</label><input id="competition" data-field="competition" value="${escapeHtml(state.competition)}"></div>${renderScoreboardLayoutControl()}<div class="scoreboard-control"><div class="teams-grid"><div>${badge(state.home)}<div class="team-short-name">${escapeHtml(state.home.name)}</div><div class="score-controls"><button class="goal-control" data-action="score-home-minus">−</button><span class="score-number">${state.home.score}</span><button class="goal-control" data-action="score-home-plus">+</button></div></div><span class="score-x">×</span><div>${badge(state.away)}<div class="team-short-name">${escapeHtml(state.away.name)}</div><div class="score-controls"><button class="goal-control" data-action="score-away-minus">−</button><span class="score-number">${state.away.score}</span><button class="goal-control" data-action="score-away-plus">+</button></div></div></div></div>${renderSportMetrics()}<div class="tiny-label">${sport.duration ? 'Cronômetro regressivo' : 'Cronômetro da partida'}</div><div class="clock-box"><span class="clock-time" data-clock>${clockText()}</span><div class="clock-buttons"><button class="button square ${state.clock.running ? '' : 'primary'}" data-action="clock-toggle">${state.clock.running ? icons.pause : icons.play}</button><button class="button square" data-action="clock-back">−1</button><button class="button square" data-action="clock-forward">+1</button><button class="button square" data-action="clock-reset">${icons.refresh}</button></div></div><div class="period-buttons">${sport.periods.map(([value,label]) => `<button class="period-button ${state.period === value ? 'active' : ''}" data-action="period" data-value="${value}">${label}</button>`).join('')}</div></div>`;
 }
 
 function renderSponsorModuleControls() {
@@ -2787,16 +2830,25 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'scoreboard-layout') {
-    const layout = target.dataset.value === 'expanded' ? 'expanded' : 'compact';
-    if (layout === state.appearance.scoreboardLayout) return;
+    const layout = SCOREBOARD_LAYOUTS.some(([value]) => value === target.dataset.value) ? target.dataset.value : 'compact';
+    const previousLayout = state.appearance.scoreboardLayout;
+    if (layout === previousLayout) return;
+    const morphPair = ['compact', 'expanded'];
     commit(draft => {
       const now = Date.now();
       draft.appearance.scoreboardLayout = layout;
       draft.visible.scoreboard = true;
       draft.scoreboardTransition = null;
-      draft.scoreboardMorph = { direction: layout, startedAt: now, expiresAt: now + scoreboardMorphDuration() };
+      draft.scoreboardMorph = morphPair.includes(layout) && morphPair.includes(previousLayout)
+        ? { direction: layout, startedAt: now, expiresAt: now + scoreboardMorphDuration() }
+        : null;
     }, { immediate: true });
-    toast(layout === 'expanded' ? 'Placar aberto com nomes completos.' : 'Placar compacto com siglas de 3 letras.');
+    toast(`Placar em layout ${SCOREBOARD_LAYOUTS.find(([value]) => value === layout)?.[1] || layout}.`);
+    return;
+  }
+  if (action === 'toggle-scoreboard-badge') {
+    commit(draft => { draft.appearance.scoreboardShowBadge = !draft.appearance.scoreboardShowBadge; }, { immediate: true });
+    toast(state.appearance.scoreboardShowBadge ? 'Escudos exibidos no placar.' : 'Escudos ocultos no placar.');
     return;
   }
   if (action === 'event-position') {
@@ -3505,6 +3557,7 @@ else {
 }
 setInterval(() => {
   if (isTeamPortal) return;
+  if (isOutput) pruneSeenMotionStarts();
   const nextClock = clockText();
   if (nextClock !== lastClock) {
     document.querySelectorAll('[data-clock]').forEach(element => { element.textContent = nextClock; });
