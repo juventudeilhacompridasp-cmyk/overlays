@@ -127,7 +127,7 @@ export {
 
 // Private records must never be accessible through a user-selected match room.
 function isReservedRoom(room) {
-  return ['authsecret', 'admins', 'teamcredentials', 'teamcatalog'].includes(String(room).toLowerCase().replace(/[^a-z0-9]/g, ''));
+  return ['authsecret', 'admins', 'teamcredentials', 'teamcatalog', 'operations'].includes(String(room).toLowerCase().replace(/[^a-z0-9]/g, ''));
 }
 
 function validSetupToken(candidate, expected) {

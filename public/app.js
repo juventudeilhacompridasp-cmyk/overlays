@@ -49,6 +49,8 @@ function brandMark() {
 }
 
 const MANAGEMENT_MODULES = [
+  { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
+  { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
   { key: 'scoreboard', label: 'Placar', caption: 'Resultado, tempo e formato', layer: 'scoreboard', icon: icons.monitor },
   { key: 'events', label: 'Eventos', caption: 'Gols, cartões, substituições e GC', layer: 'event', icon: icons.card },
   { key: 'lineup', label: 'Escalações', caption: 'Titulares, reservas, treinador e tática', layer: 'photo-lineup', icon: icons.users },
@@ -59,6 +61,7 @@ const MANAGEMENT_MODULES = [
   { key: 'report', label: 'Relatório', caption: 'Histórico completo da partida', layer: 'all', icon: icons.text },
   { key: 'teams', label: 'Times', caption: 'Elencos e escudos', layer: 'all', icon: icons.list },
   { key: 'appearance', label: 'Aparência', caption: 'Estilos, posições e animações', layer: 'all', icon: icons.eye },
+  { key: 'audit', label: 'Avisos e logs', caption: 'Delegações concluídas e histórico de ações', layer: 'all', icon: icons.list },
   { key: 'access', label: 'Usuários/Acessos', caption: 'Administradores do painel e usuários dos times', layer: 'all', icon: icons.lock },
 ];
 
@@ -260,6 +263,8 @@ function currentSport() {
 
 function createDefaultState() {
   return {
+    matchId: '',
+    championshipId: '',
     sport: 'football',
     competition: 'Campeonato Municipal de Futebol 2026',
     venue: 'Ilha Comprida · SP',
@@ -430,6 +435,12 @@ let teamLoginTeams = [];
 let accessAdmins = [];
 let accessTeamCredentials = [];
 let accessStatus = 'idle';
+let operationsData = { championships: [], matches: [], notifications: [], logs: [], delegationStatus: {}, updatedAt: 0 };
+let operationsStatus = 'idle';
+let selectedChampionshipId = '';
+let selectedMatchId = '';
+let teamDelegation = { status: 'draft' };
+let teamDelegationCompletion = { complete: false, missing: [] };
 let lastClock = '';
 let syncStatus = 'connecting';
 let lastSyncAt = 0;
@@ -1104,7 +1115,7 @@ async function checkAdminSession() {
     const response = await fetch('/api/auth/admin/session', { cache: 'no-store' });
     const data = response.ok ? await response.json() : { authenticated: false };
     adminSession = { status: data.authenticated ? 'authenticated' : 'login', username: data.username || null, error: '' };
-    if (data.authenticated) loadAccessData();
+    if (data.authenticated) { loadAccessData(); loadOperationsData(); }
   } catch {
     adminSession = { status: 'login', username: null, error: 'Falha ao verificar a sessão.' };
   }
@@ -1121,6 +1132,7 @@ async function submitAdminAuth(mode, username, password, setupToken) {
     adminSession = { status: 'authenticated', username: data.username, error: '' };
     render();
     loadAccessData();
+    loadOperationsData();
   } catch {
     adminSession = { ...adminSession, error: 'Falha de conexão.' };
     render();
@@ -1150,13 +1162,71 @@ async function loadAccessData() {
   render();
 }
 
+async function loadOperationsData() {
+  if (!isAdminPanel || adminSession.status !== 'authenticated') return;
+  operationsStatus = operationsData.updatedAt ? 'ready' : 'loading';
+  if (!operationsData.updatedAt) render();
+  try {
+    const response = await fetch(`/api/operations?ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    operationsData = {
+      championships: Array.isArray(data.championships) ? data.championships : [],
+      matches: Array.isArray(data.matches) ? data.matches : [],
+      notifications: Array.isArray(data.notifications) ? data.notifications : [],
+      logs: Array.isArray(data.logs) ? data.logs : [],
+      delegationStatus: data.delegationStatus && typeof data.delegationStatus === 'object' ? data.delegationStatus : {},
+      updatedAt: Number(data.updatedAt || 0),
+    };
+    const linkedMatch = operationsData.matches.find(item => item.room === ROOM_ID);
+    if (linkedMatch && state.matchId !== linkedMatch.id) {
+      const championship = operationsData.championships.find(item => item.id === linkedMatch.championshipId);
+      commit(draft => {
+        draft.matchId = linkedMatch.id;
+        draft.championshipId = linkedMatch.championshipId;
+        if (championship?.name) draft.competition = `${championship.name}${championship.season ? ` · ${championship.season}` : ''}`;
+        if (linkedMatch.venue) draft.venue = linkedMatch.venue;
+        for (const side of ['home', 'away']) {
+          const selectedId = side === 'home' ? linkedMatch.homeTeamId : linkedMatch.awayTeamId;
+          const team = teamCatalog.find(item => item.id === selectedId);
+          if (team) applyCatalogTeam(draft, side, team);
+        }
+      }, { backup: false, immediate: true });
+    }
+    if (selectedChampionshipId && !operationsData.championships.some(item => item.id === selectedChampionshipId)) selectedChampionshipId = '';
+    if (selectedMatchId && !operationsData.matches.some(item => item.id === selectedMatchId)) selectedMatchId = '';
+    operationsStatus = 'ready';
+  } catch {
+    operationsStatus = 'error';
+  }
+  render();
+}
+
+async function postOperation(action, payload = {}) {
+  try {
+    const response = await fetch('/api/operations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...payload }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { toast(data.error || 'Não foi possível concluir a ação.'); return false; }
+    operationsData = data.operations || operationsData;
+    operationsStatus = 'ready';
+    render();
+    return true;
+  } catch {
+    toast('Não foi possível concluir a ação.');
+    return false;
+  }
+}
+
 async function initializeTeamPortal() {
   if (!isTeamPortal || teamSession.status !== 'authenticated') return;
   try {
     const response = await fetch(`/api/team-portal?team=${encodeURIComponent(teamSession.teamId)}&ts=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const remoteTeam = (await response.json()).team;
+    const data = await response.json();
+    const remoteTeam = data.team;
     teamPortalTeam = remoteTeam ? normalizeTeamCatalog([remoteTeam])[0] : null;
+    teamDelegation = data.delegation || { status: 'draft' };
+    teamDelegationCompletion = data.completion || { complete: false, missing: [] };
     teamPortalStatus = teamPortalTeam ? 'ready' : 'invalid';
   } catch {
     teamPortalStatus = 'invalid';
@@ -1174,7 +1244,10 @@ async function saveTeamPortal() {
     });
     if (response.status === 401) { teamSession = { status: 'login', teamId: null, teamName: null, error: 'Sessão expirada. Entre novamente.' }; render(); return; }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    teamPortalTeam = normalizeTeamCatalog([(await response.json()).team])[0];
+    const data = await response.json();
+    teamPortalTeam = normalizeTeamCatalog([data.team])[0];
+    teamDelegation = data.delegation || { status: 'draft' };
+    teamDelegationCompletion = delegationCompletion(teamPortalTeam);
     teamPortalStatus = 'saved';
     render();
     setTimeout(() => { if (teamPortalStatus === 'saved') { teamPortalStatus = 'ready'; render(); } }, 1800);
@@ -1182,6 +1255,35 @@ async function saveTeamPortal() {
     teamPortalStatus = 'error';
     render();
   }
+}
+
+function delegationCompletion(team) {
+  const athletes = Array.isArray(team?.athletes) ? team.athletes : [];
+  const staff = normalizedStaff(team);
+  const missing = [];
+  if (!String(team?.name || '').trim()) missing.push('nome da equipe');
+  if (String(team?.short || '').trim().length < 2) missing.push('sigla');
+  if (!athletes.length) missing.push('ao menos um atleta');
+  if (athletes.some(item => !String(item?.name || '').trim() || !String(item?.number || '').trim())) missing.push('nome e número de todos os atletas');
+  if (!staff.length) missing.push('comissão técnica');
+  if (staff.some(item => !String(item?.name || '').trim() || !String(item?.role || '').trim())) missing.push('nome e função de toda a comissão');
+  return { complete: missing.length === 0, missing };
+}
+
+async function completeTeamDelegation() {
+  if (!teamPortalTeam) return;
+  await saveTeamPortal();
+  const localCheck = delegationCompletion(teamPortalTeam);
+  if (!localCheck.complete) { teamDelegationCompletion = localCheck; toast(`Complete: ${localCheck.missing.join(', ')}.`); render(); return; }
+  try {
+    const response = await fetch('/api/team-delegation/complete', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: teamPortalTeam.id }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { teamDelegationCompletion = { complete: false, missing: data.missing || [] }; toast(data.error || 'Não foi possível concluir a delegação.'); render(); return; }
+    teamDelegation = data.delegation;
+    teamDelegationCompletion = { complete: true, missing: [] };
+    toast('Delegação concluída. O Super Admin foi avisado.');
+    render();
+  } catch { toast('Não foi possível avisar o Super Admin.'); }
 }
 
 async function uploadTeamPresentationPhoto(team, subjectId, file) {
@@ -1379,6 +1481,56 @@ function renderAccessModule() {
     <div class="module-section"><div class="section-header"><div><h3 class="section-title">Usuários dos times</h3><p class="help-text">Cada time acessa <strong>/team</strong> com o usuário e a senha vinculados aqui para cadastrar atletas, fotos e comissão técnica.</p></div></div>
       <div class="team-catalog"><div class="team-catalog-head"><div><strong>${teamCatalog.length} time${teamCatalog.length === 1 ? '' : 's'} cadastrado${teamCatalog.length === 1 ? '' : 's'}</strong><small>Salvar novamente substitui o usuário e a senha anteriores do time.</small></div></div>
         <div class="access-list">${teamRows}</div></div></div>`;
+}
+
+function operationTeamName(id) {
+  return teamCatalog.find(team => team.id === id)?.name || id || 'Time não definido';
+}
+
+function operationChampionshipName(id) {
+  return operationsData.championships.find(item => item.id === id)?.name || 'Campeonato não definido';
+}
+
+function operationDate(value, includeTime = false) {
+  if (!value) return 'Data não definida';
+  const date = new Date(includeTime ? value : `${value}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('pt-BR', includeTime ? { dateStyle: 'short', timeStyle: 'short' } : { dateStyle: 'short' }).format(date);
+}
+
+function renderOperationsState() {
+  if (operationsStatus === 'loading' || operationsStatus === 'idle') return '<div class="portal-empty">Carregando dados operacionais…</div>';
+  if (operationsStatus === 'error') return '<div class="portal-empty">Não foi possível carregar os dados. Recarregue a página.</div>';
+  return '';
+}
+
+function renderChampionshipsModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const selected = operationsData.championships.find(item => item.id === selectedChampionshipId) || null;
+  const list = operationsData.championships.map(item => `<button class="operations-item ${item.id === selected?.id ? 'active' : ''}" data-action="select-championship" data-value="${escapeHtml(item.id)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.season || 'Temporada não informada')} · ${operationDate(item.startDate)} → ${operationDate(item.endDate)}</small></span><b>${item.status === 'active' ? 'Em andamento' : item.status === 'finished' ? 'Encerrado' : 'Planejado'}</b></button>`).join('') || '<div class="portal-empty">Nenhum campeonato cadastrado.</div>';
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Campeonatos</strong><small>${operationsData.championships.length} cadastrado${operationsData.championships.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-championship">+ Novo</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar campeonato' : 'Novo campeonato'}</h3><p class="help-text">O campeonato organiza temporadas, partidas e a identidade usada na transmissão.</p></div></div><div class="field"><label for="championship-name">Nome</label><input id="championship-name" maxlength="100" value="${escapeHtml(selected?.name || '')}" placeholder="Ex.: Campeonato Municipal"></div><div class="field-row"><div class="field"><label for="championship-season">Temporada</label><input id="championship-season" maxlength="40" value="${escapeHtml(selected?.season || '')}" placeholder="2026"></div><div class="field"><label for="championship-status">Status</label><select id="championship-status"><option value="planned" ${selected?.status === 'planned' || !selected ? 'selected' : ''}>Planejado</option><option value="active" ${selected?.status === 'active' ? 'selected' : ''}>Em andamento</option><option value="finished" ${selected?.status === 'finished' ? 'selected' : ''}>Encerrado</option></select></div></div><div class="field-row"><div class="field"><label for="championship-start">Início</label><input id="championship-start" type="date" value="${escapeHtml(selected?.startDate || '')}"></div><div class="field"><label for="championship-end">Fim</label><input id="championship-end" type="date" value="${escapeHtml(selected?.endDate || '')}"></div></div><div class="operations-actions"><button class="button primary" data-action="save-championship" data-value="${escapeHtml(selected?.id || '')}">Salvar campeonato</button>${selected ? '<button class="button subtle danger" data-action="delete-championship" data-value="' + escapeHtml(selected.id) + '">Excluir</button>' : ''}</div></section></div>`;
+}
+
+function renderMatchesModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const selected = operationsData.matches.find(item => item.id === selectedMatchId) || null;
+  const teamOptions = value => teamCatalog.map(team => `<option value="${escapeHtml(team.id)}" ${team.id === value ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('');
+  const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selected?.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
+  const sorted = [...operationsData.matches].sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || '')));
+  const list = sorted.map(item => `<article class="match-operation-card ${item.id === selected?.id ? 'active' : ''}"><button data-action="select-match" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(operationChampionshipName(item.championshipId))} · ${escapeHtml(item.round || 'Rodada')}</span><strong>${escapeHtml(operationTeamName(item.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(item.awayTeamId))}</strong><small>${operationDate(item.kickoffAt, true)} · ${escapeHtml(item.venue || 'Local não informado')}</small></button><a class="button subtle" href="/?room=${encodeURIComponent(item.room)}">Abrir transmissão</a></article>`).join('') || '<div class="portal-empty">Nenhuma partida agendada.</div>';
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(selected?.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(selected?.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(selected?.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${selected?.status === 'scheduled' || !selected ? 'selected' : ''}>Agendada</option><option value="live" ${selected?.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${selected?.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${selected?.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(selected?.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(selected?.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(selected?.room || '')}" placeholder="Gerado automaticamente se ficar vazio"><small>Este código aparece em todas as URLs dos overlays desta partida.</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
+}
+
+function renderAuditModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const unread = operationsData.notifications.filter(item => !item.read).length;
+  const notifications = operationsData.notifications.slice(0, 30).map(item => `<article class="notification-card ${item.read ? '' : 'unread'}"><div><span>${item.type === 'delegation-completed' ? 'Delegação concluída' : 'Delegação alterada'}</span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><small>${operationDate(item.createdAt, true)}</small></div>${item.read ? '<b>Lido</b>' : `<button class="button subtle" data-action="read-notification" data-value="${escapeHtml(item.id)}">Marcar como lido</button>`}</article>`).join('') || '<div class="portal-empty">Nenhum aviso recebido.</div>';
+  const labels = { 'delegation.completed': 'Delegação concluída', 'delegation.changed': 'Delegação alterada', 'delegation.saved': 'Cadastro de delegação salvo', 'championship.created': 'Campeonato criado', 'championship.updated': 'Campeonato atualizado', 'championship.deleted': 'Campeonato excluído', 'match.created': 'Partida criada', 'match.updated': 'Partida atualizada', 'match.deleted': 'Partida excluída' };
+  const logs = operationsData.logs.slice(0, 100).map(item => `<tr><td>${operationDate(item.createdAt, true)}</td><td>${escapeHtml(item.actor)}</td><td>${escapeHtml(labels[item.action] || item.action)}</td><td><strong>${escapeHtml(item.target)}</strong><small>${escapeHtml(item.details)}</small></td></tr>`).join('') || '<tr><td colspan="4">Nenhuma ação registrada.</td></tr>';
+  return `<div class="audit-grid"><section><div class="section-header"><div><h3 class="section-title">Avisos do Super Admin</h3><p class="help-text">Cadastros concluídos ou modificados pelas equipes aparecem aqui.</p></div>${unread ? `<button class="button subtle" data-action="read-all-notifications">Marcar ${unread} como lido${unread === 1 ? '' : 's'}</button>` : ''}</div><div class="notification-list">${notifications}</div></section><section><div class="section-header"><div><h3 class="section-title">Log de ações</h3><p class="help-text">Histórico operacional sem senhas ou conteúdo sensível.</p></div></div><div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Data</th><th>Responsável</th><th>Ação</th><th>Registro</th></tr></thead><tbody>${logs}</tbody></table></div></section></div>`;
 }
 
 function staffRoleOptions(selectedRole) {
@@ -1653,6 +1805,9 @@ function renderOverlayBuilder() {
 }
 
 function renderModuleControls(key) {
+  if (key === 'championships') return renderChampionshipsModule();
+  if (key === 'matches') return renderMatchesModule();
+  if (key === 'audit') return renderAuditModule();
   if (key === 'builder') return renderOverlayBuilder();
   if (key === 'pregame') return renderPregameModule();
   if (key === 'report') return renderReportModule();
@@ -1691,18 +1846,21 @@ function renderModuleHub() {
 }
 
 function renderManagementSidebar(activeKey = 'overview') {
-  const groupLabels = { scoreboard: 'Overlays', pregame: 'Partida', teams: 'Configuração' };
+  const groupLabels = { championships: 'Organização', scoreboard: 'Overlays', pregame: 'Partida', teams: 'Configuração' };
   const links = MANAGEMENT_MODULES.map(item => `${groupLabels[item.key] ? `<span class="module-sidebar-label ${item.key === 'scoreboard' ? '' : 'module-sidebar-label-spaced'}">${groupLabels[item.key]}</span>` : ''}<a class="${activeKey === item.key ? 'active' : ''}" href="${escapeHtml(moduleUrl(item.key))}">${item.icon}<span>${escapeHtml(item.label)}</span></a>`).join('');
   return `<aside class="module-sidebar" aria-label="Navegação dos overlays"><a class="module-sidebar-overview ${activeKey === 'overview' ? 'active' : ''}" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.monitor}<span>Visão geral</span></a>${links}<a class="module-sidebar-home ${activeKey === 'hub' ? 'active' : ''}" href="${escapeHtml(moduleUrl())}">${icons.layers}<span>Central de módulos</span></a></aside>`;
 }
 
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
-  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.label)}</h1><p>${escapeHtml(module.caption)}</p></div><a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a></header>${module.key === 'builder' || module.key === 'access' ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+  const unread = operationsData.notifications.filter(item => !item.read).length;
+  const isOperational = ['championships', 'matches', 'audit', 'builder', 'access'].includes(module?.key);
+  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a><a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','audit'].includes(module.key) ? 'Gestão da transmissão' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.label)}</h1><p>${escapeHtml(module.caption)}</p></div><a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a></header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
 function renderApp() {
-  return `<div class="studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><div class="status-row sync-status" data-sync-status="${syncStatus}"><i class="live-dot"></i><span data-sync-label>${syncStatus === 'online' ? 'Sincronizado' : 'Conectando…'}</span><span class="status-time" data-clock>${clockText()}</span></div><a class="button" href="${escapeHtml(moduleUrl())}">${icons.layers} Módulos</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header>
+  const unread = operationsData.notifications.filter(item => !item.read).length;
+  return `<div class="studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><div class="status-row sync-status" data-sync-status="${syncStatus}"><i class="live-dot"></i><span data-sync-label>${syncStatus === 'online' ? 'Sincronizado' : 'Conectando…'}</span><span class="status-time" data-clock>${clockText()}</span></div><a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a><a class="button" href="${escapeHtml(moduleUrl())}">${icons.layers} Módulos</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header>
     <main class="module-workspace dashboard-workspace">${renderManagementSidebar('overview')}<div class="workspace dashboard-main"><div class="page-head"><div><div class="eyebrow">Central de transmissão · ${escapeHtml(currentSport().label)}</div><h1 class="page-title">Controle da partida</h1><p class="page-caption">${escapeHtml(state.competition)} · ${escapeHtml(state.venue)}</p></div><div class="match-tools"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><button class="button subtle" data-action="undo" ${state._backup ? '' : 'disabled'}>↶ Desfazer</button><button class="button" data-action="new-match">Nova partida</button></div></div>${renderSportSwitcher()}
       <div class="workspace-grid"><div class="control-column">${renderControls()}${renderEvents()}</div><div class="preview-column">${renderMonitor()}${renderThemes()}</div></div>
     </div></main></div>${drawer ? renderDrawer() : ''}`;
@@ -1730,6 +1888,8 @@ function renderTeamPortal() {
   if (teamPortalStatus === 'loading') return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><h1>Carregando cadastro…</h1><p>Aguarde enquanto buscamos os dados da equipe.</p></section></main>`;
   if (teamPortalStatus === 'invalid' || !teamPortalTeam) return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><h1>Equipe não encontrada</h1><p>Fale com o responsável pela transmissão para verificar seu acesso.</p><button class="button subtle" data-action="team-logout" style="margin-top:16px">Sair</button></section></main>`;
   const athletes = Array.isArray(teamPortalTeam.athletes) ? teamPortalTeam.athletes : [];
+  const completion = delegationCompletion(teamPortalTeam);
+  const delegationDone = teamDelegation.status === 'completed';
   const statusLabel = teamPortalStatus === 'saving' ? 'Salvando…' : teamPortalStatus === 'saved' ? 'Dados salvos' : teamPortalStatus === 'error' ? 'Erro ao salvar' : 'Alterações salvas manualmente';
   return `<main class="team-portal-shell"><section class="team-portal-card"><header class="team-portal-head"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><div style="display:flex;align-items:center;gap:10px"><span class="portal-status portal-status-${escapeHtml(teamPortalStatus)}">${statusLabel}</span><button class="button square subtle" data-action="team-logout" aria-label="Sair">${icons.close}</button></div></header><div class="team-portal-team"><div class="portal-team-logo">${teamPortalTeam.logo ? `<img src="${escapeHtml(teamPortalTeam.logo)}" alt="Escudo de ${escapeHtml(teamPortalTeam.name)}">` : escapeHtml(teamPortalTeam.short)}</div><div><span>Cadastro da escalação</span><h1>${escapeHtml(teamPortalTeam.name)}</h1><p>Preencha os dados usados nas apresentações individuais, escalação geral e Mídia Kit.</p></div></div>
     <section class="portal-team-settings"><div class="field"><label>Nome da equipe</label><input data-portal-team-field="name" maxlength="80" value="${escapeHtml(teamPortalTeam.name)}"></div><div class="field"><label>Sigla (3 letras)</label><input data-portal-team-field="short" maxlength="3" value="${escapeHtml(teamPortalTeam.short)}"></div><div class="field"><label>Cor principal</label><input type="color" data-portal-team-field="color" value="${safeColor(teamPortalTeam.color)}"></div><label class="sponsor-upload-button">${teamPortalTeam.logo ? 'Trocar escudo' : 'Enviar escudo'}<input type="file" data-portal-team-logo accept="image/png,image/jpeg,image/webp,image/svg+xml"></label></section>
@@ -1737,7 +1897,8 @@ function renderTeamPortal() {
     ${renderStaffManager(teamPortalTeam, true)}
     <div class="portal-toolbar"><div><strong>${athletes.length} atleta${athletes.length === 1 ? '' : 's'}</strong><small>Nome, número, altura, função, posição e foto.</small></div><button class="button subtle" data-action="portal-add-athlete">+ Adicionar atleta</button></div>
     <div class="portal-athlete-list">${athletes.length ? athletes.map((athlete, index) => `<article class="portal-athlete" data-athlete-id="${escapeHtml(athlete.id)}"><div class="portal-athlete-photo">${athlete.photo ? `<img src="${escapeHtml(athlete.photo)}" alt="Foto de ${escapeHtml(athlete.name || `atleta ${index + 1}`)}">` : `<span>${escapeHtml((athlete.name || 'A').slice(0, 1).toUpperCase())}</span>`}<label>${athlete.photo ? 'Trocar foto' : 'Enviar foto'}<input type="file" data-portal-athlete-photo="${escapeHtml(athlete.id)}" accept="image/png,image/jpeg,image/webp"></label></div><div class="portal-athlete-fields"><label><span>Nome completo</span><input data-portal-athlete-field="name" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="100" value="${escapeHtml(athlete.name)}" placeholder="Nome do atleta"></label><div><label><span>Número</span><input data-portal-athlete-field="number" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="6" value="${escapeHtml(athlete.number)}" inputmode="numeric" placeholder="10"></label><label><span>Altura (m)</span><input data-portal-athlete-field="height" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="5" value="${escapeHtml(athlete.height)}" inputmode="decimal" placeholder="1,78"></label><label><span>Função</span><select data-portal-athlete-field="squadRole" data-athlete-id="${escapeHtml(athlete.id)}"><option value="starter" ${athlete.squadRole !== 'reserve' ? 'selected' : ''}>Titular</option><option value="reserve" ${athlete.squadRole === 'reserve' ? 'selected' : ''}>Reserva</option></select></label><label><span>Posição</span><input data-portal-athlete-field="position" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="6" value="${escapeHtml(athlete.position || '')}" placeholder="ZAG"></label></div></div><button class="button square subtle portal-remove-athlete" data-action="portal-remove-athlete" data-value="${escapeHtml(athlete.id)}" aria-label="Remover ${escapeHtml(athlete.name || 'atleta')}">×</button></article>`).join('') : '<div class="portal-empty">Nenhum atleta cadastrado. Use “Adicionar atleta” para começar.</div>'}</div>
-    <footer class="portal-footer"><p>As fotos devem estar em PNG, JPG ou WebP e ter até 5 MB.</p><button class="button primary portal-save" data-action="portal-save" ${teamPortalStatus === 'saving' ? 'disabled' : ''}>${teamPortalStatus === 'saving' ? 'Salvando…' : 'Salvar cadastro da equipe'}</button></footer></section></main>`;
+    <section class="delegation-completion ${delegationDone ? 'is-complete' : teamDelegation.status === 'needs-review' ? 'needs-review' : ''}"><div><span>${delegationDone ? 'Cadastro concluído' : teamDelegation.status === 'needs-review' ? 'Revisão necessária' : 'Conclusão da delegação'}</span><strong>${delegationDone ? 'O Super Admin já foi avisado.' : completion.complete ? 'Todos os campos obrigatórios estão preenchidos.' : 'Ainda faltam dados para concluir.'}</strong>${completion.missing.length ? `<p>Complete: ${escapeHtml(completion.missing.join(', '))}.</p>` : '<p>Ao concluir, um aviso será enviado ao Super Admin e a ação ficará registrada no histórico.</p>'}</div><button class="button primary" data-action="complete-team-delegation" ${!completion.complete || delegationDone || teamPortalStatus === 'saving' ? 'disabled' : ''}>${delegationDone ? 'Delegação concluída' : 'Concluir e avisar'}</button></section>
+    <footer class="portal-footer"><p>As fotos devem estar em PNG, JPG ou WebP e ter até 5 MB.</p><button class="button portal-save" data-action="portal-save" ${teamPortalStatus === 'saving' ? 'disabled' : ''}>${teamPortalStatus === 'saving' ? 'Salvando…' : 'Salvar rascunho'}</button></footer></section></main>`;
 }
 
 function renderDrawer() {
@@ -2029,6 +2190,7 @@ function confirmEvent() {
 }
 
 function handleAction(action, target) {
+  if ((action.startsWith('portal-add-') || action.startsWith('portal-remove-')) && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
   if (action === 'admin-login-submit' || action === 'admin-setup-submit') {
     const username = document.getElementById('admin-username')?.value || '';
     const password = document.getElementById('admin-password')?.value || '';
@@ -2044,6 +2206,33 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'team-logout') { logoutTeamPortal(); return; }
+  if (action === 'complete-team-delegation') { completeTeamDelegation(); return; }
+  if (action === 'new-championship') { selectedChampionshipId = ''; render(); return; }
+  if (action === 'select-championship') { selectedChampionshipId = target.dataset.value; render(); return; }
+  if (action === 'save-championship') {
+    const item = { id: target.dataset.value || '', name: document.getElementById('championship-name')?.value || '', season: document.getElementById('championship-season')?.value || '', startDate: document.getElementById('championship-start')?.value || '', endDate: document.getElementById('championship-end')?.value || '', status: document.getElementById('championship-status')?.value || 'planned' };
+    postOperation('upsert-championship', { item }).then(ok => { if (!ok) return; selectedChampionshipId = operationsData.championships.find(entry => entry.name === item.name)?.id || selectedChampionshipId; toast('Campeonato salvo.'); render(); });
+    return;
+  }
+  if (action === 'delete-championship') {
+    if (!confirm('Excluir este campeonato?')) return;
+    postOperation('delete-championship', { id: target.dataset.value }).then(ok => { if (ok) { selectedChampionshipId = ''; toast('Campeonato excluído.'); } });
+    return;
+  }
+  if (action === 'new-operation-match') { selectedMatchId = ''; render(); return; }
+  if (action === 'select-match') { selectedMatchId = target.dataset.value; render(); return; }
+  if (action === 'save-operation-match') {
+    const item = { id: target.dataset.value || '', championshipId: document.getElementById('match-championship')?.value || '', homeTeamId: document.getElementById('operation-home')?.value || '', awayTeamId: document.getElementById('operation-away')?.value || '', kickoffAt: document.getElementById('match-kickoff')?.value || '', status: document.getElementById('match-status')?.value || 'scheduled', round: document.getElementById('match-round')?.value || '', venue: document.getElementById('match-venue')?.value || '', room: document.getElementById('match-room')?.value || '' };
+    postOperation('upsert-match', { item }).then(ok => { if (!ok) return; const saved = operationsData.matches.find(entry => entry.id === item.id) || operationsData.matches[0]; selectedMatchId = saved?.id || ''; toast('Partida salva com uma sala própria de overlays.'); render(); });
+    return;
+  }
+  if (action === 'delete-operation-match') {
+    if (!confirm('Excluir esta partida da agenda? O estado já salvo na sala não será apagado.')) return;
+    postOperation('delete-match', { id: target.dataset.value }).then(ok => { if (ok) { selectedMatchId = ''; toast('Partida removida da agenda.'); } });
+    return;
+  }
+  if (action === 'read-notification') { postOperation('mark-notification-read', { id: target.dataset.value }); return; }
+  if (action === 'read-all-notifications') { postOperation('mark-all-notifications-read'); return; }
   if (action === 'module-tab') { moduleTab = target.dataset.value; render(); return; }
   if (action === 'add-custom-overlay') {
     const id = `overlay-${Date.now().toString(36)}`;
@@ -2130,8 +2319,7 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'new-match') {
-    const code = `${new Date().toISOString().slice(0, 10)}-${Math.random().toString(36).slice(2, 7)}`;
-    location.href = `${location.origin}/?room=${encodeURIComponent(code)}`;
+    location.href = moduleUrl('matches');
     return;
   }
   if (action === 'reset-appearance') {
@@ -2580,6 +2768,7 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-portal-team-field], [data-portal-athlete-field], [data-portal-staff-name], [data-portal-staff-role], [data-portal-coach-name]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
   if (target.matches('[data-custom-field]')) {
     const field = target.dataset.customField;
     commit(draft => {
@@ -2760,6 +2949,7 @@ app.addEventListener('input', event => {
 
 app.addEventListener('change', event => {
   const target = event.target;
+  if (target.matches('[data-portal-team-logo], [data-portal-athlete-photo], [data-portal-staff-photo], [data-portal-coach-photo], [data-portal-formation]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
   if (target.matches('[data-custom-media]') && target.files?.[0]) {
     const file = target.files[0];
     const overlayId = target.dataset.customMedia;

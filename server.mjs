@@ -23,6 +23,7 @@ async function persist() {
 
 sharedStates.__admins__ ||= { accounts: [], updatedAt: 0 };
 sharedStates.__team_credentials__ ||= { entries: [], updatedAt: 0 };
+sharedStates.__operations__ ||= { championships: [], matches: [], notifications: [], logs: [], delegationStatus: {}, updatedAt: 0 };
 if (!sharedStates.__auth_secret__) {
   sharedStates.__auth_secret__ = { value: auth.randomSecretHex() };
   await persist();
@@ -41,6 +42,48 @@ function validPassword(value) {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
   return trimmed.length >= 8 && trimmed.length <= 200;
+}
+
+function safeId(value, fallback = '') {
+  const normalized = String(value || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 64);
+  return normalized || fallback;
+}
+
+function operationsStore() {
+  const store = sharedStates.__operations__ ||= {};
+  store.championships = Array.isArray(store.championships) ? store.championships : [];
+  store.matches = Array.isArray(store.matches) ? store.matches : [];
+  store.notifications = Array.isArray(store.notifications) ? store.notifications : [];
+  store.logs = Array.isArray(store.logs) ? store.logs : [];
+  store.delegationStatus = store.delegationStatus && typeof store.delegationStatus === 'object' ? store.delegationStatus : {};
+  return store;
+}
+
+function addAudit(store, action, actor, target = '', details = '') {
+  store.logs.unshift({ id: crypto.randomUUID(), action, actor: String(actor || 'sistema').slice(0, 80), target: String(target || '').slice(0, 120), details: String(details || '').slice(0, 300), createdAt: Date.now() });
+  store.logs = store.logs.slice(0, 500);
+}
+
+function delegationCheck(team) {
+  const athletes = Array.isArray(team?.athletes) ? team.athletes : [];
+  const staff = Array.isArray(team?.staff) ? team.staff : [];
+  const missing = [];
+  if (!String(team?.name || '').trim()) missing.push('nome da equipe');
+  if (String(team?.short || '').trim().length < 2) missing.push('sigla');
+  if (!athletes.length) missing.push('ao menos um atleta');
+  if (athletes.some(item => !String(item?.name || '').trim() || !String(item?.number || '').trim())) missing.push('nome e número de todos os atletas');
+  if (!staff.length) missing.push('comissão técnica');
+  if (staff.some(item => !String(item?.name || '').trim() || !String(item?.role || '').trim())) missing.push('nome e função de toda a comissão');
+  return { complete: missing.length === 0, missing };
+}
+
+function markDelegationChanged(store, team, actor) {
+  const current = store.delegationStatus[team.id];
+  if (current?.status !== 'completed') return;
+  store.delegationStatus[team.id] = { ...current, status: 'needs-review', changedAt: Date.now() };
+  store.notifications.unshift({ id: crypto.randomUUID(), type: 'delegation-changed', teamId: team.id, title: `${team.name} alterou a delegação`, message: 'O cadastro foi modificado depois de ter sido concluído.', read: false, createdAt: Date.now() });
+  store.notifications = store.notifications.slice(0, 200);
+  addAudit(store, 'delegation.changed', actor, team.name, 'Cadastro alterado após a conclusão.');
 }
 
 async function readBody(request) {
@@ -261,6 +304,89 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === '/api/operations') {
+    const admin = await requireAdmin(request, response);
+    if (!admin) return;
+    const store = operationsStore();
+    if (request.method === 'GET') {
+      sendJson(response, 200, store);
+      return;
+    }
+    if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
+    try {
+      const candidate = JSON.parse(await readBody(request));
+      const action = String(candidate.action || '');
+      if (action === 'upsert-championship') {
+        const item = candidate.item || {};
+        const id = safeId(item.id || item.name, `campeonato-${Date.now().toString(36)}`);
+        const championship = { id, name: String(item.name || '').trim().slice(0, 100), season: String(item.season || '').trim().slice(0, 40), startDate: String(item.startDate || '').slice(0, 10), endDate: String(item.endDate || '').slice(0, 10), status: ['planned', 'active', 'finished'].includes(item.status) ? item.status : 'planned', updatedAt: Date.now() };
+        if (!championship.name) { sendJson(response, 400, { ok: false, error: 'Informe o nome do campeonato.' }); return; }
+        const index = store.championships.findIndex(entry => entry.id === id);
+        if (index >= 0) store.championships[index] = championship; else store.championships.unshift(championship);
+        addAudit(store, index >= 0 ? 'championship.updated' : 'championship.created', admin.username, championship.name, championship.season);
+      } else if (action === 'delete-championship') {
+        const id = safeId(candidate.id);
+        if (store.matches.some(match => match.championshipId === id)) { sendJson(response, 409, { ok: false, error: 'O campeonato possui partidas vinculadas.' }); return; }
+        const existing = store.championships.find(entry => entry.id === id);
+        store.championships = store.championships.filter(entry => entry.id !== id);
+        if (existing) addAudit(store, 'championship.deleted', admin.username, existing.name);
+      } else if (action === 'upsert-match') {
+        const item = candidate.item || {};
+        const id = safeId(item.id, `partida-${Date.now().toString(36)}`);
+        const room = safeId(item.room || id, id).slice(0, 48);
+        if (store.matches.some(entry => entry.room === room && entry.id !== id)) { sendJson(response, 409, { ok: false, error: 'Já existe uma partida usando esta sala.' }); return; }
+        const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room, updatedAt: Date.now() };
+        if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) { sendJson(response, 400, { ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }); return; }
+        const index = store.matches.findIndex(entry => entry.id === id);
+        if (index >= 0) store.matches[index] = match; else store.matches.unshift(match);
+        addAudit(store, index >= 0 ? 'match.updated' : 'match.created', admin.username, room, `${match.homeTeamId} x ${match.awayTeamId}`);
+      } else if (action === 'delete-match') {
+        const id = safeId(candidate.id);
+        const existing = store.matches.find(entry => entry.id === id);
+        store.matches = store.matches.filter(entry => entry.id !== id);
+        if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
+      } else if (action === 'mark-notification-read') {
+        const notification = store.notifications.find(entry => entry.id === candidate.id);
+        if (notification) notification.read = true;
+      } else if (action === 'mark-all-notifications-read') {
+        store.notifications.forEach(entry => { entry.read = true; });
+      } else {
+        sendJson(response, 400, { ok: false, error: 'Ação inválida.' });
+        return;
+      }
+      store.updatedAt = Date.now();
+      await persist();
+      sendJson(response, 200, { ok: true, operations: store });
+    } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
+    return;
+  }
+
+  if (url.pathname === '/api/team-delegation/complete') {
+    if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
+    try {
+      const candidate = JSON.parse(await readBody(request));
+      const teamId = safeId(candidate.teamId);
+      const admin = await getAdminSession(request);
+      const teamSession = admin ? null : await getTeamSession(request);
+      if (!admin && !(teamSession && teamSession.teamId === teamId)) { sendJson(response, 401, { ok: false, error: 'Autenticação necessária' }); return; }
+      const team = sharedStates.__team_catalog__?.teams?.find(item => item.id === teamId);
+      if (!team) { sendJson(response, 404, { ok: false, error: 'Equipe não encontrada.' }); return; }
+      const check = delegationCheck(team);
+      if (!check.complete) { sendJson(response, 409, { ok: false, error: 'Complete os campos obrigatórios antes de concluir.', missing: check.missing }); return; }
+      const store = operationsStore();
+      const actor = admin?.username || teamSession?.username || team.name;
+      const completedAt = Date.now();
+      store.delegationStatus[team.id] = { status: 'completed', completedAt, completedBy: actor };
+      store.notifications.unshift({ id: crypto.randomUUID(), type: 'delegation-completed', teamId: team.id, title: `${team.name} concluiu a delegação`, message: `${team.athletes?.length || 0} atletas e ${team.staff?.length || 0} membros da comissão foram confirmados.`, read: false, createdAt: completedAt });
+      store.notifications = store.notifications.slice(0, 200);
+      addAudit(store, 'delegation.completed', actor, team.name, `${team.athletes?.length || 0} atletas; ${team.staff?.length || 0} membros da comissão.`);
+      store.updatedAt = completedAt;
+      await persist();
+      sendJson(response, 200, { ok: true, delegation: store.delegationStatus[team.id] });
+    } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
+    return;
+  }
+
   if (url.pathname === '/api/teams') {
     if (request.method === 'PUT') {
       if (!(await requireAdmin(request, response))) return;
@@ -314,15 +440,20 @@ const server = http.createServer(async (request, response) => {
         team.coach = { name: String(headCoach?.name || candidate?.coach?.name || 'Treinador').slice(0, 100), photo: String(headCoach?.photo || candidate?.coach?.photo || '').slice(0, 500) };
         team.formation = ['4-3-3', '4-4-2', '4-2-3-1', '3-5-2'].includes(candidate?.formation) ? candidate.formation : team.formation || '4-3-3';
         team.roster = team.athletes.map(athlete => `${athlete.number || ''} ${athlete.name || ''}`.trim()).filter(Boolean).join('\n');
-        sharedStates.__team_catalog__.updatedAt = Date.now();
+        const operations = operationsStore();
+        const actor = (await getAdminSession(request))?.username || (await getTeamSession(request))?.username || team.name;
+        markDelegationChanged(operations, team, actor);
+        addAudit(operations, 'delegation.saved', actor, team.name, `${team.athletes.length} atletas; ${team.staff.length} membros da comissão.`);
+        operations.updatedAt = Date.now();
+        sharedStates.__team_catalog__.updatedAt = operations.updatedAt;
         await persist();
         response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        response.end(JSON.stringify({ team }));
+        response.end(JSON.stringify({ team, delegation: operations.delegationStatus[team.id] || { status: 'draft' } }));
       } catch { response.writeHead(400).end('Invalid JSON'); }
       return;
     }
     response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    response.end(JSON.stringify({ team }));
+    response.end(JSON.stringify({ team, delegation: operationsStore().delegationStatus[team.id] || { status: 'draft' }, completion: delegationCheck(team) }));
     return;
   }
 
