@@ -35,6 +35,38 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
   ou regra de validação de senha (mínimo de 8 caracteres) mudou — o botão apenas preenche o
   campo de texto existente, que continua sendo salvo por `PUT /api/auth/team/credentials` ou
   `POST /api/auth/admin/accounts` como antes.
+- Barra de Patrocinadores (rodapé 1500 × 200): a transição de entrada/saída ganhou duas opções
+  além de fade/slide/zoom — "Virada 3D" e "Elástico" (`sponsorBarTransition`, validado no
+  cliente e persistido em `appearance`; novos keyframes CSS `sponsor-bar-flip-*` e
+  `sponsor-bar-elastic-*`, incluindo variante para a saída OBS isolada `data-output-layer="sponsor-bar"`).
+  A tela de configurações da barra também ganhou um botão "Exibir/Ocultar barra agora"
+  (reaproveita a ação já existente `overlay-sponsor-bar`) e uma nova **exibição automática por
+  intervalo**: ao ativar (`sponsorBarAutoSchedule`), a barra aparece sozinha a cada N minutos
+  (`sponsorBarScheduleInterval`, 1–60 min) pela duração configurada em "Tempo entre
+  patrocinadores", sem exigir clique manual. Esses três campos novos (`sponsorBarAutoSchedule`,
+  `sponsorBarScheduleInterval`, `sponsorBarScheduleNextAt`) são persistidos no estado da sala
+  como os demais campos de `sponsorBar*`; não há mudança de rota, só de formato do JSON de
+  estado (campos adicionais, com fallback seguro em `normalizeState` para salas antigas).
+- No painel de cada partida, o módulo **Relatório** ganhou um seletor "Conteúdo do PDF" com três
+  opções — **Escalação** (somente titulares, comissão técnica e reservas de cada equipe),
+  **Atividades** (resumo de gols/cartões/substituições, placar por período e linha do tempo
+  completa, sem escalação) e **Tudo** (o relatório completo que já existia). A opção escolhida
+  passa a controlar o que os botões "Finalizar partida e gerar PDF", "Abrir PDF final" e
+  "Exportar relatório selecionado" produzem — o mecanismo de exportação continua sendo impressão
+  do navegador (`window.print` sobre uma aba com o HTML do relatório), sem novas rotas ou
+  dependências. O histórico de relatórios finalizados (`completedReports`) e a API de estado não
+  mudaram de formato.
+- Nova aba **Dashboard**, disponível em `/manage/dashboard`, como visão geral da plataforma:
+  agenda e contagem de partidas por status, partidas ao vivo e próximas, avisos/atividade
+  recentes (reaproveita os dados já carregados em `/api/operations`), contagem de times/acessos
+  cadastrados (reaproveita `/api/auth/admin/accounts` e `/api/auth/team/credentials`, agora
+  também carregados quando essa aba está aberta) e estatísticas agregadas de gols/cartões/
+  substituições somadas de todas as partidas com sala registrada. As estatísticas agregadas são
+  calculadas no navegador buscando `GET /api/state?room=<sala>` (rota pública já existente) para
+  cada partida cadastrada em `/api/operations` — não há nova rota nem novo dado persistido no
+  servidor. A tela principal de cada partida (`/?room=...`) também ganhou um resumo compacto
+  "Resumo da partida" (placar, contagem de eventos por tipo e quantos overlays estão no ar) logo
+  abaixo do seletor de modalidade.
 
 ## [27] - 2026-09-18
 

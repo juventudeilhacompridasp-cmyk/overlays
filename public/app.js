@@ -47,6 +47,7 @@ function brandMark() {
 }
 
 const MANAGEMENT_MODULES = [
+  { key: 'dashboard', label: 'Dashboard', caption: 'Visão geral de agenda, avisos, acessos e estatísticas da plataforma', layer: 'all', icon: icons.monitor },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
   { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
   { key: 'scoreboard', label: 'Placar', caption: 'Resultado, tempo e formato', layer: 'scoreboard', icon: icons.monitor },
@@ -295,6 +296,9 @@ function createDefaultState() {
     sponsorBarTransition: null,
     sponsorBarExpiresAt: 0,
     sponsorBarNextIndex: null,
+    sponsorBarAutoSchedule: false,
+    sponsorBarScheduleInterval: 5,
+    sponsorBarScheduleNextAt: 0,
     customOverlays: [],
     activeSponsorIndex: 0,
     sponsorLoop: false,
@@ -387,6 +391,9 @@ function normalizeState(saved) {
     sponsorBarItems,
     sponsorBarActiveIndex: clampNumber(saved.sponsorBarActiveIndex, 0, Math.max(0, sponsorBarItems.length - 1), 0),
     sponsorBarLoop: Boolean(saved.sponsorBarLoop),
+    sponsorBarAutoSchedule: Boolean(saved.sponsorBarAutoSchedule),
+    sponsorBarScheduleInterval: clampNumber(saved.sponsorBarScheduleInterval, 1, 60, 5),
+    sponsorBarScheduleNextAt: Number.isFinite(Number(saved.sponsorBarScheduleNextAt)) ? Number(saved.sponsorBarScheduleNextAt) : 0,
     customOverlays,
     championshipTheme: { ...defaults.championshipTheme, ...(saved.championshipTheme || {}), overrides: { ...(saved.championshipTheme?.overrides || {}) } },
     periodScores: saved.periodScores && typeof saved.periodScores === 'object' ? saved.periodScores : {},
@@ -434,6 +441,7 @@ let teamLoginTeams = [];
 let accessAdmins = [];
 let accessTeamCredentials = [];
 let accessStatus = 'idle';
+let dashboardStats = { status: 'idle', byRoom: {} };
 let operationsData = { championships: [], matches: [], notifications: [], logs: [], delegationStatus: {}, updatedAt: 0 };
 let operationsStatus = 'idle';
 let selectedChampionshipId = '';
@@ -449,6 +457,7 @@ let consecutiveFailures = 0;
 let outputFingerprints = {};
 let moduleTab = 'information';
 let reportSelection = 0;
+let reportExportType = 'full';
 let selectedCustomOverlayId = state.customOverlays?.[0]?.id || '';
 
 function appearanceSnapshot(source = state) {
@@ -877,7 +886,7 @@ function renderSponsorBarOverlay() {
   const appearance = state.appearance || defaultAppearance();
   const sponsor = activeSponsorBar();
   const transition = state.sponsorBarTransition && Number(state.sponsorBarTransition.expiresAt || 0) > Date.now() ? state.sponsorBarTransition.type : '';
-  const transitionStyle = ['fade', 'slide', 'zoom'].includes(appearance.sponsorBarTransition) ? appearance.sponsorBarTransition : 'fade';
+  const transitionStyle = ['fade', 'slide', 'zoom', 'flip', 'elastic'].includes(appearance.sponsorBarTransition) ? appearance.sponsorBarTransition : 'fade';
   const transitionClass = transition ? ` is-${transition === 'enter' ? 'entering' : 'exiting'} sponsor-animation-${transitionStyle}` : '';
   const duration = sponsorBarMotionDuration();
   const offset = motionOffset(state.sponsorBarTransition?.startedAt || (Number(state.sponsorBarTransition?.expiresAt || 0) - duration), duration);
@@ -1189,7 +1198,7 @@ async function logoutAdmin() {
 }
 
 async function loadAccessData() {
-  if (managementModule !== 'access') return;
+  if (!['access', 'dashboard'].includes(managementModule)) return;
   accessStatus = 'loading';
   render();
   try {
@@ -1241,8 +1250,31 @@ async function loadOperationsData() {
     if (selectedChampionshipId && !operationsData.championships.some(item => item.id === selectedChampionshipId)) selectedChampionshipId = '';
     if (selectedMatchId && !operationsData.matches.some(item => item.id === selectedMatchId)) selectedMatchId = '';
     operationsStatus = 'ready';
+    loadDashboardStats();
   } catch {
     operationsStatus = 'error';
+  }
+  render();
+}
+
+async function loadDashboardStats() {
+  if (managementModule !== 'dashboard') return;
+  const rooms = [...new Set(operationsData.matches.map(item => item.room).filter(Boolean))];
+  if (!rooms.length) { dashboardStats = { status: 'ready', byRoom: {} }; render(); return; }
+  dashboardStats = { status: 'loading', byRoom: dashboardStats.byRoom };
+  render();
+  try {
+    const results = await Promise.all(rooms.map(async room => {
+      try {
+        const response = await fetch(`/api/state?room=${encodeURIComponent(room)}`, { cache: 'no-store' });
+        return response.ok ? [room, await response.json()] : [room, null];
+      } catch { return [room, null]; }
+    }));
+    const byRoom = {};
+    for (const [room, data] of results) if (data && typeof data === 'object') byRoom[room] = data;
+    dashboardStats = { status: 'ready', byRoom };
+  } catch {
+    dashboardStats = { status: 'error', byRoom: dashboardStats.byRoom };
   }
   render();
 }
@@ -1584,13 +1616,49 @@ function renderMatchesModule() {
   return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(editor.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(editor.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(editor.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${editor.status === 'scheduled' ? 'selected' : ''}>Agendada</option><option value="live" ${editor.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${editor.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(editor.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(editor.room || '')}" ${selected ? 'readonly' : ''} placeholder="Gerado automaticamente se ficar vazio"><small>${selected ? 'A sala é permanente para preservar os overlays e URLs desta partida.' : 'Este código aparece em todas as URLs dos overlays desta partida.'}</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
 }
 
+const OPERATION_ACTION_LABELS = { 'delegation.completed': 'Delegação concluída', 'delegation.changed': 'Delegação alterada', 'delegation.saved': 'Cadastro de delegação salvo', 'championship.created': 'Campeonato criado', 'championship.updated': 'Campeonato atualizado', 'championship.deleted': 'Campeonato excluído', 'match.created': 'Partida criada', 'match.updated': 'Partida atualizada', 'match.deleted': 'Partida excluída' };
+
+function renderDashboardModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const matches = operationsData.matches;
+  const statusLabel = { scheduled: 'Agendadas', live: 'Ao vivo', finished: 'Finalizadas', cancelled: 'Canceladas' };
+  const statusCounts = Object.keys(statusLabel).map(status => [status, matches.filter(item => item.status === status).length]);
+  const liveNow = matches.filter(item => item.status === 'live');
+  const upcoming = matches.filter(item => item.status === 'scheduled').sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || ''))).slice(0, 5);
+  const matchRow = item => `<a class="dashboard-mini-row" href="/?room=${encodeURIComponent(item.room)}"><span>${escapeHtml(operationTeamName(item.homeTeamId))} × ${escapeHtml(operationTeamName(item.awayTeamId))}</span><small>${operationDate(item.kickoffAt, true)}</small></a>`;
+  const unread = operationsData.notifications.filter(item => !item.read).length;
+  const recentLogs = operationsData.logs.slice(0, 6).map(item => `<div class="dashboard-mini-row"><span>${escapeHtml(OPERATION_ACTION_LABELS[item.action] || item.action)} · ${escapeHtml(item.target)}</span><small>${operationDate(item.createdAt, true)}</small></div>`).join('') || '<div class="portal-empty">Nenhuma ação registrada.</div>';
+  const statsRooms = Object.values(dashboardStats.byRoom);
+  const aggregated = statsRooms.reduce((totals, data) => {
+    for (const [label, value] of reportSummaryEntries({ events: data.events || [] })) totals[label] = (totals[label] || 0) + value;
+    return totals;
+  }, {});
+  const aggregatedTiles = Object.entries(aggregated);
+  return `<div class="dashboard-grid">
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Agenda e status de partidas</h3><p class="help-text">${matches.length} partida${matches.length === 1 ? '' : 's'} cadastrada${matches.length === 1 ? '' : 's'} no total.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('matches'))}">Ver agenda completa</a></div>
+      <div class="dashboard-stats">${statusCounts.map(([status, count]) => `<article><strong>${count}</strong><span>${statusLabel[status]}</span></article>`).join('')}</div>
+      ${liveNow.length ? `<div class="dashboard-list"><strong>Ao vivo agora</strong>${liveNow.map(matchRow).join('')}</div>` : ''}
+      ${upcoming.length ? `<div class="dashboard-list"><strong>Próximas partidas</strong>${upcoming.map(matchRow).join('')}</div>` : '<div class="portal-empty">Nenhuma partida agendada.</div>'}
+    </section>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Atividade e avisos</h3><p class="help-text">${unread} aviso${unread === 1 ? '' : 's'} não lido${unread === 1 ? '' : 's'} de delegações das equipes.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('audit'))}">Ver avisos e logs</a></div>
+      <div class="dashboard-list">${recentLogs}</div>
+    </section>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Acessos e times cadastrados</h3><p class="help-text">Usuários com acesso ao painel e aos portais de equipe.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('access'))}">Gerenciar acessos</a></div>
+      <div class="dashboard-stats"><article><strong>${teamCatalog.length}</strong><span>Times cadastrados</span></article><article><strong>${accessTeamCredentials.length}</strong><span>Times com acesso vinculado</span></article><article><strong>${accessAdmins.length}</strong><span>Administradores</span></article></div>
+    </section>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Estatísticas agregadas</h3><p class="help-text">${dashboardStats.status === 'loading' ? 'Calculando a partir dos dados de cada partida…' : `Somado de ${statsRooms.length} de ${matches.length} partida${matches.length === 1 ? '' : 's'} com sala registrada.`}</p></div><button class="button subtle" data-action="refresh-dashboard-stats">${dashboardStats.status === 'loading' ? 'Calculando…' : 'Atualizar'}</button></div>
+      ${aggregatedTiles.length ? `<div class="dashboard-stats">${aggregatedTiles.map(([label, value]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div>` : '<div class="portal-empty">Sem dados suficientes ainda. Finalize partidas para ver estatísticas somadas.</div>'}
+    </section>
+  </div>`;
+}
+
 function renderAuditModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
   const unread = operationsData.notifications.filter(item => !item.read).length;
   const notifications = operationsData.notifications.slice(0, 30).map(item => `<article class="notification-card ${item.read ? '' : 'unread'}"><div><span>${item.type === 'delegation-completed' ? 'Delegação concluída' : 'Delegação alterada'}</span><strong>${escapeHtml(item.title)}</strong><p>${escapeHtml(item.message)}</p><small>${operationDate(item.createdAt, true)}</small></div>${item.read ? '<b>Lido</b>' : `<button class="button subtle" data-action="read-notification" data-value="${escapeHtml(item.id)}">Marcar como lido</button>`}</article>`).join('') || '<div class="portal-empty">Nenhum aviso recebido.</div>';
-  const labels = { 'delegation.completed': 'Delegação concluída', 'delegation.changed': 'Delegação alterada', 'delegation.saved': 'Cadastro de delegação salvo', 'championship.created': 'Campeonato criado', 'championship.updated': 'Campeonato atualizado', 'championship.deleted': 'Campeonato excluído', 'match.created': 'Partida criada', 'match.updated': 'Partida atualizada', 'match.deleted': 'Partida excluída' };
-  const logs = operationsData.logs.slice(0, 100).map(item => `<tr><td>${operationDate(item.createdAt, true)}</td><td>${escapeHtml(item.actor)}</td><td>${escapeHtml(labels[item.action] || item.action)}</td><td><strong>${escapeHtml(item.target)}</strong><small>${escapeHtml(item.details)}</small></td></tr>`).join('') || '<tr><td colspan="4">Nenhuma ação registrada.</td></tr>';
+  const logs = operationsData.logs.slice(0, 100).map(item => `<tr><td>${operationDate(item.createdAt, true)}</td><td>${escapeHtml(item.actor)}</td><td>${escapeHtml(OPERATION_ACTION_LABELS[item.action] || item.action)}</td><td><strong>${escapeHtml(item.target)}</strong><small>${escapeHtml(item.details)}</small></td></tr>`).join('') || '<tr><td colspan="4">Nenhuma ação registrada.</td></tr>';
   return `<div class="audit-grid"><section><div class="section-header"><div><h3 class="section-title">Avisos do Super Admin</h3><p class="help-text">Cadastros concluídos ou modificados pelas equipes aparecem aqui.</p></div>${unread ? `<button class="button subtle" data-action="read-all-notifications">Marcar ${unread} como lido${unread === 1 ? '' : 's'}</button>` : ''}</div><div class="notification-list">${notifications}</div></section><section><div class="section-header"><div><h3 class="section-title">Log de ações</h3><p class="help-text">Histórico operacional sem senhas ou conteúdo sensível.</p></div></div><div class="audit-table-wrap"><table class="audit-table"><thead><tr><th>Data</th><th>Responsável</th><th>Ação</th><th>Registro</th></tr></thead><tbody>${logs}</tbody></table></div></section></div>`;
 }
 
@@ -1742,7 +1810,10 @@ function renderSponsorWideControls() {
 
 function renderSponsorBarSettings() {
   const appearance = state.appearance || defaultAppearance();
-  return `<div class="module-section"><div class="field-row"><div class="field"><label>Transição</label><select data-appearance="sponsorBarTransition"><option value="fade" ${appearance.sponsorBarTransition === 'fade' ? 'selected' : ''}>Fade suave</option><option value="slide" ${appearance.sponsorBarTransition === 'slide' ? 'selected' : ''}>Deslizamento</option><option value="zoom" ${appearance.sponsorBarTransition === 'zoom' ? 'selected' : ''}>Zoom elegante</option></select></div><div class="field"><label>Ajuste da mídia</label><select data-appearance="sponsorBarFit"><option value="cover" ${appearance.sponsorBarFit === 'cover' ? 'selected' : ''}>Preencher (cover)</option><option value="contain" ${appearance.sponsorBarFit === 'contain' ? 'selected' : ''}>Conter (contain)</option></select></div></div>${appearanceRange('sponsorBarDuration', 'Tempo entre patrocinadores', appearance.sponsorBarDuration, 3, 60, 's')}${appearanceRange('sponsorBarAnimationSpeed', 'Velocidade da transição', appearance.sponsorBarAnimationSpeed, 50, 160, '%')}<div class="field-row">${appearanceRange('sponsorBarScale', 'Escala interna da arte', appearance.sponsorBarScale, 60, 180, '%')}${appearanceRange('sponsorBarOpacity', 'Opacidade', appearance.sponsorBarOpacity, 20, 100, '%')}</div><div class="field-row">${appearanceRange('sponsorBarRadius', 'Arredondamento', appearance.sponsorBarRadius, 0, 24, 'px')}<label class="color-field"><span>Fundo da barra</span><input type="color" data-appearance="sponsorBarBackground" value="${safeColor(appearance.sponsorBarBackground, '#08090d')}"></label></div><p class="help-text">A saída permanece independente em 1500 × 200. A escala, opacidade e arredondamento alteram somente a aparência interna da barra.</p><div class="inline-actions"><button class="button ${state.sponsorBarLoop ? 'primary' : ''}" data-action="toggle-sponsor-bar-loop">${state.sponsorBarLoop ? 'Parar looping' : 'Iniciar looping'}</button><button class="button" data-action="next-sponsor-bar">Próximo patrocinador</button></div></div>`;
+  const autoSchedule = Boolean(state.sponsorBarAutoSchedule);
+  return `<div class="module-section"><div class="field-row"><div class="field"><label>Transição</label><select data-appearance="sponsorBarTransition"><option value="fade" ${appearance.sponsorBarTransition === 'fade' ? 'selected' : ''}>Fade suave</option><option value="slide" ${appearance.sponsorBarTransition === 'slide' ? 'selected' : ''}>Deslizamento</option><option value="zoom" ${appearance.sponsorBarTransition === 'zoom' ? 'selected' : ''}>Zoom elegante</option><option value="flip" ${appearance.sponsorBarTransition === 'flip' ? 'selected' : ''}>Virada 3D</option><option value="elastic" ${appearance.sponsorBarTransition === 'elastic' ? 'selected' : ''}>Elástico</option></select></div><div class="field"><label>Ajuste da mídia</label><select data-appearance="sponsorBarFit"><option value="cover" ${appearance.sponsorBarFit === 'cover' ? 'selected' : ''}>Preencher (cover)</option><option value="contain" ${appearance.sponsorBarFit === 'contain' ? 'selected' : ''}>Conter (contain)</option></select></div></div>${appearanceRange('sponsorBarDuration', 'Tempo entre patrocinadores', appearance.sponsorBarDuration, 3, 60, 's')}${appearanceRange('sponsorBarAnimationSpeed', 'Velocidade da transição', appearance.sponsorBarAnimationSpeed, 50, 160, '%')}<div class="field-row">${appearanceRange('sponsorBarScale', 'Escala interna da arte', appearance.sponsorBarScale, 60, 180, '%')}${appearanceRange('sponsorBarOpacity', 'Opacidade', appearance.sponsorBarOpacity, 20, 100, '%')}</div><div class="field-row">${appearanceRange('sponsorBarRadius', 'Arredondamento', appearance.sponsorBarRadius, 0, 24, 'px')}<label class="color-field"><span>Fundo da barra</span><input type="color" data-appearance="sponsorBarBackground" value="${safeColor(appearance.sponsorBarBackground, '#08090d')}"></label></div><p class="help-text">A saída permanece independente em 1500 × 200. A escala, opacidade e arredondamento alteram somente a aparência interna da barra.</p><div class="inline-actions"><button class="button ${state.visible.sponsorBar ? 'primary' : ''}" data-action="overlay-sponsor-bar">${state.visible.sponsorBar ? 'Ocultar barra agora' : 'Exibir barra agora'}</button><button class="button ${state.sponsorBarLoop ? 'primary' : ''}" data-action="toggle-sponsor-bar-loop">${state.sponsorBarLoop ? 'Parar looping' : 'Iniciar looping'}</button><button class="button" data-action="next-sponsor-bar">Próximo patrocinador</button></div>
+    <div class="team-access-box"><div><strong>Exibição automática por intervalo</strong><small>${autoSchedule ? `A barra aparece por ${clampNumber(appearance.sponsorBarDuration, 3, 60, 10)}s a cada ${clampNumber(state.sponsorBarScheduleInterval, 1, 60, 5)} min, sem precisar clicar em exibir.` : 'Desativada. A barra só aparece por ação manual ou looping.'}</small></div><button class="button ${autoSchedule ? 'primary' : 'subtle'}" data-action="toggle-sponsor-bar-schedule">${autoSchedule ? 'Desativar' : 'Ativar'}</button></div>
+    ${autoSchedule ? `<label class="parameter-control"><span>Intervalo entre exibições <strong>${clampNumber(state.sponsorBarScheduleInterval, 1, 60, 5)} min</strong></span><input type="range" min="1" max="60" step="1" value="${clampNumber(state.sponsorBarScheduleInterval, 1, 60, 5)}" data-field="sponsorBarScheduleInterval"></label>` : ''}</div>`;
 }
 
 function formatReportDateTime(value, options = {}) {
@@ -1785,19 +1856,62 @@ function reportEventRows(report) {
   return (report.events || []).map(event => `<tr><td>${escapeHtml(event.minute || '—')}</td><td>${escapeHtml(event.period || '—')}</td><td>${escapeHtml(event.title)}</td><td>${escapeHtml(event.team || '—')}</td><td>${escapeHtml(event.name || '—')}</td><td>${escapeHtml(event.note || '—')}</td><td>${escapeHtml(event.score || '—')}</td></tr>`).join('');
 }
 
-function printableReport(report) {
-  const teamSection = (team, side) => `<section class="report-team"><header><div class="report-team-mark" style="--team-report-color:${safeColor(team.color, '#2f7df6')}">${team.logo ? `<img src="${escapeHtml(team.logo)}" alt="">` : escapeHtml(team.short || side)}</div><div><small>${side}</small><h2>${escapeHtml(team.name)}</h2><p>Esquema ${escapeHtml(team.formation)} · ${team.score} gol${team.score === 1 ? '' : 's'}</p></div></header><h3>Titulares</h3><ol class="report-roster">${team.starters.map(player => `<li><b>${escapeHtml(player.number || '—')}</b><span>${escapeHtml(player.name)}<small>${escapeHtml(player.position || 'Posição não informada')}</small></span></li>`).join('')}</ol><h3>Comissão técnica</h3><ul class="report-staff">${team.staff.map(member => `<li><span>${escapeHtml(member.role)}</span><strong>${escapeHtml(member.name)}</strong></li>`).join('')}</ul><h3>Reservas</h3><ol class="report-roster">${team.reserves.map(player => `<li><b>${escapeHtml(player.number || '—')}</b><span>${escapeHtml(player.name)}<small>${escapeHtml(player.position || 'Posição não informada')}</small></span></li>`).join('')}</ol></section>`;
+function reportTeamSection(team, side) {
+  return `<section class="report-team"><header><div class="report-team-mark" style="--team-report-color:${safeColor(team.color, '#2f7df6')}">${team.logo ? `<img src="${escapeHtml(team.logo)}" alt="">` : escapeHtml(team.short || side)}</div><div><small>${side}</small><h2>${escapeHtml(team.name)}</h2><p>Esquema ${escapeHtml(team.formation)} · ${team.score} gol${team.score === 1 ? '' : 's'}</p></div></header><h3>Titulares</h3><ol class="report-roster">${team.starters.map(player => `<li><b>${escapeHtml(player.number || '—')}</b><span>${escapeHtml(player.name)}<small>${escapeHtml(player.position || 'Posição não informada')}</small></span></li>`).join('')}</ol><h3>Comissão técnica</h3><ul class="report-staff">${team.staff.map(member => `<li><span>${escapeHtml(member.role)}</span><strong>${escapeHtml(member.name)}</strong></li>`).join('')}</ul><h3>Reservas</h3><ol class="report-roster">${team.reserves.map(player => `<li><b>${escapeHtml(player.number || '—')}</b><span>${escapeHtml(player.name)}<small>${escapeHtml(player.position || 'Posição não informada')}</small></span></li>`).join('')}</ol></section>`;
+}
+
+function reportSummaryEntries(report) {
   const eventTitles = (report.events || []).map(event => String(event.title || '').toLocaleLowerCase('pt-BR'));
   const count = matcher => eventTitles.filter(title => matcher.test(title)).length;
-  const summary = [['Gols', count(/gol|cesta|ponto/)], ['Amarelos', count(/amarelo/)], ['Vermelhos', count(/vermelho/)], ['Substituições', count(/substitui/)], ['Outros eventos', Math.max(0, eventTitles.length - count(/gol|cesta|ponto|amarelo|vermelho|substitui/))]];
+  return [['Gols', count(/gol|cesta|ponto/)], ['Amarelos', count(/amarelo/)], ['Vermelhos', count(/vermelho/)], ['Substituições', count(/substitui/)], ['Outros eventos', Math.max(0, eventTitles.length - count(/gol|cesta|ponto|amarelo|vermelho|substitui/))]];
+}
+
+function reportPeriodScoresHtml(report) {
   const periodScores = Object.entries(report.periodScores || {}).map(([period, score]) => `<div><span>${escapeHtml(period)}</span><strong>${escapeHtml(score)}</strong></div>`).join('');
-  return `<article class="match-report-print report-document"><header class="report-cover"><div class="report-brand"><span>JEC</span><div><strong>JUVENTUDE OVERLAY STUDIO</strong><small>RELATÓRIO FINAL DA PARTIDA</small></div></div><div class="report-status">${report.status === 'final' ? 'FINALIZADO' : 'PRÉVIA'}</div><div class="report-score"><div><small>MANDANTE</small><strong>${escapeHtml(report.home.name)}</strong></div><b>${escapeHtml(report.finalScore)}</b><div><small>VISITANTE</small><strong>${escapeHtml(report.away.name)}</strong></div></div><p>${escapeHtml(report.competition)} · ${escapeHtml(report.sportLabel || report.sport)} · ${escapeHtml(report.date)}</p></header>
-  <section class="report-facts"><div><span>Local</span><strong>${escapeHtml(report.venue || 'Não informado')}</strong></div><div><span>Início real</span><strong>${escapeHtml(formatReportDateTime(report.startedAt, { timeOnly: true }))}</strong></div><div><span>Encerramento</span><strong>${escapeHtml(formatReportDateTime(report.endedAt, { timeOnly: true }))}</strong></div><div><span>Duração real</span><strong>${escapeHtml(report.duration || formatMatchDuration(report.startedAt, report.endedAt))}</strong></div><div><span>Acréscimos</span><strong>+${Number(report.extraTime || 0)} min</strong></div></section>
-  <section class="report-summary"><h2>Resumo da partida</h2><div>${summary.map(([label,value]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div></section>
-  <div class="report-team-grid">${teamSection(report.home, 'MANDANTE')}${teamSection(report.away, 'VISITANTE')}</div>
-  <section class="report-periods"><h2>Placar por período</h2><div>${periodScores || '<p>Sem parciais registradas.</p>'}</div></section>
+  return periodScores || '<p>Sem parciais registradas.</p>';
+}
+
+function reportCoverHtml(report, kicker) {
+  return `<header class="report-cover"><div class="report-brand"><span>JEC</span><div><strong>JUVENTUDE OVERLAY STUDIO</strong><small>${escapeHtml(kicker)}</small></div></div><div class="report-status">${report.status === 'final' ? 'FINALIZADO' : 'PRÉVIA'}</div><div class="report-score"><div><small>MANDANTE</small><strong>${escapeHtml(report.home.name)}</strong></div><b>${escapeHtml(report.finalScore)}</b><div><small>VISITANTE</small><strong>${escapeHtml(report.away.name)}</strong></div></div><p>${escapeHtml(report.competition)} · ${escapeHtml(report.sportLabel || report.sport)} · ${escapeHtml(report.date)}</p></header>`;
+}
+
+function reportFactsHtml(report) {
+  return `<section class="report-facts"><div><span>Local</span><strong>${escapeHtml(report.venue || 'Não informado')}</strong></div><div><span>Início real</span><strong>${escapeHtml(formatReportDateTime(report.startedAt, { timeOnly: true }))}</strong></div><div><span>Encerramento</span><strong>${escapeHtml(formatReportDateTime(report.endedAt, { timeOnly: true }))}</strong></div><div><span>Duração real</span><strong>${escapeHtml(report.duration || formatMatchDuration(report.startedAt, report.endedAt))}</strong></div><div><span>Acréscimos</span><strong>+${Number(report.extraTime || 0)} min</strong></div></section>`;
+}
+
+function reportFooterHtml(report) {
+  return `<footer class="report-footer"><span>Documento ${escapeHtml(report.id)}</span><span>Gerado em ${escapeHtml(formatReportDateTime(report.generatedAt || report.createdAt))}</span></footer>`;
+}
+
+function printableReport(report) {
+  return `<article class="match-report-print report-document">${reportCoverHtml(report, 'RELATÓRIO FINAL DA PARTIDA')}
+  ${reportFactsHtml(report)}
+  <section class="report-summary"><h2>Resumo da partida</h2><div>${reportSummaryEntries(report).map(([label,value]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div></section>
+  <div class="report-team-grid">${reportTeamSection(report.home, 'MANDANTE')}${reportTeamSection(report.away, 'VISITANTE')}</div>
+  <section class="report-periods"><h2>Placar por período</h2><div>${reportPeriodScoresHtml(report)}</div></section>
   <section class="report-events"><h2>Linha do tempo completa</h2><table><thead><tr><th>Min.</th><th>Período</th><th>Evento</th><th>Equipe</th><th>Atleta</th><th>Detalhe</th><th>Placar</th></tr></thead><tbody>${reportEventRows(report) || '<tr><td colspan="7">Nenhum evento registrado.</td></tr>'}</tbody></table></section>
-  <footer class="report-footer"><span>Documento ${escapeHtml(report.id)}</span><span>Gerado em ${escapeHtml(formatReportDateTime(report.generatedAt || report.createdAt))}</span></footer></article>`;
+  ${reportFooterHtml(report)}</article>`;
+}
+
+function printableLineupReport(report) {
+  return `<article class="match-report-print report-document">${reportCoverHtml(report, 'ESCALAÇÃO DA PARTIDA')}
+  ${reportFactsHtml(report)}
+  <div class="report-team-grid">${reportTeamSection(report.home, 'MANDANTE')}${reportTeamSection(report.away, 'VISITANTE')}</div>
+  ${reportFooterHtml(report)}</article>`;
+}
+
+function printableActivitiesReport(report) {
+  return `<article class="match-report-print report-document">${reportCoverHtml(report, 'ATIVIDADES DA PARTIDA')}
+  ${reportFactsHtml(report)}
+  <section class="report-summary"><h2>Resumo da partida</h2><div>${reportSummaryEntries(report).map(([label,value]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div></section>
+  <section class="report-periods"><h2>Placar por período</h2><div>${reportPeriodScoresHtml(report)}</div></section>
+  <section class="report-events"><h2>Linha do tempo completa</h2><table><thead><tr><th>Min.</th><th>Período</th><th>Evento</th><th>Equipe</th><th>Atleta</th><th>Detalhe</th><th>Placar</th></tr></thead><tbody>${reportEventRows(report) || '<tr><td colspan="7">Nenhum evento registrado.</td></tr>'}</tbody></table></section>
+  ${reportFooterHtml(report)}</article>`;
+}
+
+const REPORT_EXPORT_TYPES = { full: { label: 'Tudo', build: printableReport, kicker: 'Relatório' }, lineup: { label: 'Escalação', build: printableLineupReport, kicker: 'Escalação' }, activities: { label: 'Atividades', build: printableActivitiesReport, kicker: 'Atividades' } };
+function printableByType(report, type) {
+  return (REPORT_EXPORT_TYPES[type] || REPORT_EXPORT_TYPES.full).build(report);
 }
 
 function printablePregame() {
@@ -1816,7 +1930,10 @@ function openPrintableDocument(title, content, printWindow = null) {
 function renderReportModule() {
   const reports = [reportSnapshot(), ...(state.completedReports || [])];
   const report = reports[Math.min(reportSelection, reports.length - 1)];
-  return `<div class="report-toolbar"><div><strong>Relatório completo da partida</strong><small>${state.matchEndedAt ? `Finalizado em ${formatReportDateTime(state.matchEndedAt)}` : 'Ao finalizar, o relatório é congelado no histórico e preparado em PDF.'}</small></div><div class="inline-actions"><button class="button primary" data-action="${state.matchEndedAt ? 'print-final-report' : 'finish-match'}">${state.matchEndedAt ? 'Abrir PDF final' : 'Finalizar partida e gerar PDF'}</button><button class="button" data-action="print-report">Exportar relatório selecionado</button></div></div>${state.completedReports?.length ? `<div class="field"><label>Histórico de partidas finalizadas</label><select data-report-selection><option value="0">Prévia da partida atual</option>${state.completedReports.map((item, index) => `<option value="${index + 1}" ${reportSelection === index + 1 ? 'selected' : ''}>${escapeHtml(item.date)} · ${escapeHtml(item.home.name)} ${escapeHtml(item.finalScore)} ${escapeHtml(item.away.name)}</option>`).join('')}</select></div>` : ''}${printableReport(report)}`;
+  const typeChoices = Object.entries(REPORT_EXPORT_TYPES).map(([key, meta]) => `<button class="layout-choice ${reportExportType === key ? 'active' : ''}" data-action="report-export-type" data-value="${key}"><strong>${escapeHtml(meta.label)}</strong></button>`).join('');
+  return `<div class="report-toolbar"><div><strong>Relatório da partida</strong><small>${state.matchEndedAt ? `Finalizado em ${formatReportDateTime(state.matchEndedAt)}` : 'Ao finalizar, o relatório é congelado no histórico e preparado em PDF.'}</small></div><div class="inline-actions"><button class="button primary" data-action="${state.matchEndedAt ? 'print-final-report' : 'finish-match'}">${state.matchEndedAt ? 'Abrir PDF final' : 'Finalizar partida e gerar PDF'}</button><button class="button" data-action="print-report">Exportar relatório selecionado</button></div></div>
+  <div class="scoreboard-layout-control"><span>Conteúdo do PDF</span><div role="group" aria-label="Tipo de relatório para exportação">${typeChoices}</div></div>
+  ${state.completedReports?.length ? `<div class="field"><label>Histórico de partidas finalizadas</label><select data-report-selection><option value="0">Prévia da partida atual</option>${state.completedReports.map((item, index) => `<option value="${index + 1}" ${reportSelection === index + 1 ? 'selected' : ''}>${escapeHtml(item.date)} · ${escapeHtml(item.home.name)} ${escapeHtml(item.finalScore)} ${escapeHtml(item.away.name)}</option>`).join('')}</select></div>` : ''}${printableByType(report, reportExportType)}`;
 }
 
 function renderPregameTeam(side) {
@@ -1866,6 +1983,7 @@ function renderOverlayBuilder() {
 }
 
 function renderModuleControls(key) {
+  if (key === 'dashboard') return renderDashboardModule();
   if (key === 'championships') return renderChampionshipsModule();
   if (key === 'matches') return renderMatchesModule();
   if (key === 'audit') return renderAuditModule();
@@ -1915,14 +2033,25 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['championships', 'matches', 'audit', 'builder', 'access'].includes(module?.key);
+  const isOperational = ['dashboard', 'championships', 'matches', 'audit', 'builder', 'access'].includes(module?.key);
   return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a><a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','audit'].includes(module.key) ? 'Gestão da transmissão' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.label)}</h1><p>${escapeHtml(module.caption)}</p></div><a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a></header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+}
+
+function renderMatchDashboard() {
+  const overlayLayers = ['scoreboard', 'event', 'sponsor', 'sponsor-bar', 'photo-lineup'];
+  const overlaysOnAir = overlayLayers.filter(layer => moduleOnAir(layer)).length;
+  const summary = reportSummaryEntries({ events: state.events || [] });
+  const status = state.matchEndedAt ? 'Finalizada' : state.clock.running ? 'Ao vivo' : 'Em preparação';
+  return `<section class="panel match-dashboard"><div class="section-header"><div><h3 class="section-title">Resumo da partida</h3><span class="section-kicker">${escapeHtml(status)}</span></div><a class="button subtle" href="${escapeHtml(moduleUrl('report'))}">Relatório completo</a></div>
+    <div class="match-dashboard-head"><div>${badge(state.home)}<strong>${escapeHtml(state.home.short)}</strong></div><b>${state.home.score} × ${state.away.score}</b><div><strong>${escapeHtml(state.away.short)}</strong>${badge(state.away)}</div></div>
+    <div class="dashboard-stats">${summary.map(([label, value]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}<article><strong>${overlaysOnAir}/${overlayLayers.length}</strong><span>Overlays no ar</span></article></div>
+  </section>`;
 }
 
 function renderApp() {
   const unread = operationsData.notifications.filter(item => !item.read).length;
   return `<div class="studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><div class="status-row sync-status" data-sync-status="${syncStatus}"><i class="live-dot"></i><span data-sync-label>${syncStatus === 'online' ? 'Sincronizado' : 'Conectando…'}</span><span class="status-time" data-clock>${clockText()}</span></div><a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a><a class="button" href="${escapeHtml(moduleUrl())}">${icons.layers} Módulos</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header>
-    <main class="module-workspace dashboard-workspace">${renderManagementSidebar('overview')}<div class="workspace dashboard-main"><div class="page-head"><div><div class="eyebrow">Central de transmissão · ${escapeHtml(currentSport().label)}</div><h1 class="page-title">Controle da partida</h1><p class="page-caption">${escapeHtml(state.competition)} · ${escapeHtml(state.venue)}</p></div><div class="match-tools"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><button class="button subtle" data-action="undo" ${state._backup ? '' : 'disabled'}>↶ Desfazer</button><button class="button" data-action="new-match">Nova partida</button></div></div>${renderSportSwitcher()}
+    <main class="module-workspace dashboard-workspace">${renderManagementSidebar('overview')}<div class="workspace dashboard-main"><div class="page-head"><div><div class="eyebrow">Central de transmissão · ${escapeHtml(currentSport().label)}</div><h1 class="page-title">Controle da partida</h1><p class="page-caption">${escapeHtml(state.competition)} · ${escapeHtml(state.venue)}</p></div><div class="match-tools"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><button class="button subtle" data-action="undo" ${state._backup ? '' : 'disabled'}>↶ Desfazer</button><button class="button" data-action="new-match">Nova partida</button></div></div>${renderSportSwitcher()}${renderMatchDashboard()}
       <div class="workspace-grid"><div class="control-column">${renderControls()}${renderEvents()}</div><div class="preview-column">${renderMonitor()}${renderThemes()}</div></div>
     </div></main></div>${drawer ? renderDrawer() : ''}`;
 }
@@ -2320,6 +2449,7 @@ function handleAction(action, target) {
   }
   if (action === 'read-notification') { postOperation('mark-notification-read', { id: target.dataset.value }); return; }
   if (action === 'read-all-notifications') { postOperation('mark-all-notifications-read'); return; }
+  if (action === 'refresh-dashboard-stats') { loadDashboardStats(); return; }
   if (action === 'module-tab') { moduleTab = target.dataset.value; render(); return; }
   if (action === 'add-custom-overlay') {
     const id = `overlay-${Date.now().toString(36)}`;
@@ -2363,6 +2493,11 @@ function handleAction(action, target) {
     commit(draft => { draft.sponsorBarMode = target.dataset.value === 'video' ? 'video' : 'images'; }, { immediate: true });
     return;
   }
+  if (action === 'report-export-type') {
+    reportExportType = REPORT_EXPORT_TYPES[target.dataset.value] ? target.dataset.value : 'full';
+    render();
+    return;
+  }
   if (action === 'finish-match') {
     const pdfWindow = window.open('', '_blank');
     commit(draft => {
@@ -2375,19 +2510,19 @@ function handleAction(action, target) {
     reportSelection = 1;
     render();
     const finalReport = state.completedReports[0];
-    openPrintableDocument(`Relatório final · ${finalReport.home.short} ${finalReport.finalScore} ${finalReport.away.short}`, printableReport(finalReport), pdfWindow);
+    openPrintableDocument(`${REPORT_EXPORT_TYPES[reportExportType].kicker} final · ${finalReport.home.short} ${finalReport.finalScore} ${finalReport.away.short}`, printableByType(finalReport, reportExportType), pdfWindow);
     toast('Partida finalizada. Relatório salvo e PDF preparado.');
     return;
   }
   if (action === 'print-final-report') {
     const finalReport = state.completedReports?.[0] || reportSnapshot(state, true);
-    openPrintableDocument(`Relatório final · ${finalReport.home.short} ${finalReport.finalScore} ${finalReport.away.short}`, printableReport(finalReport));
+    openPrintableDocument(`${REPORT_EXPORT_TYPES[reportExportType].kicker} final · ${finalReport.home.short} ${finalReport.finalScore} ${finalReport.away.short}`, printableByType(finalReport, reportExportType));
     return;
   }
   if (action === 'print-report' || action === 'print-pregame') {
     const selected = ([reportSnapshot(), ...(state.completedReports || [])])[reportSelection] || reportSnapshot();
-    const content = action === 'print-pregame' ? printablePregame() : printableReport(selected);
-    openPrintableDocument(action === 'print-pregame' ? `Resumo pré-jogo · ${state.home.short} × ${state.away.short}` : `Relatório · ${selected.home.short} ${selected.finalScore} ${selected.away.short}`, content);
+    const content = action === 'print-pregame' ? printablePregame() : printableByType(selected, reportExportType);
+    openPrintableDocument(action === 'print-pregame' ? `Resumo pré-jogo · ${state.home.short} × ${state.away.short}` : `${REPORT_EXPORT_TYPES[reportExportType].kicker} · ${selected.home.short} ${selected.finalScore} ${selected.away.short}`, content);
     return;
   }
   if (action === 'undo') {
@@ -2787,6 +2922,14 @@ function handleAction(action, target) {
     toast(state.sponsorBarLoop ? 'Looping da barra iniciado.' : 'Looping da barra interrompido.');
     return;
   }
+  if (action === 'toggle-sponsor-bar-schedule') {
+    commit(draft => {
+      draft.sponsorBarAutoSchedule = !draft.sponsorBarAutoSchedule;
+      draft.sponsorBarScheduleNextAt = draft.sponsorBarAutoSchedule ? Date.now() + clampNumber(draft.sponsorBarScheduleInterval, 1, 60, 5) * 60000 : 0;
+    }, { immediate: true });
+    toast(state.sponsorBarAutoSchedule ? 'Exibição automática da barra ativada.' : 'Exibição automática da barra desativada.');
+    return;
+  }
   if (action === 'next-sponsor-bar') {
     commit(draft => {
       draft.sponsorBarActiveIndex = (Number(draft.sponsorBarActiveIndex || 0) + 1) % Math.max(1, draft.sponsorBarItems.length);
@@ -3022,7 +3165,7 @@ app.addEventListener('input', event => {
       else if (key === 'scoreboardAnimation') draft.appearance[key] = ['assemble','slide','zoom','flip','elastic','glitch'].includes(target.value) ? target.value : 'assemble';
       else if (key === 'scoreboardShadow') draft.appearance.scoreboardShadow = ['none','soft','strong'].includes(target.value) ? target.value : 'soft';
       else if (key === 'sponsorAnimation') draft.appearance.sponsorAnimation = ['slide','zoom','flip','fade'].includes(target.value) ? target.value : 'slide';
-      else if (key === 'sponsorBarTransition') draft.appearance.sponsorBarTransition = ['fade','slide','zoom'].includes(target.value) ? target.value : 'fade';
+      else if (key === 'sponsorBarTransition') draft.appearance.sponsorBarTransition = ['fade','slide','zoom','flip','elastic'].includes(target.value) ? target.value : 'fade';
       else if (key === 'sponsorBarFit') draft.appearance.sponsorBarFit = ['cover','contain'].includes(target.value) ? target.value : 'cover';
       else if (key === 'sponsorBarBackground') draft.appearance.sponsorBarBackground = safeColor(target.value, draft.appearance.sponsorBarBackground);
       else if (key === 'sponsorFormat') {
@@ -3036,7 +3179,7 @@ app.addEventListener('input', event => {
   if (target.matches('[data-field]')) {
     const key = target.dataset.field;
     commit(draft => {
-      draft[key] = key === 'extraTime' ? clampNumber(target.value, 0, 30, 0) : key.toLowerCase().includes('color') || key.startsWith('custom') ? safeColor(target.value, draft[key]) : target.value;
+      draft[key] = key === 'extraTime' ? clampNumber(target.value, 0, 30, 0) : key === 'sponsorBarScheduleInterval' ? clampNumber(target.value, 1, 60, 5) : key.toLowerCase().includes('color') || key.startsWith('custom') ? safeColor(target.value, draft[key]) : target.value;
       if (key === 'customPrimary' || key === 'customAccent') draft.theme = 'custom';
     });
     return;
@@ -3435,6 +3578,12 @@ setInterval(() => {
       state.sponsorBarNextIndex = null;
     }
     if (isOutput || isPreview) render(); else commit(() => {}, { backup: false });
+  }
+  if (state.sponsorBarAutoSchedule && !state.visible.sponsorBar && !(state.sponsorBarTransition && Number(state.sponsorBarTransition.expiresAt || 0) > Date.now()) && state.sponsorBarScheduleNextAt && state.sponsorBarScheduleNextAt <= Date.now()) {
+    putSponsorBarOnAir(state);
+    state.sponsorBarExpiresAt = Date.now() + clampNumber(state.appearance?.sponsorBarDuration, 3, 60, 10) * 1000;
+    state.sponsorBarScheduleNextAt = Date.now() + clampNumber(state.sponsorBarScheduleInterval, 1, 60, 5) * 60000;
+    if (isOutput || isPreview) render(); else commit(() => {}, { backup: false, immediate: true });
   }
   if (state.lineupTransition && state.lineupTransition.expiresAt <= Date.now()) {
     state.lineupTransition = null;
