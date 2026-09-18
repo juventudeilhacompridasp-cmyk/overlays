@@ -44,6 +44,25 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
   (`--overlay-primary`, `--overlay-accent`, `--overlay-dark`, `--overlay-light` e
   `--scoreboard-radius`/`--scoreboard-surface`/`--scoreboard-accent`), então respeitam os temas
   prontos (Noturno, Campo, Clean) e a cor personalizada do campeonato sem nenhum código extra.
+- Botão "Acesso da equipe" na tela de login do administrador (`renderAdminAuthGate`), levando
+  direto a `/team`. Antes, quem chegasse em `/` ou `/manage/*` sem ser o time responsável não
+  tinha como encontrar a tela de login de equipe sem saber o endereço de cor.
+
+### Alterado
+- Nome exibido do produto passou de "Juventude Overlay Studio" para **"Juventude Esporte
+  Clube"** em todo lugar visível ao usuário: título da aba do navegador, cabeçalho do painel
+  (`/` e `/manage/*`), e todas as telas de login/portal (`/team`, setup do admin). A marca
+  agora vem de duas constantes centralizadas em `public/app.js` — `BRAND_NAME` (texto) e
+  `brandMark()` (símbolo, hoje o ícone de coroa em SVG) — para trocar em um só lugar quando o
+  logo oficial for aplicado. Identificadores técnicos não foram alterados nesta mudança:
+  nome do pacote npm, nomes de container/volume no Docker, nome do Worker no `wrangler.json`,
+  `project_id`/domínio do Site e a string `service` de `/health` continuam os mesmos de
+  propósito — mudar esses exigiria coordenar infraestrutura já publicada, fora do escopo do
+  pedido (só o nome da ferramenta, não a identidade técnica de deploy).
+- **Pendente:** o logo oficial (brasão dourado com coroa, grinalda de louros e "J") foi
+  enviado pelo usuário mas ainda não está no repositório — falta um meio de salvar o arquivo
+  anexado no chat em disco. `brandMark()` continua retornando o ícone de coroa em SVG até o
+  arquivo de imagem ser adicionado em `public/` e a função ser atualizada para usar `<img>`.
 
 ## [24] - 2026-09-17
 

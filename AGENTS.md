@@ -1,4 +1,4 @@
-# Instruções para agentes — Juventude Overlay Studio
+# Instruções para agentes — Juventude Esporte Clube
 
 Leia este arquivo antes de alterar o projeto. Vale para qualquer modelo, IDE ou agente.
 As instruções explícitas do usuário definem o escopo da tarefa.

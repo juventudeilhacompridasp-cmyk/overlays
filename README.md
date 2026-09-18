@@ -1,4 +1,4 @@
-# Juventude Overlay Studio
+# Juventude Esporte Clube
 
 Aplicação web para controle de placar, escalações, eventos, patrocinadores e outras artes de transmissões esportivas. Pode ser executada localmente, em uma rede privada ou em um servidor próprio.
 

@@ -458,7 +458,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  process.stdout.write(`Juventude Overlay Studio ready at http://127.0.0.1:${port}\n`);
+  process.stdout.write(`Juventude Esporte Clube ready at http://127.0.0.1:${port}\n`);
 });
 
 export { server };

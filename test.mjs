@@ -151,7 +151,7 @@ try {
   const homepage = await fetch(baseURL);
   verify('Dashboard returns HTTP 200', homepage.status === 200);
   const html = await homepage.text();
-  verify('HTML identifies Juventude Overlay Studio', html.includes('Juventude Overlay Studio'));
+  verify('HTML identifies Juventude Esporte Clube', html.includes('Juventude Esporte Clube'));
   const health = await (await fetch(`${baseURL}/health`)).json();
   verify('Health endpoint identifies a ready local service', health.ok === true && health.service === 'juventude-overlay-studio');
   verify('JavaScript asset returns HTTP 200', (await fetch(`${baseURL}/app.js`)).status === 200);
@@ -177,6 +177,9 @@ try {
   verify('Room-aware local state endpoint accepts and returns state for an authenticated administrator', probeWrite.ok && probeRead.ok === true);
 
   const dashboard = makeRuntime('/?room=principal');
+  dashboard.sandbox.__overlayStudio.setAdminSession('login', null);
+  verify('Admin login screen offers a direct link to the team access login', dashboard.app.innerHTML.includes('href="/team"') && dashboard.app.innerHTML.includes('Acesso da equipe') && dashboard.app.innerHTML.includes('Juventude Esporte Clube'));
+  dashboard.sandbox.__overlayStudio.setAdminSession('authenticated', 'sala-admin');
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
   verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));

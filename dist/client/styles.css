@@ -1007,6 +1007,7 @@ body.team-portal-output { min-width: 0; background: #090a0e; }
 .team-portal-state p { margin: 0; color: var(--muted); }
 .auth-card { min-height: 0; padding-block: clamp(40px, 8vw, 80px); }
 .auth-form { width: min(320px, 86vw); margin: 22px auto 0; text-align: left; }
+.auth-team-link { width: 100%; margin-top: 10px; }
 .auth-error { margin: 4px 0 0; color: var(--red); font-size: 12px; text-align: left; }
 .team-portal-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .portal-brand { display: flex; align-items: center; gap: 10px; color: var(--gold); }
