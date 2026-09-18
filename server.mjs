@@ -361,7 +361,7 @@ const server = http.createServer(async (request, response) => {
         sendJson(response, 400, { ok: false, error: 'Ação inválida.' });
         return;
       }
-      store.updatedAt = Date.now();
+      store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
       sharedStates.__operations__ = store;
       await persist();
       sendJson(response, 200, { ok: true, operations: store });
@@ -452,7 +452,7 @@ const server = http.createServer(async (request, response) => {
         const actor = (await getAdminSession(request))?.username || (await getTeamSession(request))?.username || team.name;
         markDelegationChanged(operations, team, actor);
         addAudit(operations, 'delegation.saved', actor, team.name, `${team.athletes.length} atletas; ${team.staff.length} membros da comissão.`);
-        operations.updatedAt = Date.now();
+        operations.updatedAt = Math.max(Date.now(), Number(operations.updatedAt || 0) + 1);
         sharedStates.__team_catalog__.updatedAt = operations.updatedAt;
         await persist();
         response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });

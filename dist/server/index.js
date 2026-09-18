@@ -301,7 +301,7 @@ async function hydrateLegacyTeamPhotos(env, catalog) {
       }
     }
     if (changed) {
-      catalog.updatedAt = Date.now();
+      catalog.updatedAt = Math.max(Date.now(), Number(catalog.updatedAt || 0) + 1);
       await persistState(env, 'team-catalog', catalog);
     }
     legacyPhotosHydrated = true;
@@ -514,7 +514,7 @@ export default {
         } else {
           return Response.json({ ok: false, error: 'Ação inválida.' }, { status: 400 });
         }
-        store.updatedAt = Date.now();
+        store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
         const persisted = await persistStateIfCurrent(env, '__operations__', store, baseUpdatedAt);
         if (!persisted.ok) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: normalizeOperations(persisted.state) }, { status: 409 });
         return Response.json({ ok: true, operations: store }, { headers: { 'cache-control': 'no-store' } });
@@ -602,7 +602,7 @@ export default {
           const actor = admin?.username || teamSession?.username || team.name;
           markDelegationChanged(operations, team, actor);
           addAudit(operations, 'delegation.saved', actor, team.name, team.athletes.length + ' atletas; ' + team.staff.length + ' membros da comissão.');
-          operations.updatedAt = Date.now();
+          operations.updatedAt = Math.max(Date.now(), Number(operations.updatedAt || 0) + 1);
           catalog.updatedAt = operations.updatedAt;
           await persistState(env, 'team-catalog', catalog);
           await persistState(env, '__operations__', operations);
@@ -647,7 +647,7 @@ export default {
           const headCoach = team.staff?.find(member => member.role === 'Treinador') || team.staff?.[0];
           if (headCoach) headCoach.photo = photoUrl;
         }
-        catalog.updatedAt = Date.now();
+        catalog.updatedAt = Math.max(Date.now(), Number(catalog.updatedAt || 0) + 1);
         await persistState(env, 'team-catalog', catalog);
         return Response.json({ ok: true, url: photoUrl });
       }
