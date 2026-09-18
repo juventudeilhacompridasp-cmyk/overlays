@@ -26,6 +26,29 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+## [27] - 2026-09-18
+
+### Adicionado
+- Seletor de **partida ativa** nos painéis administrativos. A escolha persiste no navegador e
+  passa a ser reutilizada em todas as rotas administrativas sem `room`, permitindo alternar
+  entre partidas já cadastradas sem perder seus estados individuais de placar e transmissão.
+
+### Alterado
+- A configuração visual completa dos overlays (`theme`, cores, tipografia, parâmetros de
+  aparência e tema visual) agora é armazenada como `globalAppearance` no catálogo compartilhado
+  e aplicada a todas as partidas, prévias e saídas do OBS. A sala continua isolando somente os
+  dados operacionais da partida.
+- O código da sala se torna imutável depois que a partida é criada, preservando o vínculo com o
+  estado persistido e com as URLs já configuradas no OBS.
+- Gravações de campeonatos, partidas e catálogo global passam a enviar `baseUpdatedAt`. O servidor
+  rejeita com HTTP 409 uma edição baseada em versão antiga, em vez de sobrescrever silenciosamente
+  mudanças feitas por outro Super Admin.
+
+### Corrigido
+- Os formulários de campeonato e partida mantêm rascunhos em memória durante sincronizações e
+  atualizações de tela. A consulta periódica só redesenha o painel quando a versão remota mudou,
+  eliminando a piscada que apagava texto em digitação.
+
 ## [26] - 2026-09-18
 
 ### Adicionado

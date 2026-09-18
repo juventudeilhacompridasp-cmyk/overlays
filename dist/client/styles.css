@@ -188,6 +188,8 @@ a { color: inherit; }
 .brand-caption { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
 .top-actions, .status-row, .section-header, .field-row, .inline-actions, .team-title, .event-line, .event-side, .overlay-card-top { display: flex; align-items: center; }
 .top-actions { gap: 20px; }
+.active-match-switcher { display:flex; align-items:center; gap:8px; min-width:250px; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.active-match-switcher select { min-width:190px; max-width:320px; height:38px; padding:0 30px 0 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text); font:600 12px/1 var(--font-ui); text-transform:none; letter-spacing:0; }
 .status-row { gap: 8px; color: var(--muted-soft); font-size: 12px; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px rgba(56, 217, 150, .7); }
 .sync-status[data-sync-status="syncing"] .live-dot, .sync-status[data-sync-status="connecting"] .live-dot { background: var(--yellow); box-shadow: 0 0 12px rgba(241, 191, 82, .7); animation: connection-pulse .8s ease-in-out infinite; }

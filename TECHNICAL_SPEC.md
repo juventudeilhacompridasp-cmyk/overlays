@@ -72,7 +72,7 @@ No Docker, estado e mídias ficam no volume `/app/.data`. Na versão hospedada p
 | `/manage/pregame` | Resumo para narradores |
 | `/manage/report` | Relatório e histórico da partida |
 | `/manage/teams` | Cadastro geral de equipes |
-| `/manage/appearance` | Aparência e tema do campeonato |
+| `/manage/appearance` | Aparência global dos overlays |
 | `/preview` | Visualização completa em 1920×1080 |
 | `/overlay` | Saída transparente para o OBS |
 | `/team?token=...` | Portal restrito de uma equipe |
@@ -94,8 +94,8 @@ Todas as telas que participam da mesma transmissão devem usar o mesmo valor de 
 | `GET /health` | Estado do serviço |
 | `GET /api/state?room=...` | Obtém o estado de uma sala |
 | `PUT /api/state?room=...` | Atualiza o estado de uma sala |
-| `GET /api/teams` | Obtém catálogo de equipes e temas |
-| `PUT /api/teams` | Atualiza catálogo de equipes e temas |
+| `GET /api/teams` | Obtém catálogo de equipes e aparência global |
+| `PUT /api/teams` | Atualiza catálogo e aparência global; exige `baseUpdatedAt` atual |
 | `GET /api/team-portal?token=...` | Obtém os dados da equipe autorizada |
 | `PUT /api/team-portal?token=...` | Atualiza somente a equipe autorizada |
 | `GET/PUT /api/team-athlete-photo` | Lê ou envia foto de atleta/comissão |
@@ -115,7 +115,21 @@ registro privado `__operations__` (Node) / chave D1 `__operations__` (Sites). Es
 bloqueado em `/api/state` e somente administradores podem consultá-lo. Logs não guardam senhas,
 cookies nem conteúdo de arquivos enviados.
 
-As respostas de estado usam `cache-control: no-store`. Atualizações concorrentes são comparadas pelo campo numérico `updatedAt`.
+As respostas de estado usam `cache-control: no-store`. Atualizações de campeonatos, partidas e
+catálogo compartilhado usam controle otimista: o cliente envia `baseUpdatedAt` e recebe HTTP 409
+quando outro administrador já publicou uma versão mais nova. No Worker, a gravação usa comparação
+atômica do `updated_at` no D1.
+
+O navegador guarda a última `room` escolhida e a reutiliza em todas as telas administrativas. O
+código da sala de uma partida é imutável após a criação para manter o vínculo com o estado e com
+as URLs do OBS.
+
+### Aparência global
+
+`globalAppearance`, dentro de `team-catalog`, contém tema, cores personalizadas, tipografia,
+parâmetros detalhados de aparência e identidade visual. Painéis, prévias e saídas do OBS aplicam
+esse registro sobre o estado de cada sala. Assim, partidas preservam placar, eventos, escalações e
+patrocinadores próprios, enquanto a identidade visual é única para toda a instalação.
 
 ## 8. Modelo de dados principal
 

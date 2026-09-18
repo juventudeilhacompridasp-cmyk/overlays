@@ -1,14 +1,12 @@
 const initialParams = new URLSearchParams(location.search);
 let requestedRoom = initialParams.get('room');
-if (!requestedRoom && location.pathname === '/') {
+if (!requestedRoom) {
   try { requestedRoom = localStorage.getItem('juventude.overlay.lastRoom'); } catch {}
-  requestedRoom ||= `partida-${Math.random().toString(36).slice(2, 8)}`;
-  globalThis.history?.replaceState?.({}, '', `/?room=${encodeURIComponent(requestedRoom)}`);
+  if (location.pathname === '/') requestedRoom ||= `partida-${Math.random().toString(36).slice(2, 8)}`;
+  if (requestedRoom) globalThis.history?.replaceState?.({}, '', `${location.pathname}?room=${encodeURIComponent(requestedRoom)}`);
 }
 const ROOM_ID = (requestedRoom || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
-if (location.pathname === '/') {
-  try { localStorage.setItem('juventude.overlay.lastRoom', ROOM_ID); } catch {}
-}
+try { localStorage.setItem('juventude.overlay.lastRoom', ROOM_ID); } catch {}
 const STORAGE_KEY = `juventude.overlay-studio.v2.${ROOM_ID}`;
 const TEAM_CATALOG_KEY = 'juventude.overlay-team-catalog.v1';
 const CHANNEL_NAME = `juventude-overlay-live.${ROOM_ID}`;
@@ -174,9 +172,9 @@ function normalizeTeamCatalog(value) {
 function loadTeamCatalog() {
   try {
     const saved = JSON.parse(localStorage.getItem(TEAM_CATALOG_KEY));
-    return { updatedAt: Number(saved?.updatedAt || 0), teams: normalizeTeamCatalog(saved?.teams || saved), championshipThemes: saved?.championshipThemes && typeof saved.championshipThemes === 'object' ? saved.championshipThemes : {} };
+    return { updatedAt: Number(saved?.updatedAt || 0), teams: normalizeTeamCatalog(saved?.teams || saved), championshipThemes: saved?.championshipThemes && typeof saved.championshipThemes === 'object' ? saved.championshipThemes : {}, globalAppearance: saved?.globalAppearance && typeof saved.globalAppearance === 'object' ? saved.globalAppearance : null };
   } catch {
-    return { updatedAt: 0, teams: defaultTeamCatalog(), championshipThemes: {} };
+    return { updatedAt: 0, teams: defaultTeamCatalog(), championshipThemes: {}, globalAppearance: null };
   }
 }
 
@@ -421,6 +419,7 @@ function loadState() {
 let state = loadState();
 let teamCatalogState = loadTeamCatalog();
 let teamCatalog = teamCatalogState.teams;
+let teamCatalogServerUpdatedAt = Number(teamCatalogState.updatedAt || 0);
 let selectedCatalogTeamId = teamCatalog.find(team => team.id === state.selectedTeams?.home)?.id || teamCatalog[0]?.id;
 let currentTab = 'match';
 let drawer = null;
@@ -439,6 +438,8 @@ let operationsData = { championships: [], matches: [], notifications: [], logs: 
 let operationsStatus = 'idle';
 let selectedChampionshipId = '';
 let selectedMatchId = '';
+let championshipDraft = null;
+let matchDraft = null;
 let teamDelegation = { status: 'draft' };
 let teamDelegationCompletion = { complete: false, missing: [] };
 let lastClock = '';
@@ -449,6 +450,35 @@ let outputFingerprints = {};
 let moduleTab = 'information';
 let reportSelection = 0;
 let selectedCustomOverlayId = state.customOverlays?.[0]?.id || '';
+
+function appearanceSnapshot(source = state) {
+  return {
+    theme: source.theme,
+    customPrimary: source.customPrimary,
+    customAccent: source.customAccent,
+    typeface: source.typeface,
+    appearance: structuredClone(source.appearance || defaultAppearance()),
+    championshipTheme: structuredClone(source.championshipTheme || createDefaultState().championshipTheme),
+  };
+}
+
+function applyGlobalAppearance(target, globalAppearance) {
+  if (!globalAppearance || typeof globalAppearance !== 'object') return target;
+  const defaults = createDefaultState();
+  target.theme = String(globalAppearance.theme || defaults.theme);
+  target.customPrimary = safeColor(globalAppearance.customPrimary, defaults.customPrimary);
+  target.customAccent = safeColor(globalAppearance.customAccent, defaults.customAccent);
+  target.typeface = TYPEFACES[globalAppearance.typeface] ? globalAppearance.typeface : defaults.typeface;
+  target.appearance = { ...defaultAppearance(), ...(globalAppearance.appearance || {}) };
+  target.championshipTheme = { ...defaults.championshipTheme, ...(globalAppearance.championshipTheme || {}), overrides: { ...(globalAppearance.championshipTheme?.overrides || {}) } };
+  return target;
+}
+
+function appearanceFingerprint(source = state) {
+  return JSON.stringify(appearanceSnapshot(source));
+}
+
+if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({
@@ -953,12 +983,17 @@ function schedulePush(immediate = false) {
 }
 
 function commit(mutator, options = {}) {
+  const previousAppearance = appearanceFingerprint();
   if (options.backup !== false) {
     const snapshot = structuredClone(state);
     delete snapshot._backup;
     state._backup = snapshot;
   }
   mutator(state);
+  if (appearanceFingerprint() !== previousAppearance) {
+    teamCatalogState.globalAppearance = appearanceSnapshot(state);
+    scheduleTeamCatalogPush(options.immediate);
+  }
   state.updatedAt = Math.max(Date.now(), Number(state.updatedAt || 0) + 1);
   writeLocal();
   channel?.postMessage({ type: 'state', state });
@@ -987,15 +1022,22 @@ function writeTeamCatalogLocal() {
 }
 
 function scheduleTeamCatalogPush(immediate = false) {
-  teamCatalogState = { updatedAt: Math.max(Date.now(), Number(teamCatalogState.updatedAt || 0) + 1), teams: teamCatalog, championshipThemes: teamCatalogState.championshipThemes || {} };
+  teamCatalogState = { updatedAt: Math.max(Date.now(), Number(teamCatalogState.updatedAt || 0) + 1), teams: teamCatalog, championshipThemes: teamCatalogState.championshipThemes || {}, globalAppearance: teamCatalogState.globalAppearance || appearanceSnapshot(state) };
   writeTeamCatalogLocal();
   clearTimeout(teamCatalogPushTimeout);
   teamCatalogPushTimeout = setTimeout(async () => {
     try {
       const response = await fetch('/api/teams', {
-        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(teamCatalogState),
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...teamCatalogState, baseUpdatedAt: teamCatalogServerUpdatedAt }),
       });
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        teamCatalogServerUpdatedAt = Number(data.catalog?.updatedAt || teamCatalogServerUpdatedAt);
+        toast('Outro administrador alterou a configuração global. Revise e salve novamente.');
+        return;
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      teamCatalogServerUpdatedAt = Number(data.updatedAt || teamCatalogState.updatedAt || 0);
       syncStatus = 'online';
       lastSyncAt = Date.now();
     } catch (error) {
@@ -1015,8 +1057,7 @@ function commitTeamCatalog(mutator, options = {}) {
 }
 
 function persistChampionshipTheme() {
-  teamCatalogState.championshipThemes ||= {};
-  teamCatalogState.championshipThemes[state.competition] = structuredClone(state.championshipTheme);
+  teamCatalogState.globalAppearance = appearanceSnapshot(state);
   scheduleTeamCatalogPush();
 }
 
@@ -1026,12 +1067,13 @@ async function initializeTeamCatalog() {
     const response = await fetch(`/api/teams?ts=${Date.now()}`, { cache: 'no-store' });
     const remote = response.ok ? await response.json() : null;
     if (remote?.teams?.length && Number(remote.updatedAt || 0) >= Number(teamCatalogState.updatedAt || 0)) {
-      teamCatalogState = { updatedAt: Number(remote.updatedAt || 0), teams: normalizeTeamCatalog(remote.teams), championshipThemes: remote.championshipThemes || {} };
+      teamCatalogState = { updatedAt: Number(remote.updatedAt || 0), teams: normalizeTeamCatalog(remote.teams), championshipThemes: remote.championshipThemes || {}, globalAppearance: remote.globalAppearance || null };
+      teamCatalogServerUpdatedAt = teamCatalogState.updatedAt;
       teamCatalog = teamCatalogState.teams;
       if (!teamCatalog.some(team => team.id === selectedCatalogTeamId)) selectedCatalogTeamId = teamCatalog[0]?.id;
       writeTeamCatalogLocal();
-      const savedTheme = teamCatalogState.championshipThemes?.[state.competition];
-      if (savedTheme) state.championshipTheme = { ...state.championshipTheme, ...savedTheme, overrides: { ...(savedTheme.overrides || {}) } };
+      if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
+      else if (!isOutput && !isPreview) { teamCatalogState.globalAppearance = appearanceSnapshot(state); scheduleTeamCatalogPush(true); }
       render();
     } else if (!isOutput && !isPreview) {
       scheduleTeamCatalogPush(true);
@@ -1047,8 +1089,10 @@ async function pollTeamCatalog() {
     const response = await fetch(`/api/teams?ts=${Date.now()}`, { cache: 'no-store' });
     const remote = response.ok ? await response.json() : null;
     if (!remote?.teams?.length || Number(remote.updatedAt || 0) <= Number(teamCatalogState.updatedAt || 0)) return;
-    teamCatalogState = { updatedAt: Number(remote.updatedAt), teams: normalizeTeamCatalog(remote.teams), championshipThemes: remote.championshipThemes || {} };
+    teamCatalogState = { updatedAt: Number(remote.updatedAt), teams: normalizeTeamCatalog(remote.teams), championshipThemes: remote.championshipThemes || {}, globalAppearance: remote.globalAppearance || null };
+    teamCatalogServerUpdatedAt = teamCatalogState.updatedAt;
     teamCatalog = teamCatalogState.teams;
+    if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
     writeTeamCatalogLocal();
     if (isOutput || isPreview) { render(); return; }
     commit(draft => {
@@ -1170,6 +1214,7 @@ async function loadOperationsData() {
     const response = await fetch(`/api/operations?ts=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
+    if (Number(data.updatedAt || 0) === Number(operationsData.updatedAt || 0)) { operationsStatus = 'ready'; return; }
     operationsData = {
       championships: Array.isArray(data.championships) ? data.championships : [],
       matches: Array.isArray(data.matches) ? data.matches : [],
@@ -1204,8 +1249,15 @@ async function loadOperationsData() {
 
 async function postOperation(action, payload = {}) {
   try {
-    const response = await fetch('/api/operations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, ...payload }) });
+    const response = await fetch('/api/operations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, baseUpdatedAt: Number(operationsData.updatedAt || 0), ...payload }) });
     const data = await response.json().catch(() => ({}));
+    if (response.status === 409 && data.operations) {
+      operationsData = data.operations;
+      operationsStatus = 'ready';
+      toast('Outro administrador atualizou esses dados. Seu rascunho foi mantido; revise e salve novamente.');
+      render();
+      return false;
+    }
     if (!response.ok) { toast(data.error || 'Não foi possível concluir a ação.'); return false; }
     operationsData = data.operations || operationsData;
     operationsStatus = 'ready';
@@ -1298,6 +1350,7 @@ async function uploadTeamPresentationPhoto(team, subjectId, file) {
 function receiveState(incoming) {
   if (!incoming || typeof incoming !== 'object' || !incoming.updatedAt || Number(incoming.updatedAt) <= Number(state.updatedAt)) return;
   state = normalizeState(incoming);
+  if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
   writeLocal();
   render();
 }
@@ -1504,23 +1557,31 @@ function renderOperationsState() {
   return '';
 }
 
+function renderMatchSwitcher() {
+  if (!operationsData.matches.length) return `<a class="button" href="${escapeHtml(moduleUrl('matches'))}">Cadastrar partida</a>`;
+  const sorted = [...operationsData.matches].sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || '')));
+  return `<label class="active-match-switcher"><span>Partida ativa</span><select id="active-match-switcher">${sorted.map(item => `<option value="${escapeHtml(item.room)}" ${item.room === ROOM_ID ? 'selected' : ''}>${escapeHtml(operationTeamName(item.homeTeamId))} × ${escapeHtml(operationTeamName(item.awayTeamId))} · ${escapeHtml(item.round || operationDate(item.kickoffAt, true))}</option>`).join('')}</select></label>`;
+}
+
 function renderChampionshipsModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
   const selected = operationsData.championships.find(item => item.id === selectedChampionshipId) || null;
+  const editor = championshipDraft || selected || { name: '', season: '', startDate: '', endDate: '', status: 'planned' };
   const list = operationsData.championships.map(item => `<button class="operations-item ${item.id === selected?.id ? 'active' : ''}" data-action="select-championship" data-value="${escapeHtml(item.id)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.season || 'Temporada não informada')} · ${operationDate(item.startDate)} → ${operationDate(item.endDate)}</small></span><b>${item.status === 'active' ? 'Em andamento' : item.status === 'finished' ? 'Encerrado' : 'Planejado'}</b></button>`).join('') || '<div class="portal-empty">Nenhum campeonato cadastrado.</div>';
-  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Campeonatos</strong><small>${operationsData.championships.length} cadastrado${operationsData.championships.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-championship">+ Novo</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar campeonato' : 'Novo campeonato'}</h3><p class="help-text">O campeonato organiza temporadas, partidas e a identidade usada na transmissão.</p></div></div><div class="field"><label for="championship-name">Nome</label><input id="championship-name" maxlength="100" value="${escapeHtml(selected?.name || '')}" placeholder="Ex.: Campeonato Municipal"></div><div class="field-row"><div class="field"><label for="championship-season">Temporada</label><input id="championship-season" maxlength="40" value="${escapeHtml(selected?.season || '')}" placeholder="2026"></div><div class="field"><label for="championship-status">Status</label><select id="championship-status"><option value="planned" ${selected?.status === 'planned' || !selected ? 'selected' : ''}>Planejado</option><option value="active" ${selected?.status === 'active' ? 'selected' : ''}>Em andamento</option><option value="finished" ${selected?.status === 'finished' ? 'selected' : ''}>Encerrado</option></select></div></div><div class="field-row"><div class="field"><label for="championship-start">Início</label><input id="championship-start" type="date" value="${escapeHtml(selected?.startDate || '')}"></div><div class="field"><label for="championship-end">Fim</label><input id="championship-end" type="date" value="${escapeHtml(selected?.endDate || '')}"></div></div><div class="operations-actions"><button class="button primary" data-action="save-championship" data-value="${escapeHtml(selected?.id || '')}">Salvar campeonato</button>${selected ? '<button class="button subtle danger" data-action="delete-championship" data-value="' + escapeHtml(selected.id) + '">Excluir</button>' : ''}</div></section></div>`;
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Campeonatos</strong><small>${operationsData.championships.length} cadastrado${operationsData.championships.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-championship">+ Novo</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar campeonato' : 'Novo campeonato'}</h3><p class="help-text">O campeonato organiza temporadas, partidas e a identidade usada na transmissão.</p></div></div><div class="field"><label for="championship-name">Nome</label><input id="championship-name" maxlength="100" value="${escapeHtml(editor.name || '')}" placeholder="Ex.: Campeonato Municipal"></div><div class="field-row"><div class="field"><label for="championship-season">Temporada</label><input id="championship-season" maxlength="40" value="${escapeHtml(editor.season || '')}" placeholder="2026"></div><div class="field"><label for="championship-status">Status</label><select id="championship-status"><option value="planned" ${editor.status === 'planned' ? 'selected' : ''}>Planejado</option><option value="active" ${editor.status === 'active' ? 'selected' : ''}>Em andamento</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Encerrado</option></select></div></div><div class="field-row"><div class="field"><label for="championship-start">Início</label><input id="championship-start" type="date" value="${escapeHtml(editor.startDate || '')}"></div><div class="field"><label for="championship-end">Fim</label><input id="championship-end" type="date" value="${escapeHtml(editor.endDate || '')}"></div></div><div class="operations-actions"><button class="button primary" data-action="save-championship" data-value="${escapeHtml(selected?.id || '')}">Salvar campeonato</button>${selected ? '<button class="button subtle danger" data-action="delete-championship" data-value="' + escapeHtml(selected.id) + '">Excluir</button>' : ''}</div></section></div>`;
 }
 
 function renderMatchesModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
   const selected = operationsData.matches.find(item => item.id === selectedMatchId) || null;
+  const editor = matchDraft || selected || { championshipId: '', homeTeamId: '', awayTeamId: '', kickoffAt: '', status: 'scheduled', round: '', venue: '', room: '' };
   const teamOptions = value => teamCatalog.map(team => `<option value="${escapeHtml(team.id)}" ${team.id === value ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('');
-  const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === selected?.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
+  const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === editor.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
   const sorted = [...operationsData.matches].sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || '')));
   const list = sorted.map(item => `<article class="match-operation-card ${item.id === selected?.id ? 'active' : ''}"><button data-action="select-match" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(operationChampionshipName(item.championshipId))} · ${escapeHtml(item.round || 'Rodada')}</span><strong>${escapeHtml(operationTeamName(item.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(item.awayTeamId))}</strong><small>${operationDate(item.kickoffAt, true)} · ${escapeHtml(item.venue || 'Local não informado')}</small></button><a class="button subtle" href="/?room=${encodeURIComponent(item.room)}">Abrir transmissão</a></article>`).join('') || '<div class="portal-empty">Nenhuma partida agendada.</div>';
-  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(selected?.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(selected?.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(selected?.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${selected?.status === 'scheduled' || !selected ? 'selected' : ''}>Agendada</option><option value="live" ${selected?.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${selected?.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${selected?.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(selected?.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(selected?.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(selected?.room || '')}" placeholder="Gerado automaticamente se ficar vazio"><small>Este código aparece em todas as URLs dos overlays desta partida.</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(editor.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(editor.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(editor.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${editor.status === 'scheduled' ? 'selected' : ''}>Agendada</option><option value="live" ${editor.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${editor.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(editor.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(editor.room || '')}" ${selected ? 'readonly' : ''} placeholder="Gerado automaticamente se ficar vazio"><small>${selected ? 'A sala é permanente para preservar os overlays e URLs desta partida.' : 'Este código aparece em todas as URLs dos overlays desta partida.'}</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
 }
 
 function renderAuditModule() {
@@ -2009,6 +2070,18 @@ function ensureEmergencyButton() {
   document.body.append(button);
 }
 
+function ensureMatchSwitcher() {
+  if (!isAdminPanel || adminSession.status !== 'authenticated' || !operationsData.matches.length || document.getElementById('active-match-switcher')) return;
+  const actions = document.querySelector('.top-actions');
+  if (!actions) return;
+  const wrapper = document.createElement('label');
+  wrapper.className = 'active-match-switcher';
+  wrapper.innerHTML = renderMatchSwitcher();
+  const nested = wrapper.querySelector('.active-match-switcher');
+  if (nested) wrapper.innerHTML = nested.innerHTML;
+  actions.prepend(wrapper);
+}
+
 function render() {
   if (isOutput) { renderIsolatedOutput(); return; }
   const remembered = rememberFocusedField();
@@ -2028,6 +2101,7 @@ function render() {
       try { replacement.setSelectionRange(remembered.start, remembered.end); } catch {}
     }
   }
+  ensureMatchSwitcher();
   ensureEmergencyButton();
 }
 
@@ -2207,11 +2281,11 @@ function handleAction(action, target) {
   }
   if (action === 'team-logout') { logoutTeamPortal(); return; }
   if (action === 'complete-team-delegation') { completeTeamDelegation(); return; }
-  if (action === 'new-championship') { selectedChampionshipId = ''; render(); return; }
-  if (action === 'select-championship') { selectedChampionshipId = target.dataset.value; render(); return; }
+  if (action === 'new-championship') { selectedChampionshipId = ''; championshipDraft = { name: '', season: '', startDate: '', endDate: '', status: 'planned' }; render(); return; }
+  if (action === 'select-championship') { selectedChampionshipId = target.dataset.value; championshipDraft = structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || null); render(); return; }
   if (action === 'save-championship') {
     const item = { id: target.dataset.value || '', name: document.getElementById('championship-name')?.value || '', season: document.getElementById('championship-season')?.value || '', startDate: document.getElementById('championship-start')?.value || '', endDate: document.getElementById('championship-end')?.value || '', status: document.getElementById('championship-status')?.value || 'planned' };
-    postOperation('upsert-championship', { item }).then(ok => { if (!ok) return; selectedChampionshipId = operationsData.championships.find(entry => entry.name === item.name)?.id || selectedChampionshipId; toast('Campeonato salvo.'); render(); });
+    postOperation('upsert-championship', { item }).then(ok => { if (!ok) return; selectedChampionshipId = operationsData.championships.find(entry => entry.name === item.name)?.id || selectedChampionshipId; championshipDraft = null; toast('Campeonato salvo.'); render(); });
     return;
   }
   if (action === 'delete-championship') {
@@ -2219,11 +2293,11 @@ function handleAction(action, target) {
     postOperation('delete-championship', { id: target.dataset.value }).then(ok => { if (ok) { selectedChampionshipId = ''; toast('Campeonato excluído.'); } });
     return;
   }
-  if (action === 'new-operation-match') { selectedMatchId = ''; render(); return; }
-  if (action === 'select-match') { selectedMatchId = target.dataset.value; render(); return; }
+  if (action === 'new-operation-match') { selectedMatchId = ''; matchDraft = { championshipId: '', homeTeamId: '', awayTeamId: '', kickoffAt: '', status: 'scheduled', round: '', venue: '', room: '' }; render(); return; }
+  if (action === 'select-match') { selectedMatchId = target.dataset.value; matchDraft = structuredClone(operationsData.matches.find(item => item.id === selectedMatchId) || null); render(); return; }
   if (action === 'save-operation-match') {
     const item = { id: target.dataset.value || '', championshipId: document.getElementById('match-championship')?.value || '', homeTeamId: document.getElementById('operation-home')?.value || '', awayTeamId: document.getElementById('operation-away')?.value || '', kickoffAt: document.getElementById('match-kickoff')?.value || '', status: document.getElementById('match-status')?.value || 'scheduled', round: document.getElementById('match-round')?.value || '', venue: document.getElementById('match-venue')?.value || '', room: document.getElementById('match-room')?.value || '' };
-    postOperation('upsert-match', { item }).then(ok => { if (!ok) return; const saved = operationsData.matches.find(entry => entry.id === item.id) || operationsData.matches[0]; selectedMatchId = saved?.id || ''; toast('Partida salva com uma sala própria de overlays.'); render(); });
+    postOperation('upsert-match', { item }).then(ok => { if (!ok) return; const saved = operationsData.matches.find(entry => entry.id === item.id) || operationsData.matches[0]; selectedMatchId = saved?.id || ''; matchDraft = null; toast('Partida salva com uma sala própria de overlays.'); render(); });
     return;
   }
   if (action === 'delete-operation-match') {
@@ -2768,6 +2842,18 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  const championshipFields = { 'championship-name': 'name', 'championship-season': 'season', 'championship-start': 'startDate', 'championship-end': 'endDate', 'championship-status': 'status' };
+  if (championshipFields[target.id]) {
+    championshipDraft ||= structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || { name: '', season: '', startDate: '', endDate: '', status: 'planned' });
+    championshipDraft[championshipFields[target.id]] = target.value;
+    return;
+  }
+  const matchFields = { 'match-championship': 'championshipId', 'operation-home': 'homeTeamId', 'operation-away': 'awayTeamId', 'match-kickoff': 'kickoffAt', 'match-status': 'status', 'match-round': 'round', 'match-venue': 'venue', 'match-room': 'room' };
+  if (matchFields[target.id]) {
+    matchDraft ||= structuredClone(operationsData.matches.find(item => item.id === selectedMatchId) || { championshipId: '', homeTeamId: '', awayTeamId: '', kickoffAt: '', status: 'scheduled', round: '', venue: '', room: '' });
+    matchDraft[matchFields[target.id]] = target.value;
+    return;
+  }
   if (target.matches('[data-portal-team-field], [data-portal-athlete-field], [data-portal-staff-name], [data-portal-staff-role], [data-portal-coach-name]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
   if (target.matches('[data-custom-field]')) {
     const field = target.dataset.customField;
@@ -2913,10 +2999,6 @@ app.addEventListener('input', event => {
     commit(draft => {
       draft[key] = key === 'extraTime' ? clampNumber(target.value, 0, 30, 0) : key.toLowerCase().includes('color') || key.startsWith('custom') ? safeColor(target.value, draft[key]) : target.value;
       if (key === 'customPrimary' || key === 'customAccent') draft.theme = 'custom';
-      if (key === 'competition' && teamCatalogState.championshipThemes?.[draft.competition]) {
-        draft.championshipTheme = structuredClone(teamCatalogState.championshipThemes[draft.competition]);
-        if (draft.championshipTheme.enabled) { draft.theme = 'custom'; draft.customPrimary = draft.championshipTheme.primary; draft.customAccent = draft.championshipTheme.secondary; }
-      }
     });
     return;
   }
@@ -2949,6 +3031,14 @@ app.addEventListener('input', event => {
 
 app.addEventListener('change', event => {
   const target = event.target;
+  if (target.matches('#active-match-switcher')) {
+    const room = String(target.value || '').replace(/[^a-z0-9-]/gi, '').slice(0, 48);
+    if (room && room !== ROOM_ID) {
+      try { localStorage.setItem('juventude.overlay.lastRoom', room); } catch {}
+      location.href = `${location.pathname}?room=${encodeURIComponent(room)}`;
+    }
+    return;
+  }
   if (target.matches('[data-portal-team-logo], [data-portal-athlete-photo], [data-portal-staff-photo], [data-portal-coach-photo], [data-portal-formation]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
   if (target.matches('[data-custom-media]') && target.files?.[0]) {
     const file = target.files[0];
@@ -3229,6 +3319,7 @@ else {
   initializeTeamCatalog();
   setInterval(pollServer, isOutput || isPreview ? 320 : 800);
   setInterval(pollTeamCatalog, isOutput || isPreview ? 1600 : 5000);
+  if (isAdminPanel) setInterval(loadOperationsData, 5000);
 }
 setInterval(() => {
   if (isTeamPortal) return;
