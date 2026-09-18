@@ -449,6 +449,10 @@ const server = http.createServer(async (request, response) => {
       '.js': 'text/javascript; charset=utf-8',
       '.svg': 'image/svg+xml',
       '.json': 'application/json; charset=utf-8',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
     }[extension] || 'application/octet-stream';
     response.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store' });
     response.end(data);
@@ -458,7 +462,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, host, () => {
-  process.stdout.write(`Juventude Overlay Studio ready at http://127.0.0.1:${port}\n`);
+  process.stdout.write(`Juventude Esporte Clube ready at http://127.0.0.1:${port}\n`);
 });
 
 export { server };

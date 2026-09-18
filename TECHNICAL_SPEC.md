@@ -1,8 +1,8 @@
-# Especificação técnica — Juventude Overlay Studio
+# Especificação técnica — Juventude Esporte Clube
 
 ## 1. Visão geral
 
-O Juventude Overlay Studio é uma aplicação web monolítica e sem dependências externas de runtime. Um servidor Node.js entrega a interface estática e expõe APIs HTTP para sincronizar o estado das transmissões, guardar equipes e armazenar mídias.
+O sistema da Juventude Esporte Clube é uma aplicação web monolítica e sem dependências externas de runtime. Um servidor Node.js entrega a interface estática e expõe APIs HTTP para sincronizar o estado das transmissões, guardar equipes e armazenar mídias.
 
 O mesmo código de interface atende quatro contextos:
 

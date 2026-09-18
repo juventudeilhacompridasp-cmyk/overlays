@@ -23,7 +23,7 @@ O cadastro inicial fica bloqueado sem esse código. Veja docs/AUTH.md.
 ## Fluxo operacional
 1. Desenvolver no OpenCode com qualquer modelo e enviar uma branch/PR.
 2. Executar a CI e integrar a alteração na main. Registrar o SHA completo aprovado.
-3. Solicitar ao publicador: “Publique no Juventude Overlay Studio o commit <SHA> do
+3. Solicitar ao publicador: “Publique no site da Juventude Esporte Clube o commit <SHA> do
    repositório juventudeilhacompridasp-cmyk/overlays, seguindo docs/DEPLOY.md.”
 4. O publicador executa o procedimento abaixo e informa URL, versão e resultado.
 5. Conferir o fluxo alterado usando uma sala de teste. Testes não devem alterar a partida real.

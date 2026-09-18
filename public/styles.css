@@ -182,7 +182,7 @@ a { color: inherit; }
 .studio { min-height: 100vh; }
 .topbar { height: 72px; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: rgba(10, 11, 15, .94); position: sticky; top: 0; z-index: 20; }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; }
-.brand-mark { width: 37px; height: 40px; color: var(--gold); }
+.brand-mark { width: 37px; height: 40px; object-fit: contain; color: var(--gold); }
 .brand-copy { display: grid; gap: 2px; }
 .brand-name { font-family: var(--display); font-size: 17px; font-weight: 700; letter-spacing: 1.7px; text-transform: uppercase; }
 .brand-caption { font-size: 10px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; }
@@ -1007,6 +1007,7 @@ body.team-portal-output { min-width: 0; background: #090a0e; }
 .team-portal-state p { margin: 0; color: var(--muted); }
 .auth-card { min-height: 0; padding-block: clamp(40px, 8vw, 80px); }
 .auth-form { width: min(320px, 86vw); margin: 22px auto 0; text-align: left; }
+.auth-team-link { width: 100%; margin-top: 10px; }
 .auth-error { margin: 4px 0 0; color: var(--red); font-size: 12px; text-align: left; }
 .team-portal-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .portal-brand { display: flex; align-items: center; gap: 10px; color: var(--gold); }
