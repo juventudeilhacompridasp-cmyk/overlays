@@ -26,6 +26,28 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+## [26] - 2026-09-18
+
+### Adicionado
+- Conceito operacional de **campeonatos e partidas** no painel: `/manage/championships` mantém
+  nome, temporada, período e status da competição; `/manage/matches` agenda cada confronto com
+  campeonato, mandante, visitante, data, local, fase e uma `room` exclusiva. Ao abrir uma
+  partida, o painel vincula a sala ao cadastro e preenche competição e equipes, enquanto placar,
+  eventos, escalações, mídias e URLs do OBS continuam isolados pelo contrato de `room` existente.
+- Fluxo formal de conclusão da delegação no portal `/team`. O gestor salva o rascunho e usa
+  **Concluir e avisar** quando todos os atletas possuem nome/número e toda a comissão possui
+  nome/função. A conclusão cria um aviso não lido para o Super Admin; alterações posteriores
+  reabrem a revisão e geram um novo aviso.
+- Módulo `/manage/audit` com central de avisos e log das ações de campeonato, partida e
+  delegação. Os administradores podem marcar avisos individualmente ou em lote como lidos; o
+  histórico é limitado aos 500 eventos mais recentes e não armazena senhas, cookies ou arquivos.
+- APIs administrativas `GET/POST /api/operations` e API autenticada
+  `POST /api/team-delegation/complete`, implementadas tanto no servidor Node quanto no Worker.
+  Os dados usam o registro privado `__operations__`, que não pode ser lido nem sobrescrito por
+  uma `room` escolhida pelo usuário.
+
+## [25] - 2026-09-18
+
 ### Adicionado
 - Três novos estilos de placar em "Estilo do placar" (`/manage/scoreboard` → Aparência, e no
   seletor genérico da aba Aparência): **Neon** (contorno e sombra com brilho na cor de destaque

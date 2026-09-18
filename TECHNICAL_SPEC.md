@@ -100,6 +100,20 @@ Todas as telas que participam da mesma transmissão devem usar o mesmo valor de 
 | `PUT /api/team-portal?token=...` | Atualiza somente a equipe autorizada |
 | `GET/PUT /api/team-athlete-photo` | Lê ou envia foto de atleta/comissão |
 | `GET/PUT /api/assets/...` | Lê ou envia escudos e mídias de overlays |
+| `GET/POST /api/operations` | Lista e altera campeonatos, partidas, avisos e logs; exige administrador |
+| `POST /api/team-delegation/complete` | Conclui a delegação autenticada, avisa o Super Admin e registra auditoria |
+
+### Campeonatos, partidas e salas
+
+Campeonatos são cadastros permanentes de temporada. Cada partida aponta para um campeonato,
+mandante, visitante, data, local, fase e um código de `room` exclusivo. Os overlays continuam
+usando o contrato de sala já existente; abrir uma partida pela agenda apenas vincula e preenche
+a sala correspondente, sem misturar placar, eventos ou mídias de outras transmissões.
+
+Os catálogos operacionais, avisos de conclusão de delegação, status de revisão e logs ficam no
+registro privado `__operations__` (Node) / chave D1 `__operations__` (Sites). Esse registro é
+bloqueado em `/api/state` e somente administradores podem consultá-lo. Logs não guardam senhas,
+cookies nem conteúdo de arquivos enviados.
 
 As respostas de estado usam `cache-control: no-store`. Atualizações concorrentes são comparadas pelo campo numérico `updatedAt`.
 

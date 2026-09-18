@@ -185,8 +185,8 @@ try {
   dashboard.sandbox.__overlayStudio.setAdminSession('authenticated', 'sala-admin');
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
-  verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));
-  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 11);
+  verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Organização', 'Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));
+  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 14);
   const lineupModule = makeRuntime('/manage/lineup?room=module-lineup', { broadcast: false });
   verify('Dedicated routes share the same navigation and mark the selected overlay', lineupModule.app.innerHTML.includes('aria-label="Navegação dos overlays"') && /class="active" href="[^"]*\/manage\/lineup/.test(lineupModule.app.innerHTML));
   verify('Lineup module combines dedicated controls, isolated preview, and OBS URL access', lineupModule.app.innerHTML.includes('Direção da apresentação') && lineupModule.app.innerHTML.includes('Prévia isolada') && lineupModule.app.innerHTML.includes('data-value="photo-lineup"'));
@@ -566,6 +566,17 @@ try {
   const portalRead = await (await worker.fetch(new Request('https://example.test/api/team-portal?token=token123'), {})).json();
   const portalUpdate = await (await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ athletes: [{ id: 'ana-1', name: 'Ana Souza', number: '10', height: '1.76', photo: '', squadRole: 'reserve', position: 'ATA' }], staff: [{ id: 'coach', name: 'Carlos Silva', role: 'Treinador', photo: '' }, { id: 'staff-assistant', name: 'Paulo Lima', role: 'Auxiliar técnico', photo: '' }], coach: { name: 'Carlos Silva', photo: '' }, formation: '4-2-3-1' }), headers: { 'content-type': 'application/json', cookie: teamCookie } }), {})).json();
   verify('Production catalog and team portal share athletes and complete technical staff', catalogWrite.status === 200 && portalRead.team.athletes[0].height === '1.75' && portalUpdate.team.roster === '10 Ana Souza' && portalUpdate.team.athletes[0].squadRole === 'reserve' && portalUpdate.team.athletes[0].position === 'ATA' && portalUpdate.team.coach.name === 'Carlos Silva' && portalUpdate.team.staff.length === 2 && portalUpdate.team.staff[1].name === 'Paulo Lima' && portalUpdate.team.formation === '4-2-3-1');
+  const unauthorizedOperations = await worker.fetch(new Request('https://example.test/api/operations'), {});
+  verify('Operational catalogs and audit logs require an administrator session', unauthorizedOperations.status === 401);
+  const championshipCreate = await worker.fetch(new Request('https://example.test/api/operations', { method: 'POST', body: JSON.stringify({ action: 'upsert-championship', item: { name: 'Copa Teste', season: '2026', status: 'active' } }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const championshipData = await championshipCreate.json();
+  const championshipId = championshipData.operations.championships[0].id;
+  const matchCreate = await worker.fetch(new Request('https://example.test/api/operations', { method: 'POST', body: JSON.stringify({ action: 'upsert-match', item: { championshipId, homeTeamId: 'team-test', awayTeamId: 'team-rival', room: 'copa-teste-final', kickoffAt: '2026-09-20T18:00', status: 'scheduled' } }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const matchData = await matchCreate.json();
+  verify('An administrator can organize championships and match-specific overlay rooms', championshipCreate.status === 200 && matchCreate.status === 200 && matchData.operations.matches[0].room === 'copa-teste-final');
+  const delegationComplete = await worker.fetch(new Request('https://example.test/api/team-delegation/complete', { method: 'POST', body: JSON.stringify({ teamId: 'team-test' }), headers: { 'content-type': 'application/json', cookie: teamCookie } }), {});
+  const operationsAfterCompletion = await (await worker.fetch(new Request('https://example.test/api/operations', { headers: { cookie: workerAdminCookie } }), {})).json();
+  verify('Completing a team delegation creates an unread Super Admin notification and an audit entry', delegationComplete.status === 200 && operationsAfterCompletion.notifications.some(item => item.teamId === 'team-test' && !item.read) && operationsAfterCompletion.logs.some(item => item.action === 'delegation.completed' && item.target === 'Time Teste'));
   const portalWriteByOtherTeam = await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test', { method: 'PUT', body: JSON.stringify({ name: 'Invasão' }), headers: { 'content-type': 'application/json' } }), { OVERLAY_SETUP_TOKEN: setupToken });
   verify('Team portal writes are rejected without a matching session', portalWriteByOtherTeam.status === 401);
   const teamCredentialsList = await (await worker.fetch(new Request('https://example.test/api/auth/team/credentials', { headers: { cookie: workerAdminCookie } }), {})).json();
@@ -655,7 +666,7 @@ try {
   await reader.fetch(new Request('https://example.test/api/state', { method: 'PUT', body: JSON.stringify(older), headers: { 'content-type': 'application/json', cookie: writerAdminCookie } }), { DB: database, OVERLAY_SETUP_TOKEN: setupToken });
   const protectedState = await (await writer.fetch(new Request('https://example.test/api/state'), { DB: database, OVERLAY_SETUP_TOKEN: setupToken })).json();
   verify('Older browser sessions cannot overwrite a newer shared scoreboard', protectedState.home.score === 22);
-  for (const room of ['auth-secret', 'admins', 'team-credentials', 'team-catalog', '__auth_secret__', '__admins__', '__team_credentials__', 'AUTH-SECRET']) {
+  for (const room of ['auth-secret', 'admins', 'team-credentials', 'team-catalog', 'operations', '__auth_secret__', '__admins__', '__team_credentials__', '__operations__', 'AUTH-SECRET']) {
     for (const method of ['GET', 'PUT']) {
       const options = { method, headers: { 'content-type': 'application/json', cookie: writerAdminCookie } };
       if (method === 'PUT') options.body = JSON.stringify({ updatedAt: Date.now(), value: 'attack' });

@@ -1016,6 +1016,54 @@ body.team-portal-output { min-width: 0; background: #090a0e; }
 .portal-status { padding: 6px 9px; border-radius: 20px; background: var(--surface-3); color: var(--muted-soft); font-size: 10px; }
 .portal-status-saved { background: rgba(56,217,150,.1); color: var(--green); }
 .portal-status-error { background: rgba(250,98,110,.1); color: var(--red); }
+.notification-button { position: relative; }
+.notification-button.has-unread { border-color: rgba(216,173,86,.48); color: var(--gold); }
+.notification-button b { min-width: 18px; height: 18px; padding: 0 5px; display: inline-grid; place-items: center; border-radius: 10px; background: var(--gold); color: #0b0c10; font-size: 10px; }
+.operations-layout { display: grid; grid-template-columns: minmax(280px,.8fr) minmax(360px,1.2fr); gap: 18px; }
+.operations-list, .operations-editor { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: #101117; }
+.operations-list { display: grid; align-content: start; gap: 8px; }
+.operations-list-head { margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.operations-list-head > div { display: grid; gap: 3px; }
+.operations-list-head strong { font-size: 13px; }
+.operations-list-head small { color: var(--muted); font-size: 10px; }
+.operations-item { width: 100%; padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--line); border-radius: 6px; background: #14151c; color: var(--text); text-align: left; cursor: pointer; }
+.operations-item:hover, .operations-item.active, .match-operation-card.active { border-color: rgba(216,173,86,.48); background: rgba(216,173,86,.07); }
+.operations-item > span { min-width: 0; display: grid; gap: 4px; }
+.operations-item strong { font-size: 12px; }
+.operations-item small { color: var(--muted); font-size: 10px; }
+.operations-item > b { color: var(--gold); font-size: 9px; text-transform: uppercase; }
+.operations-editor .field { margin-bottom: 13px; }
+.operations-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.button.danger { color: var(--red); }
+.match-operation-card { padding: 11px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 7px; background: #14151c; }
+.match-operation-card > button { min-width: 0; display: grid; gap: 4px; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; }
+.match-operation-card > button span, .match-operation-card > button small { color: var(--muted); font-size: 9px; }
+.match-operation-card > button strong { font-size: 12px; }
+.match-operation-card > button strong b { padding: 0 5px; color: var(--gold); }
+.audit-grid { display: grid; gap: 24px; }
+.notification-list { display: grid; gap: 8px; }
+.notification-card { padding: 13px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid var(--line); border-radius: 7px; background: #111219; }
+.notification-card.unread { border-color: rgba(216,173,86,.45); box-shadow: inset 3px 0 var(--gold); }
+.notification-card > div { display: grid; gap: 4px; }
+.notification-card span { color: var(--gold); font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.notification-card strong { font-size: 12px; }
+.notification-card p { margin: 0; color: var(--muted-soft); font-size: 11px; }
+.notification-card small, .notification-card > b { color: var(--muted); font-size: 9px; }
+.audit-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 7px; }
+.audit-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.audit-table th, .audit-table td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.audit-table th { color: var(--muted); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
+.audit-table td:first-child { white-space: nowrap; color: var(--muted); }
+.audit-table td:last-child { display: grid; gap: 3px; }
+.audit-table td small { color: var(--muted); }
+.delegation-completion { margin-top: 20px; padding: 16px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid rgba(216,173,86,.3); border-radius: 8px; background: rgba(216,173,86,.06); }
+.delegation-completion > div { display: grid; gap: 4px; }
+.delegation-completion span { color: var(--gold); font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+.delegation-completion strong { font-size: 13px; }
+.delegation-completion p { margin: 0; color: var(--muted); font-size: 11px; }
+.delegation-completion.is-complete { border-color: rgba(56,217,150,.35); background: rgba(56,217,150,.07); }
+.delegation-completion.is-complete span { color: var(--green); }
+.delegation-completion.needs-review { border-color: rgba(250,174,70,.42); }
 .team-portal-team { margin: 30px 0; display: flex; align-items: center; gap: 18px; }
 .portal-team-logo { width: 82px; height: 82px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid rgba(216,173,86,.32); border-radius: 16px; background: rgba(216,173,86,.07); color: var(--gold); font-family: var(--display); font-size: 25px; font-weight: 700; }
 .portal-team-logo img { width: 84%; height: 84%; object-fit: contain; }
@@ -1164,4 +1212,17 @@ body.preview-output { min-width: 0; min-height: 100vh; display: grid; place-item
   .module-hub-grid, .recommended-flow > div { grid-template-columns: 1fr; }
   .module-monitor .section-header { align-items: flex-start; gap: 8px; }
   .module-monitor .inline-actions { flex-wrap: wrap; justify-content: flex-end; }
+}
+
+@media (max-width: 900px) {
+  .operations-layout { grid-template-columns: 1fr; }
+  .delegation-completion { align-items: stretch; flex-direction: column; }
+  .delegation-completion .button { width: 100%; }
+}
+
+@media (max-width: 560px) {
+  .match-operation-card { grid-template-columns: 1fr; }
+  .notification-card { align-items: stretch; flex-direction: column; }
+  .notification-card .button { width: 100%; }
+  .audit-table { min-width: 680px; }
 }
