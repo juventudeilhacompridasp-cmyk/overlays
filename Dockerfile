@@ -1,6 +1,6 @@
 FROM node:22-alpine
 
-LABEL org.opencontainers.image.title="Juventude Overlay Studio"
+LABEL org.opencontainers.image.title="Juventude Esporte Clube"
 LABEL org.opencontainers.image.description="Painel e overlays esportivos para OBS"
 
 WORKDIR /app

@@ -53,16 +53,29 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
   Clube"** em todo lugar visível ao usuário: título da aba do navegador, cabeçalho do painel
   (`/` e `/manage/*`), e todas as telas de login/portal (`/team`, setup do admin). A marca
   agora vem de duas constantes centralizadas em `public/app.js` — `BRAND_NAME` (texto) e
-  `brandMark()` (símbolo, hoje o ícone de coroa em SVG) — para trocar em um só lugar quando o
-  logo oficial for aplicado. Identificadores técnicos não foram alterados nesta mudança:
+  `brandMark()` (símbolo, ver entrada abaixo sobre o logo oficial). Identificadores técnicos
+  não foram alterados nesta mudança:
   nome do pacote npm, nomes de container/volume no Docker, nome do Worker no `wrangler.json`,
   `project_id`/domínio do Site e a string `service` de `/health` continuam os mesmos de
   propósito — mudar esses exigiria coordenar infraestrutura já publicada, fora do escopo do
   pedido (só o nome da ferramenta, não a identidade técnica de deploy).
-- **Pendente:** o logo oficial (brasão dourado com coroa, grinalda de louros e "J") foi
-  enviado pelo usuário mas ainda não está no repositório — falta um meio de salvar o arquivo
-  anexado no chat em disco. `brandMark()` continua retornando o ícone de coroa em SVG até o
-  arquivo de imagem ser adicionado em `public/` e a função ser atualizada para usar `<img>`.
+- `brandMark()` agora retorna a imagem oficial (`public/brand-logo.png`, brasão dourado com
+  coroa, grinalda de louros e "J") em vez do ícone de coroa em SVG genérico. O ícone SVG
+  (`icons.crown`) foi removido do código por ficar sem nenhum uso depois da troca.
+- `build.mjs` passou a copiar qualquer arquivo binário solto em `public/` (além de
+  `index.html`/`styles.css`/`app.js`, que continuam embutidos como texto no Worker) para
+  `dist/client/`, para que a versão hospedada no Sites sirva o logo através do binding
+  `ASSETS` declarado em `wrangler.json`. Sem essa mudança, a imagem funcionaria só localmente
+  (o servidor Node já serve qualquer arquivo de `public/` sem precisar de build) e daria 404
+  no Site publicado.
+- `server.mjs` passou a reconhecer `.png`, `.jpg`/`.jpeg` e `.webp` no mapa de `content-type`
+  dos arquivos estáticos (antes só tinha `.html`, `.css`, `.js`, `.svg`, `.json`; qualquer
+  outra extensão virava `application/octet-stream`, o que podia levar o navegador a baixar a
+  imagem em vez de exibi-la).
+- A imagem original enviada (3481×3000, ~2,9 MB) foi redimensionada para 512 px de largura
+  (~120 KB) antes de entrar no repositório, mantendo a transparência — o brasão é exibido a
+  37×40 px no topo do painel e 28×31 px nas telas de login, então a resolução original não
+  trazia benefício visual e deixaria o carregamento do painel bem mais pesado.
 
 ## [24] - 2026-09-17
 

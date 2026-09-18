@@ -9,11 +9,19 @@ await fs.rm(output, { recursive: true, force: true });
 await fs.mkdir(assets, { recursive: true });
 await fs.mkdir(serverOutput, { recursive: true });
 
+const textAssets = ['index.html', 'styles.css', 'app.js'];
 const assetMap = {};
-for (const filename of ['index.html', 'styles.css', 'app.js']) {
+for (const filename of textAssets) {
   const source = await fs.readFile(path.join(root, 'public', filename), 'utf8');
   await fs.writeFile(path.join(assets, filename), source);
   assetMap[`/${filename}`] = source;
+}
+
+// Binary assets (logos, images) are not embedded in the Worker script; they're
+// copied as-is so the ASSETS binding (see wrangler.json) serves them directly.
+for (const filename of await fs.readdir(path.join(root, 'public'))) {
+  if (textAssets.includes(filename)) continue;
+  await fs.copyFile(path.join(root, 'public', filename), path.join(assets, filename));
 }
 
 const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))

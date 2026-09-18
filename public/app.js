@@ -25,7 +25,6 @@ const app = document.getElementById('app');
 const apiUrl = path => `${path}${path.includes('?') ? '&' : '?'}room=${encodeURIComponent(ROOM_ID)}`;
 
 const icons = {
-  crown: '<svg class="brand-mark" viewBox="0 0 42 46" fill="none" aria-hidden="true"><path d="M6 10l8 5 7-10 7 10 8-5-3 12H9L6 10z" stroke="currentColor" stroke-width="1.7"/><path d="M12 26h18M21 26v11c0 3-2.5 5-6 5-2.7 0-4.6-1.1-5.8-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M32 28c-1 6-4 10-8 12" stroke="currentColor" stroke-width="1.3" opacity=".6"/></svg>',
   monitor: '<svg viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M6 16h6M9 13v3" stroke="currentColor" stroke-width="1.5"/></svg>',
   users: '<svg viewBox="0 0 18 18" fill="none"><circle cx="7" cy="6" r="2.3" stroke="currentColor" stroke-width="1.4"/><path d="M2.8 14c.3-2.2 1.8-3.5 4.2-3.5s3.9 1.3 4.2 3.5M12.3 4.1a2 2 0 010 3.7M12.5 10.6c1.7.2 2.6 1.3 2.8 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   list: '<svg viewBox="0 0 18 18" fill="none"><path d="M6.2 5h9M6.2 9h9M6.2 13h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="3.2" cy="5" r="1" fill="currentColor"/><circle cx="3.2" cy="9" r="1" fill="currentColor"/><circle cx="3.2" cy="13" r="1" fill="currentColor"/></svg>',
@@ -46,7 +45,7 @@ const icons = {
 
 const BRAND_NAME = 'Juventude Esporte Clube';
 function brandMark() {
-  return icons.crown;
+  return `<img class="brand-mark" src="/brand-logo.png" alt="Brasão da ${BRAND_NAME}">`;
 }
 
 const MANAGEMENT_MODULES = [

@@ -156,6 +156,8 @@ try {
   verify('Health endpoint identifies a ready local service', health.ok === true && health.service === 'juventude-overlay-studio');
   verify('JavaScript asset returns HTTP 200', (await fetch(`${baseURL}/app.js`)).status === 200);
   verify('Stylesheet asset returns HTTP 200', (await fetch(`${baseURL}/styles.css`)).status === 200);
+  const brandLogo = await fetch(`${baseURL}/brand-logo.png`);
+  verify('Official crest asset is served with an image content type', brandLogo.status === 200 && (brandLogo.headers.get('content-type') || '').includes('image/png'));
   verify('Full-screen preview route returns HTTP 200', (await fetch(`${baseURL}/preview`)).status === 200);
   verify('Dedicated management routes return the application shell', (await fetch(`${baseURL}/manage/lineup?room=principal`)).status === 200 && (await fetch(`${baseURL}/manage/scoreboard?room=principal`)).status === 200);
   verify('Unknown routes return HTTP 404', (await fetch(`${baseURL}/missing-route`)).status === 404);
@@ -179,6 +181,7 @@ try {
   const dashboard = makeRuntime('/?room=principal');
   dashboard.sandbox.__overlayStudio.setAdminSession('login', null);
   verify('Admin login screen offers a direct link to the team access login', dashboard.app.innerHTML.includes('href="/team"') && dashboard.app.innerHTML.includes('Acesso da equipe') && dashboard.app.innerHTML.includes('Juventude Esporte Clube'));
+  verify('Brand mark renders the official crest image, not an inline icon', dashboard.app.innerHTML.includes('<img class="brand-mark" src="/brand-logo.png"'));
   dashboard.sandbox.__overlayStudio.setAdminSession('authenticated', 'sala-admin');
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
