@@ -6,7 +6,10 @@ As instruções explícitas do usuário definem o escopo da tarefa.
 ## Contexto e arquivos
 - Produto: painel em português para transmissões esportivas, fontes transparentes no OBS e portais de equipes.
 - Leia README.md para execução e TECHNICAL_SPEC.md para rotas, dados e funcionalidades.
-- Leia docs/DEVELOPMENT.md para trabalhar e docs/DEPLOY.md antes de publicar.
+- Leia docs/DEVELOPMENT.md para trabalhar, docs/AUTH.md antes de alterar autenticação e
+  docs/DEPLOY.md antes de publicar.
+- Leia CHANGELOG.md para entender o histórico recente antes de propor uma mudança;
+  ele existe para que outra IA (ou você mesma, em outra sessão) recupere contexto rápido.
 - Interface: public/app.js, public/styles.css e public/index.html.
 - Backend local: server.mjs. Backend hospedado: código do Worker gerado por build.mjs.
 - dist/ é gerado e atualmente versionado. Nunca edite esse diretório à mão.
@@ -36,9 +39,20 @@ As instruções explícitas do usuário definem o escopo da tarefa.
 4. Execute npm run build e npm test; confira git diff, inclusive dist/.
 5. Para mudanças visuais, confira o painel e a fonte /overlay com a mesma room de teste.
    Não use salas ou uploads de produção nos testes.
-6. Envie a branch e abra PR quando houver autorização para trabalhar no GitHub.
+6. Atualize CHANGELOG.md em toda mudança com efeito observável (rotas, dados, interface, segurança,
+   build/deploy). Regras obrigatórias para a entrada:
+   - Sempre em português, sob `## [Não publicado]`, na subseção certa (Adicionado, Alterado,
+     Corrigido, Removido ou Segurança — crie a subseção se faltar).
+   - Detalhada o bastante para outra IA, sem ver esta conversa, entender o que mudou, por que
+     mudou e como isso afeta contratos existentes (rotas, formato de dados, compatibilidade).
+     Não basta nomear o arquivo tocado; descreva o comportamento novo/alterado.
+   - Ao abrir o PR, mova a entrada de "Não publicado" para uma seção com a versão/data,
+     mantendo "Não publicado" vazio para o próximo ciclo.
+   - Corrija a entrada no mesmo commit se a mudança for revista antes do push; não acumule
+     entradas desatualizadas ou contraditórias.
+7. Envie a branch e abra PR quando houver autorização para trabalhar no GitHub.
    Descreva problema, resultado, validação e impactos em dados.
-7. Ao concluir, informe arquivos relevantes, testes realmente executados, falhas e próximo passo.
+8. Ao concluir, informe arquivos relevantes, testes realmente executados, falhas e próximo passo.
    Não diga que publicou quando apenas fez commit/push ou quando a CI passou.
 
 ## Limites de publicação

@@ -318,6 +318,9 @@ a { color: inherit; }
 .style-swatch-glass { border: 1px solid rgba(216,173,86,.5); background: linear-gradient(135deg, rgba(255,255,255,.18), rgba(130,83,205,.18)); }
 .style-swatch-minimal { border: 0; border-left: 3px solid var(--gold); border-radius: 0; background: #111217; box-shadow: none; }
 .style-swatch-contrast { border: 2px solid var(--gold); background: #050507; box-shadow: 0 0 9px rgba(216,173,86,.25); }
+.style-swatch-neon { border: 1px solid var(--gold); background: #0b0b10; box-shadow: 0 0 10px rgba(216,173,86,.55), 0 0 18px rgba(130,83,205,.35); }
+.style-swatch-ribbon { border: 0; border-radius: 0; clip-path: polygon(22% 0, 100% 0, 100% 100%, 0 100%); background: #17141c; border-bottom: 2px solid var(--gold); }
+.style-swatch-gradient { border: 0; border-radius: 9px; background: linear-gradient(115deg, #8253cd, #d8ad56); box-shadow: 0 5px 11px rgba(0,0,0,.35); }
 
 .scoreboard-layout-control { margin: 5px 0 16px; }
 .scoreboard-layout-control > span { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; letter-spacing: .65px; text-transform: uppercase; }
@@ -418,6 +421,17 @@ a { color: inherit; }
 .scorebug-style-contrast .scorebug-team { background: #09090d; }
 .scorebug-style-contrast .scorebug-goals, .scorebug-style-contrast .scorebug-divider { background: var(--overlay-accent); color: #100d12; }
 .scorebug-style-contrast .scorebug-clock { background: #fff; color: #050507; }
+.scorebug-style-neon { border: 1px solid var(--overlay-accent); background: color-mix(in srgb, var(--overlay-dark) 88%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--overlay-accent) 55%, transparent), 0 0 18px color-mix(in srgb, var(--overlay-accent) 45%, transparent), 0 0 34px color-mix(in srgb, var(--overlay-primary) 30%, transparent); }
+.scorebug-style-neon .scorebug-team { background: color-mix(in srgb, var(--overlay-primary) 26%, transparent); }
+.scorebug-style-neon .scorebug-goals, .scorebug-style-neon .scorebug-divider { background: var(--overlay-dark); color: var(--overlay-accent); text-shadow: 0 0 10px color-mix(in srgb, var(--overlay-accent) 80%, transparent); }
+.scorebug-style-neon .scorebug-clock { background: color-mix(in srgb, var(--overlay-dark) 92%, transparent); color: var(--overlay-accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--overlay-accent) 40%, transparent); }
+.scorebug-style-neon .scorebug-period { background: color-mix(in srgb, var(--overlay-primary) 55%, transparent); }
+.scorebug-style-ribbon { border: 0; border-bottom-width: var(--scoreboard-accent, 3px); clip-path: polygon(1.4cqw 0, 100% 0, 100% 100%, 0 100%); background: color-mix(in srgb, var(--overlay-dark) var(--scoreboard-surface, 100%), transparent); }
+.scorebug-style-ribbon .scorebug-team:first-child { padding-left: 1.8cqw; }
+.scorebug-style-ribbon .scorebug-goals, .scorebug-style-ribbon .scorebug-divider { background: linear-gradient(180deg, var(--overlay-accent), color-mix(in srgb, var(--overlay-accent) 60%, black)); color: var(--overlay-dark); }
+.scorebug-style-gradient { overflow: hidden; border: 0; border-radius: calc(var(--scoreboard-radius, 4px) + 8px); background: linear-gradient(115deg, var(--overlay-primary), color-mix(in srgb, var(--overlay-primary) 35%, var(--overlay-accent))); box-shadow: 0 14px 30px color-mix(in srgb, var(--overlay-primary) 45%, transparent); }
+.scorebug-style-gradient .scorebug-team { background: rgba(255,255,255,.1); }
+.scorebug-style-gradient .scorebug-goals, .scorebug-style-gradient .scorebug-divider { background: var(--overlay-dark); color: var(--overlay-light); }
 .scorebug-team { min-width: 13.6cqw; padding: 0 .8cqw; display: flex; align-items: center; justify-content: center; gap: .7cqw; letter-spacing: .5px; }
 .scorebug-layout-compact .scorebug-team { min-width: 7.3cqw; padding: 0 .65cqw; }
 .scorebug-layout-compact .scorebug-team-name { letter-spacing: .09em; }
@@ -480,6 +494,10 @@ a { color: inherit; }
 .scorebug.is-exiting.scorebug-animation-zoom { animation: score-zoom-out var(--scoreboard-motion-duration, 850ms) cubic-bezier(.7,0,.84,0) both; animation-delay: var(--scoreboard-motion-offset, 0ms); }
 .scorebug.is-entering.scorebug-animation-flip { animation: score-flip-in var(--scoreboard-motion-duration, 850ms) cubic-bezier(.16,1,.3,1) both; animation-delay: var(--scoreboard-motion-offset, 0ms); backface-visibility: hidden; }
 .scorebug.is-exiting.scorebug-animation-flip { animation: score-flip-out var(--scoreboard-motion-duration, 850ms) cubic-bezier(.7,0,.84,0) both; animation-delay: var(--scoreboard-motion-offset, 0ms); backface-visibility: hidden; }
+.scorebug.is-entering.scorebug-animation-elastic { animation: score-elastic-in var(--scoreboard-motion-duration, 850ms) cubic-bezier(.34,1.56,.64,1) both; animation-delay: var(--scoreboard-motion-offset, 0ms); }
+.scorebug.is-exiting.scorebug-animation-elastic { animation: score-elastic-out var(--scoreboard-motion-duration, 850ms) cubic-bezier(.7,0,.84,0) both; animation-delay: var(--scoreboard-motion-offset, 0ms); }
+.scorebug.is-entering.scorebug-animation-glitch { animation: score-glitch-in var(--scoreboard-motion-duration, 850ms) steps(7,end) both; animation-delay: var(--scoreboard-motion-offset, 0ms); }
+.scorebug.is-exiting.scorebug-animation-glitch { animation: score-glitch-out var(--scoreboard-motion-duration, 850ms) steps(7,end) both; animation-delay: var(--scoreboard-motion-offset, 0ms); }
 .event-banner { position: absolute; top: var(--event-y, 72%); left: var(--event-x, 4%); min-width: 39%; overflow: hidden; border-left: .6cqw solid var(--overlay-accent); border-radius: 3px; background: var(--overlay-dark); box-shadow: 0 12px 26px rgba(0, 0, 0, .34); color: var(--overlay-light); font-family: var(--event-font, var(--overlay-font)); scale: var(--event-scale, 1); transform-origin: top left; }
 .event-banner.is-entering { animation: banner-arrive .58s cubic-bezier(.16,1,.3,1) both; animation-delay: var(--event-motion-offset, 0ms); }
 .event-banner.is-exiting { animation: banner-leave .5s cubic-bezier(.7,0,.84,0) both; animation-delay: var(--event-motion-offset, 0ms); }
@@ -661,6 +679,10 @@ a { color: inherit; }
 @keyframes score-zoom-out { from { opacity: 1; transform: scale(1); filter: blur(0); } to { opacity: 0; transform: scale(.35); filter: blur(8px); } }
 @keyframes score-flip-in { from { opacity: 0; transform: perspective(800px) rotateX(-90deg); transform-origin: top; } to { opacity: 1; transform: perspective(800px) rotateX(0); transform-origin: top; } }
 @keyframes score-flip-out { from { opacity: 1; transform: perspective(800px) rotateX(0); transform-origin: top; } to { opacity: 0; transform: perspective(800px) rotateX(90deg); transform-origin: top; } }
+@keyframes score-elastic-in { 0% { opacity: 0; transform: scale(.4) translateY(14px); } 55% { opacity: 1; transform: scale(1.08) translateY(-5px); } 78% { transform: scale(.96) translateY(2px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+@keyframes score-elastic-out { 0% { opacity: 1; transform: scale(1) translateY(0); } 30% { transform: scale(1.06) translateY(-4px); } 100% { opacity: 0; transform: scale(.4) translateY(14px); } }
+@keyframes score-glitch-in { 0% { opacity: 0; transform: translateX(-16px) skewX(-9deg); } 25% { opacity: 1; transform: translateX(7px) skewX(7deg); } 45% { transform: translateX(-4px) skewX(-4deg); } 65% { transform: translateX(3px) skewX(3deg); } 85% { transform: translateX(-1px) skewX(-1deg); } 100% { opacity: 1; transform: translateX(0) skewX(0); } }
+@keyframes score-glitch-out { 0% { opacity: 1; transform: translateX(0) skewX(0); } 25% { transform: translateX(-5px) skewX(5deg); } 55% { opacity: .65; transform: translateX(6px) skewX(-6deg); } 100% { opacity: 0; transform: translateX(18px) skewX(11deg); } }
 @keyframes score-number-pop { 0% { transform: scale(.7); background: var(--overlay-accent); color: #171319; } 38% { transform: scale(1.16); background: var(--overlay-accent); color: #171319; } 100% { transform: scale(1); } }
 @keyframes score-content-return { from { opacity: 0; transform: translateY(9px); filter: blur(4px); } to { opacity: 1; transform: translateY(0); filter: blur(0); } }
 @keyframes banner-arrive { 0% { opacity: 0; transform: translate3d(-48px,0,0) skewX(-5deg); } 100% { opacity: 1; transform: translate3d(0,0,0) skewX(0); } }
