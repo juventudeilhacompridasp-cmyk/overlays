@@ -26,6 +26,16 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+### Adicionado
+- Na tela **Usuários/Acessos**, os campos de senha (administradores e usuários dos times)
+  ganharam um botão "gerar senha" que preenche o campo com uma senha aleatória de 8 caracteres
+  (letras maiúsculas, minúsculas, números e símbolos, sem caracteres ambíguos como `0`/`O` ou
+  `1`/`l`/`I`) e um botão "copiar" que envia usuário e senha formatados para a área de
+  transferência. A geração e a cópia acontecem só no navegador; nenhuma rota, formato de dados
+  ou regra de validação de senha (mínimo de 8 caracteres) mudou — o botão apenas preenche o
+  campo de texto existente, que continua sendo salvo por `PUT /api/auth/team/credentials` ou
+  `POST /api/auth/admin/accounts` como antes.
+
 ## [27] - 2026-09-18
 
 ### Adicionado

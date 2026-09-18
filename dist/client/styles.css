@@ -954,6 +954,9 @@ a { color: inherit; }
 .access-linked { color: var(--green) !important; }
 .access-row .field { margin-bottom: 0; }
 .access-row-save { width: 100%; }
+.password-field { display: flex; gap: 6px; align-items: center; }
+.password-field input { flex: 1; min-width: 0; }
+.password-field .button.square { flex: none; }
 
 .module-workspace { min-height: calc(100vh - 72px); display: grid; grid-template-columns: 216px minmax(0,1fr); }
 .module-sidebar { position: sticky; top: 72px; height: calc(100vh - 72px); padding: 20px 12px; display: grid; align-content: start; gap: 5px; border-right: 1px solid var(--line); background: #0d0e13; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }

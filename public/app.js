@@ -1523,13 +1523,13 @@ function renderAccessModule() {
     const entry = credentialByTeam.get(team.id);
     const id = escapeHtml(team.id);
     return `<article class="access-row"><div class="access-row-head"><div><strong>${escapeHtml(team.name)}</strong><small class="${entry ? 'access-linked' : ''}">${entry ? `Usuário vinculado: ${escapeHtml(entry.username)}` : 'Nenhum usuário vinculado'}</small></div>${entry ? `<button class="button square subtle" data-action="remove-team-credentials" data-value="${id}" aria-label="Remover acesso de ${escapeHtml(team.name)}">${icons.close}</button>` : ''}</div>
-      <div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="${entry ? escapeHtml(entry.username) : 'ex: gestor.time'}"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"></div></div>
+      <div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="${entry ? escapeHtml(entry.username) : 'ex: gestor.time'}"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><div class="password-field"><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"><button type="button" class="button square subtle" data-action="generate-team-password" data-value="${id}" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-team-credentials" data-value="${id}" title="Copiar usuário e senha">${icons.copy}</button></div></div></div>
       <button class="button subtle access-row-save" data-action="set-team-credentials" data-value="${id}">${entry ? 'Atualizar acesso' : 'Vincular acesso'}</button></article>`;
   }).join('') || '<div class="portal-empty">Nenhum time cadastrado.</div>';
   return `<div class="module-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas com acesso completo ao painel e a todos os times cadastrados.</p></div></div>
     <div class="team-catalog"><div class="team-catalog-head"><div><strong>${accessAdmins.length} administrador${accessAdmins.length === 1 ? '' : 'es'}</strong><small>É necessário manter pelo menos um administrador ativo.</small></div></div>
       <div class="access-list">${adminRows}</div>
-      <div class="field-row"><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"></div></div>
+      <div class="field-row"><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><div class="password-field"><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"><button type="button" class="button square subtle" data-action="generate-admin-password" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-admin-credentials" title="Copiar usuário e senha">${icons.copy}</button></div></div></div>
       <button class="button primary access-row-save" data-action="add-admin-account">+ Adicionar administrador</button></div></div>
     <div class="module-section"><div class="section-header"><div><h3 class="section-title">Usuários dos times</h3><p class="help-text">Cada time acessa <strong>/team</strong> com o usuário e a senha vinculados aqui para cadastrar atletas, fotos e comissão técnica.</p></div></div>
       <div class="team-catalog"><div class="team-catalog-head"><div><strong>${teamCatalog.length} time${teamCatalog.length === 1 ? '' : 's'} cadastrado${teamCatalog.length === 1 ? '' : 's'}</strong><small>Salvar novamente substitui o usuário e a senha anteriores do time.</small></div></div>
@@ -2208,10 +2208,10 @@ function changeMetric(group, property, rawValue) {
   });
 }
 
-async function copyText(value) {
+async function copyText(value, successMessage = 'Link copiado para a área de transferência.', failureMessage = 'Copie o link exibido na caixa.') {
   try {
     await navigator.clipboard.writeText(value);
-    toast('Link copiado para a área de transferência.');
+    toast(successMessage);
   } catch {
     const input = document.createElement('textarea');
     input.value = value;
@@ -2221,8 +2221,21 @@ async function copyText(value) {
     input.select();
     const copied = document.execCommand('copy');
     input.remove();
-    toast(copied ? 'Link copiado para a área de transferência.' : 'Copie o link exibido na caixa.');
+    toast(copied ? successMessage : failureMessage);
   }
+}
+
+const PASSWORD_CHARSETS = ['ABCDEFGHJKLMNPQRSTUVWXYZ', 'abcdefghjkmnpqrstuvwxyz', '23456789', '!@#$%&*'];
+function generatePassword(length = 8) {
+  const all = PASSWORD_CHARSETS.join('');
+  const randomChar = set => set[Math.floor(Math.random() * set.length)];
+  const chars = PASSWORD_CHARSETS.map(randomChar);
+  while (chars.length < length) chars.push(randomChar(all));
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
 }
 
 function confirmEvent() {
@@ -2453,6 +2466,32 @@ function handleAction(action, target) {
       selectedCatalogTeamId = catalog[0]?.id;
     }, { immediate: true });
     toast('Time removido do cadastro.');
+    return;
+  }
+  if (action === 'generate-team-password') {
+    const teamIdValue = target.dataset.value;
+    const field = document.getElementById(`access-password-${teamIdValue}`);
+    if (field) field.value = generatePassword();
+    return;
+  }
+  if (action === 'copy-team-credentials') {
+    const teamIdValue = target.dataset.value;
+    const username = document.getElementById(`access-username-${teamIdValue}`)?.value.trim() || '';
+    const password = document.getElementById(`access-password-${teamIdValue}`)?.value.trim() || '';
+    if (!username || !password) { toast('Preencha usuário e senha antes de copiar.'); return; }
+    copyText(`Usuário: ${username}\nSenha: ${password}`, 'Usuário e senha copiados para a área de transferência.', 'Copie o usuário e a senha exibidos nos campos.');
+    return;
+  }
+  if (action === 'generate-admin-password') {
+    const field = document.getElementById('access-admin-password');
+    if (field) field.value = generatePassword();
+    return;
+  }
+  if (action === 'copy-admin-credentials') {
+    const username = document.getElementById('access-admin-username')?.value.trim() || '';
+    const password = document.getElementById('access-admin-password')?.value.trim() || '';
+    if (!username || !password) { toast('Preencha usuário e senha antes de copiar.'); return; }
+    copyText(`Usuário: ${username}\nSenha: ${password}`, 'Usuário e senha copiados para a área de transferência.', 'Copie o usuário e a senha exibidos nos campos.');
     return;
   }
   if (action === 'set-team-credentials') {
