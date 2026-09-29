@@ -1643,3 +1643,203 @@ body.preview-output { min-width: 0; min-height: 100vh; display: grid; place-item
 .stats-block .access-chips { flex-wrap: wrap; }
 .stats-block .access-chip { height: auto; min-height: 30px; padding: 5px 12px; white-space: nowrap; }
 .stats-input-head, .stats-input-row { grid-template-columns: minmax(0, 1fr) 108px 108px; }
+
+/* ===== Escalação · conceitos de layout (photoLineupLayout) =====
+   Cada conceito tem composição, visual e coreografia próprios. As animações usam só transform/opacity,
+   portanto valem igualmente na fonte do OBS (obs-render-mode). */
+.photo-lineup[class*="photo-lineup-layout-"] { border: 0; border-radius: 0; box-shadow: none; overflow: visible; }
+.photo-lineup[class*="photo-lineup-layout-"] .photo-lineup-body { min-height: 0; overflow: visible; }
+.photo-lineup[class*="photo-lineup-layout-"] .photo-lineup-grid { min-height: 0; background: transparent; }
+.photo-lineup[class*="photo-lineup-layout-"] .photo-player:first-child:nth-last-child(5), .photo-lineup[class*="photo-lineup-layout-"] .photo-player:nth-child(7):nth-last-child(5) { grid-column: auto; }
+
+/* 1 · Túnel de entrada — colunas altas, nomes na vertical */
+.photo-lineup-layout-tunnel { background: linear-gradient(180deg, rgba(4,5,9,.94), rgba(4,5,9,.82)); border-bottom: .45cqw solid var(--photo-team-color) !important; }
+.photo-lineup-layout-tunnel::before { inset: 0 0 auto; height: .22cqw; background: linear-gradient(90deg, var(--photo-team-color) 0 22%, var(--overlay-accent) 22% 30%, transparent 30%); }
+.photo-lineup-layout-tunnel .photo-lineup-head { min-height: 4.6cqw; padding: .9cqw 1.5cqw .3cqw; border: 0; background: transparent; }
+.photo-lineup-layout-tunnel .photo-lineup-head h2 { font-size: 2.5cqw; font-style: italic; text-transform: uppercase; letter-spacing: .02em; }
+.photo-lineup-layout-tunnel .photo-lineup-head > span { border: 0; background: var(--overlay-accent); color: #07080c; letter-spacing: .2em; transform: skewX(-12deg); }
+.photo-lineup-layout-tunnel .photo-lineup-grid { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 8cqw); justify-content: center; gap: .5cqw; padding: .7cqw 1.4cqw .3cqw; }
+.photo-lineup-layout-tunnel .photo-player { position: relative; height: 23cqw; border: 0; border-bottom: .35cqw solid var(--photo-team-color); border-radius: 0; background: #05060a; }
+.photo-lineup-layout-tunnel .photo-player-image { position: absolute; inset: 0; height: auto; }
+.photo-lineup-layout-tunnel .photo-player-image::after { height: 68%; background: linear-gradient(transparent, rgba(3,4,7,.92)); }
+.photo-lineup-layout-tunnel .photo-player-fallback { margin-top: -6cqw; font-size: 4.4cqw; }
+.photo-lineup-layout-tunnel .photo-player-image b { inset: .35cqw 0 auto 0; min-width: 0; padding: 0; border: 0; background: transparent; color: transparent; font-size: 3.1cqw; font-style: italic; letter-spacing: -.04em; -webkit-text-stroke: .09cqw rgba(255,255,255,.9); text-shadow: none; }
+.photo-lineup-layout-tunnel .photo-player-copy { position: absolute; inset: auto 0 0 0; min-height: 0; padding: .5cqw .3cqw .6cqw; border: 0; justify-items: center; gap: .4cqw; }
+.photo-lineup-layout-tunnel .photo-player-copy strong { max-height: 11.5cqw; display: block; font-size: 1.22cqw; letter-spacing: .04em; white-space: nowrap; text-overflow: ellipsis; writing-mode: vertical-rl; transform: rotate(180deg); }
+.photo-lineup-layout-tunnel .photo-player-copy small { padding: .14cqw .3cqw; background: var(--overlay-accent); color: #07080c; font-size: .6cqw; }
+.photo-lineup-layout-tunnel .lineup-staff-strip { padding: 0 1.4cqw .8cqw; }
+.photo-lineup-layout-tunnel .lineup-spotlight { background: linear-gradient(105deg, #05060a 0 55%, color-mix(in srgb, var(--photo-team-color) 40%, #05060a)); }
+.photo-lineup-layout-tunnel .lineup-spotlight-number { background: transparent; color: transparent; -webkit-text-stroke: .14cqw var(--overlay-accent); font-style: italic; }
+@keyframes tunnel-arrive { from { opacity: 0; transform: translateY(3cqw); } to { opacity: 1; transform: none; } }
+@keyframes tunnel-leave { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(2cqw); } }
+@keyframes tunnel-rise { from { opacity: 0; transform: translateY(105%) skewY(4deg); } to { opacity: 1; transform: none; } }
+@keyframes tunnel-drop { to { opacity: 0; transform: translateY(70%); } }
+section.photo-lineup.photo-lineup-layout-tunnel.is-entering { animation: tunnel-arrive .5s cubic-bezier(.16,1,.3,1) both; animation-delay: var(--photo-lineup-motion-offset, 0ms); }
+section.photo-lineup.photo-lineup-layout-tunnel.is-exiting { animation: tunnel-leave .5s cubic-bezier(.7,0,.84,0) both; animation-delay: calc(360ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-tunnel.is-entering .photo-player { animation: tunnel-rise .7s cubic-bezier(.16,1,.3,1) both; animation-delay: calc(220ms + var(--player-index, 0) * 60ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-tunnel.is-exiting .photo-player { animation: tunnel-drop .36s cubic-bezier(.7,0,.84,0) both; animation-delay: calc(var(--player-index, 0) * 25ms + var(--photo-lineup-motion-offset, 0ms)); }
+
+/* 2 · Carta de coleção — moldura de foil, viradas 3D */
+.photo-lineup-layout-poster { border-radius: 1.2cqw !important; background: radial-gradient(90% 130% at 50% 0, color-mix(in srgb, var(--photo-team-color) 42%, #0b0f24), #050716 78%); box-shadow: 0 2cqw 4cqw rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.14) !important; }
+.photo-lineup-layout-poster::before { display: none; }
+.photo-lineup-layout-poster .photo-lineup-head { min-height: 5.4cqw; padding: .9cqw 1.6cqw; border: 0; background: transparent; }
+.photo-lineup-layout-poster .photo-lineup-head h2 { background: linear-gradient(100deg, #fff 0, var(--overlay-accent) 60%, #fff); -webkit-background-clip: text; background-clip: text; color: transparent; font-size: 2.4cqw; letter-spacing: .06em; }
+.photo-lineup-layout-poster .photo-lineup-head > span { border: .1cqw solid var(--overlay-accent); border-radius: 5cqw; background: transparent; color: var(--overlay-accent); letter-spacing: .22em; }
+.photo-lineup-layout-poster .photo-lineup-team-mark { border-radius: 50%; border: .18cqw solid var(--overlay-accent); }
+.photo-lineup-layout-poster .photo-lineup-grid { padding: .6cqw 1.6cqw 1.5cqw; gap: .8cqw; perspective: 110cqw; }
+.photo-lineup-layout-poster .photo-player { position: relative; padding: .2cqw; border: 0; border-radius: .95cqw; background: linear-gradient(135deg, var(--overlay-accent), #fff 24%, var(--photo-team-color) 50%, var(--overlay-accent) 76%, #fff); box-shadow: 0 .6cqw 1.2cqw rgba(0,0,0,.4); }
+.photo-lineup-layout-poster .photo-player-image { height: 9.2cqw; border-radius: .78cqw .78cqw 0 0; background: radial-gradient(circle at 50% 28%, color-mix(in srgb, var(--photo-team-color) 60%, #0b0f24), #050716); }
+.photo-lineup-layout-poster .photo-player-image b { inset: .45cqw auto auto .45cqw; width: 2cqw; height: 2cqw; min-width: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--overlay-accent); color: #0b0f24; font-size: 1.05cqw; }
+.photo-lineup-layout-poster .photo-player-copy { border: 0; border-radius: 0 0 .78cqw .78cqw; background: #0b0f24; justify-items: center; text-align: center; }
+.photo-lineup-layout-poster .photo-player-copy strong { font-size: 1.02cqw; }
+.photo-lineup-layout-poster .photo-player-copy small { background: transparent; color: var(--overlay-accent); }
+.photo-lineup-layout-poster .photo-player::after { position: absolute; inset: 0; background: linear-gradient(105deg, transparent 38%, rgba(255,255,255,.45) 50%, transparent 62%); content: ''; opacity: 0; pointer-events: none; }
+.photo-lineup-layout-poster .lineup-spotlight { background: radial-gradient(90% 110% at 30% 50%, color-mix(in srgb, var(--photo-team-color) 46%, #0b0f24), #050716); }
+.photo-lineup-layout-poster .lineup-spotlight-number { background: transparent; color: var(--overlay-accent); }
+@keyframes poster-arrive { from { opacity: 0; transform: scale(.94); } to { opacity: 1; transform: none; } }
+@keyframes poster-deal { 0% { opacity: 0; transform: rotateY(-100deg) translateY(1.6cqw) scale(.9); } 65% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+@keyframes poster-out { to { opacity: 0; transform: rotateY(90deg) scale(.9); } }
+@keyframes poster-shine { 0% { opacity: 1; transform: translateX(-110%); } 100% { opacity: 0; transform: translateX(110%); } }
+section.photo-lineup.photo-lineup-layout-poster.is-entering { animation: poster-arrive .5s cubic-bezier(.16,1,.3,1) both; animation-delay: var(--photo-lineup-motion-offset, 0ms); }
+section.photo-lineup.photo-lineup-layout-poster.is-exiting { animation: lineup-fade-out .45s ease-in both; animation-delay: calc(300ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-poster.is-entering .photo-player { animation: poster-deal .75s cubic-bezier(.16,1,.3,1) both; animation-delay: calc(200ms + var(--player-index, 0) * 85ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-poster.is-entering .photo-player::after { animation: poster-shine .9s ease-out both; animation-delay: calc(700ms + var(--player-index, 0) * 85ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-poster.is-exiting .photo-player { animation: poster-out .32s ease-in both; animation-delay: calc(var(--player-index, 0) * 30ms + var(--photo-lineup-motion-offset, 0ms)); }
+
+/* 3 · Coluna lateral — lista compacta que deixa o jogo livre */
+.photo-lineup-layout-sidebar { width: 26cqw; background: linear-gradient(180deg, rgba(8,10,16,.95), rgba(8,10,16,.88)); border-left: .5cqw solid var(--photo-team-color) !important; }
+.photo-lineup-layout-sidebar::before { inset: 0 0 auto; height: .18cqw; background: var(--overlay-accent); }
+.photo-lineup-layout-sidebar .photo-lineup-head { min-height: 4cqw; padding: .55cqw .9cqw; grid-template-columns: 2.9cqw minmax(0,1fr); gap: .7cqw; row-gap: .15cqw; border: 0; background: linear-gradient(100deg, color-mix(in srgb, var(--photo-team-color) 55%, #0a0c12), transparent); }
+.photo-lineup-layout-sidebar .photo-lineup-team-mark { width: 2.9cqw; height: 2.9cqw; grid-row: span 2; }
+.photo-lineup-layout-sidebar .photo-lineup-head h2 { font-size: 1.35cqw; }
+.photo-lineup-layout-sidebar .photo-lineup-head > span { grid-column: 2; padding: 0; border: 0; background: transparent; color: var(--overlay-accent); font-size: .5cqw; letter-spacing: .2em; }
+.photo-lineup-layout-sidebar .photo-lineup-grid { grid-template-columns: 1fr; align-content: start; gap: .16cqw; padding: .5cqw .55cqw .3cqw; }
+.photo-lineup-layout-sidebar .photo-player { height: 3.2cqw; display: grid; grid-template-columns: 3.2cqw minmax(0,1fr); align-items: stretch; border: 0; border-radius: 0; background: linear-gradient(90deg, color-mix(in srgb, var(--photo-team-color) 32%, #10131b), #10131b 70%); box-shadow: none; }
+.photo-lineup-layout-sidebar .photo-player-image { height: 3.2cqw; }
+.photo-lineup-layout-sidebar .photo-player-image::after { display: none; }
+.photo-lineup-layout-sidebar .photo-player-fallback { font-size: 1.3cqw; }
+.photo-lineup-layout-sidebar .photo-player-image b { inset: auto 0 0 auto; min-width: 1.15cqw; padding: .1cqw .2cqw; border: 0; background: var(--overlay-accent); color: #08090d; font-size: .7cqw; }
+.photo-lineup-layout-sidebar .photo-player-copy { min-height: 0; padding: 0 .7cqw; grid-template-columns: minmax(0,1fr) auto; align-items: center; border: 0; }
+.photo-lineup-layout-sidebar .photo-player-copy strong { display: block; font-size: .9cqw; white-space: nowrap; text-overflow: ellipsis; }
+.photo-lineup-layout-sidebar .photo-player-copy small { padding: 0; background: transparent; color: var(--overlay-accent); font-size: .55cqw; }
+.photo-lineup-layout-sidebar .starters-with-staff { height: auto; gap: 0; }
+.photo-lineup-layout-sidebar .lineup-staff-strip > span { display: none; }
+.photo-lineup-layout-sidebar .head-coach-highlight { width: 100%; min-width: 0; margin: 0 .55cqw .55cqw; padding: .25cqw .6cqw .25cqw .3cqw; gap: .6cqw; border-width: 0 0 0 .2cqw; }
+.photo-lineup-layout-sidebar .head-coach-highlight .coach-photo { width: 2.6cqw; height: 2.6cqw; font-size: 1cqw; }
+.photo-lineup-layout-sidebar .head-coach-highlight .coach-photo img { height: 100%; }
+.photo-lineup-layout-sidebar .head-coach-highlight h3 { font-size: .9cqw; }
+.photo-lineup-layout-sidebar .lineup-spotlight { min-height: 0; grid-template-columns: 1fr; }
+.photo-lineup-layout-sidebar .lineup-spotlight-photo img, .photo-lineup-layout-sidebar .lineup-spotlight-photo { height: 19cqw; }
+.photo-lineup-layout-sidebar .lineup-spotlight-photo img { object-fit: cover; }
+.photo-lineup-layout-sidebar .lineup-spotlight-number { position: absolute; top: 15.6cqw; left: 0; padding: .3cqw 1cqw; font-size: 3cqw; }
+.photo-lineup-layout-sidebar .lineup-spotlight-copy { padding: 1.2cqw 1cqw 1.4cqw; }
+.photo-lineup-layout-sidebar .lineup-spotlight-copy small { font-size: .7cqw; }
+.photo-lineup-layout-sidebar .lineup-spotlight-copy h3 { max-width: none; margin: .5cqw 0 .3cqw; font-size: 1.9cqw; }
+.photo-lineup-layout-sidebar .lineup-spotlight-copy p { font-size: .8cqw; }
+.photo-lineup-layout-sidebar .bench-list { min-height: 0; grid-template-columns: 1fr; padding: .5cqw .55cqw; }
+.photo-lineup-layout-sidebar .bench-player { min-height: 3cqw; grid-template-columns: 3cqw 2cqw minmax(0,1fr); }
+.photo-lineup-layout-sidebar .bench-player > div { width: 3cqw; height: 3cqw; }
+.photo-lineup-layout-sidebar .bench-player > b { font-size: 1cqw; }
+.photo-lineup-layout-sidebar .bench-player strong { font-size: .85cqw; }
+.photo-lineup-layout-sidebar .bench-player small { font-size: .5cqw; }
+.photo-lineup-layout-sidebar .tactical-board { min-height: 0; grid-template-columns: 1fr; }
+.photo-lineup-layout-sidebar .tactical-pitch { min-height: 21cqw; border-right: 0; }
+.photo-lineup-layout-sidebar .tactical-player { width: 4.6cqw; }
+.photo-lineup-layout-sidebar .tactical-player b { width: 1.7cqw; height: 1.7cqw; font-size: .75cqw; }
+.photo-lineup-layout-sidebar .tactical-player span { max-width: 4.6cqw; padding: .1cqw .2cqw; }
+.photo-lineup-layout-sidebar .tactical-player span strong { max-width: 4.2cqw; font-size: .5cqw; }
+.photo-lineup-layout-sidebar .tactical-player span small { display: none; }
+.photo-lineup-layout-sidebar .tactical-board aside { padding: .8cqw 1cqw; grid-template-columns: auto 1fr; align-items: center; column-gap: .8cqw; }
+.photo-lineup-layout-sidebar .tactical-board aside strong { margin: 0; font-size: 1.7cqw; }
+.photo-lineup-layout-sidebar .tactical-board aside em, .photo-lineup-layout-sidebar .tactical-board aside span { grid-column: 1 / -1; font-size: .55cqw; }
+.photo-lineup-layout-sidebar .lineup-empty-stage { min-height: 8cqw; }
+@keyframes sidebar-arrive { from { opacity: 0; transform: translateX(-105%); } to { opacity: 1; transform: none; } }
+@keyframes sidebar-leave { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(-105%); } }
+@keyframes sidebar-row { from { opacity: 0; transform: translateX(-2.4cqw); } to { opacity: 1; transform: none; } }
+section.photo-lineup.photo-lineup-layout-sidebar.is-entering { animation: sidebar-arrive .6s cubic-bezier(.16,1,.3,1) both; animation-delay: var(--photo-lineup-motion-offset, 0ms); }
+section.photo-lineup.photo-lineup-layout-sidebar.is-exiting { animation: sidebar-leave .5s cubic-bezier(.7,0,.84,0) both; animation-delay: calc(180ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-sidebar.is-entering .photo-player { animation: sidebar-row .5s cubic-bezier(.16,1,.3,1) both; animation-delay: calc(260ms + var(--player-index, 0) * 45ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-sidebar.is-exiting .photo-player { animation: sidebar-row .3s ease-in reverse both; animation-delay: calc(var(--player-index, 0) * 15ms + var(--photo-lineup-motion-offset, 0ms)); }
+
+/* 4 · Telão de estádio — painel LED, duas colunas */
+.photo-lineup-layout-stadium { --led: var(--overlay-accent); background: #040507; border: .3cqw solid #1b1e26 !important; border-radius: .7cqw !important; box-shadow: 0 0 0 .14cqw #000, 0 0 2.6cqw color-mix(in srgb, var(--led) 22%, transparent), 0 2cqw 4cqw rgba(0,0,0,.6) !important; }
+.photo-lineup-layout-stadium::before { inset: 0; height: auto; z-index: 5; background: radial-gradient(circle, rgba(0,0,0,.6) .11cqw, transparent .13cqw) 0 0 / .46cqw .46cqw; opacity: .5; }
+.photo-lineup-layout-stadium::after { position: absolute; inset: 0 0 auto; z-index: 6; height: .5cqw; background: linear-gradient(transparent, var(--led), transparent); content: ''; opacity: 0; pointer-events: none; }
+.photo-lineup-layout-stadium .photo-lineup-head { min-height: 5cqw; border-bottom: .14cqw solid var(--led); background: #07080c; }
+.photo-lineup-layout-stadium .photo-lineup-head h2 { color: var(--led); font-size: 2.3cqw; letter-spacing: .07em; text-shadow: 0 0 1cqw color-mix(in srgb, var(--led) 60%, transparent); }
+.photo-lineup-layout-stadium .photo-lineup-head > span { border: .1cqw solid var(--led); background: transparent; color: var(--led); letter-spacing: .2em; }
+.photo-lineup-layout-stadium .photo-lineup-grid { grid-template-columns: repeat(2, minmax(0,1fr)); grid-template-rows: repeat(6, auto); grid-auto-flow: column; gap: .2cqw 1.6cqw; padding: 1.1cqw 1.6cqw; }
+.photo-lineup-layout-stadium .photo-player { height: 3.6cqw; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; overflow: visible; border: 0; border-bottom: .09cqw solid rgba(255,255,255,.1); border-radius: 0; background: transparent; box-shadow: none; }
+.photo-lineup-layout-stadium .photo-player-image { width: auto; height: 3.3cqw; display: flex; align-items: center; gap: .8cqw; background: transparent; }
+.photo-lineup-layout-stadium .photo-player-image::after { display: none; }
+.photo-lineup-layout-stadium .photo-player-image img { width: 3.2cqw; height: 3.2cqw; flex: none; outline: .1cqw solid var(--led); filter: grayscale(1) contrast(1.15); }
+.photo-lineup-layout-stadium .photo-player-fallback { width: 3.2cqw; height: 3.2cqw; display: grid; place-items: center; flex: none; outline: .1cqw solid var(--led); font-size: 1.3cqw; }
+.photo-lineup-layout-stadium .photo-player-image b { position: static; order: -1; min-width: 3.4cqw; padding: 0; border: 0; background: transparent; color: var(--led); font-size: 2.4cqw; font-variant-numeric: tabular-nums; text-align: right; text-shadow: 0 0 .9cqw color-mix(in srgb, var(--led) 65%, transparent); }
+.photo-lineup-layout-stadium .photo-player-copy { min-height: 0; padding: 0 0 0 1cqw; border: 0; gap: .12cqw; }
+.photo-lineup-layout-stadium .photo-player-copy strong { display: block; font-size: 1.2cqw; letter-spacing: .05em; white-space: nowrap; text-overflow: ellipsis; }
+.photo-lineup-layout-stadium .photo-player-copy small { padding: 0; background: transparent; color: var(--led); font-size: .66cqw; }
+.photo-lineup-layout-stadium .lineup-staff-strip { padding: 0 1.6cqw 1cqw; }
+.photo-lineup-layout-stadium .lineup-staff-strip > span, .photo-lineup-layout-stadium .head-coach-highlight { border-radius: 0; border-color: color-mix(in srgb, var(--led) 55%, transparent); background: #07080c; box-shadow: none; }
+.photo-lineup-layout-stadium .lineup-spotlight { background: #040507; }
+.photo-lineup-layout-stadium .lineup-spotlight-photo img { filter: grayscale(1) contrast(1.15); }
+.photo-lineup-layout-stadium .lineup-spotlight-number { background: transparent; color: var(--led); text-shadow: 0 0 2cqw color-mix(in srgb, var(--led) 60%, transparent); }
+.photo-lineup-layout-stadium .lineup-spotlight-copy h3 { text-shadow: 0 0 1cqw rgba(255,255,255,.25); }
+.photo-lineup-layout-stadium .bench-player { border-bottom-color: rgba(255,255,255,.1); background: transparent; }
+.photo-lineup-layout-stadium .bench-player > b { text-shadow: 0 0 .8cqw color-mix(in srgb, var(--led) 60%, transparent); }
+.photo-lineup-layout-stadium .tactical-board, .photo-lineup-layout-stadium .tactical-pitch { background-color: #040a06; }
+@keyframes stadium-boot { 0% { opacity: 0; } 12% { opacity: 1; } 20% { opacity: .15; } 34% { opacity: 1; } 44% { opacity: .5; } 60%, 100% { opacity: 1; } }
+@keyframes stadium-off { 0% { opacity: 1; } 30% { opacity: .2; } 55% { opacity: .8; } 100% { opacity: 0; } }
+@keyframes stadium-scan { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(46cqw); } }
+@keyframes stadium-row { 0% { opacity: 0; } 25% { opacity: 1; } 40% { opacity: .2; } 60% { opacity: 1; } 75% { opacity: .55; } 100% { opacity: 1; } }
+section.photo-lineup.photo-lineup-layout-stadium.is-entering { animation: stadium-boot .8s steps(14, end) both; animation-delay: var(--photo-lineup-motion-offset, 0ms); }
+section.photo-lineup.photo-lineup-layout-stadium.is-exiting { animation: stadium-off .5s steps(10, end) both; animation-delay: calc(140ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-stadium.is-entering::after { animation: stadium-scan .9s cubic-bezier(.45,0,.2,1) both; animation-delay: calc(120ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-stadium.is-entering .photo-player { animation: stadium-row .6s linear both; animation-delay: calc(300ms + var(--player-index, 0) * 70ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-stadium.is-exiting .photo-player { animation: stadium-off .3s steps(6, end) both; animation-delay: calc(var(--player-index, 0) * 20ms + var(--photo-lineup-motion-offset, 0ms)); }
+
+/* 5 · Programa do jogo — papel claro, tipografia de jornal */
+.photo-lineup-layout-matchday { --paper: #f3eee2; --ink: #14120d; background: var(--paper); color: var(--ink); font-family: Georgia, 'Times New Roman', serif; border-radius: .25cqw !important; box-shadow: 0 1.8cqw 3.4cqw rgba(0,0,0,.42) !important; transform-origin: top left; }
+.photo-lineup-layout-matchday::before { inset: 0 0 auto; height: .8cqw; background: linear-gradient(var(--photo-team-color) 0 .45cqw, transparent .45cqw .6cqw, var(--photo-team-color) .6cqw .72cqw); }
+.photo-lineup-layout-matchday .photo-lineup-head { min-height: 5.6cqw; padding: 1.3cqw 1.6cqw .5cqw; border: 0; border-bottom: .12cqw solid var(--ink); background: transparent; }
+.photo-lineup-layout-matchday .photo-lineup-team-mark { border: .12cqw solid var(--ink); }
+.photo-lineup-layout-matchday .photo-lineup-head h2 { color: var(--ink); font-size: 2.5cqw; font-weight: 800; text-transform: uppercase; letter-spacing: -.005em; }
+.photo-lineup-layout-matchday .photo-lineup-head > span { border: .13cqw solid var(--photo-team-color); background: transparent; color: var(--photo-team-color); font-family: var(--sans, system-ui, sans-serif); letter-spacing: .16em; rotate: -3deg; }
+.photo-lineup-layout-matchday .photo-lineup-grid { gap: .9cqw; padding: 1.3cqw 1.6cqw 1.5cqw; }
+.photo-lineup-layout-matchday .photo-player { position: relative; overflow: visible; padding: .4cqw .4cqw 0; border: 0; border-radius: .1cqw; background: #fff; box-shadow: 0 .3cqw .8cqw rgba(30,20,0,.3); rotate: -1deg; }
+.photo-lineup-layout-matchday .photo-player:nth-child(even) { rotate: .9deg; }
+.photo-lineup-layout-matchday .photo-player::before { position: absolute; top: -.4cqw; left: 50%; z-index: 2; width: 3cqw; height: .95cqw; background: rgba(233,208,128,.72); content: ''; transform: translateX(-50%) rotate(-3deg); }
+.photo-lineup-layout-matchday .photo-player-image { height: 8.2cqw; background: color-mix(in srgb, var(--photo-team-color) 22%, #d9d2c0); }
+.photo-lineup-layout-matchday .photo-player-image img { filter: grayscale(.4) contrast(1.05); }
+.photo-lineup-layout-matchday .photo-player-image::after { display: none; }
+.photo-lineup-layout-matchday .photo-player-fallback { color: var(--photo-team-color); }
+.photo-lineup-layout-matchday .photo-player-image b { inset: auto auto .3cqw .3cqw; min-width: 1.9cqw; border: 0; background: var(--ink); color: var(--paper); font-size: 1.25cqw; text-shadow: none; }
+.photo-lineup-layout-matchday .photo-player-copy { border: 0; background: #fff; }
+.photo-lineup-layout-matchday .photo-player-copy strong { color: var(--ink); font-size: 1.02cqw; }
+.photo-lineup-layout-matchday .photo-player-copy small { padding: 0; background: transparent; color: var(--photo-team-color); font-family: var(--sans, system-ui, sans-serif); font-size: .62cqw; }
+.photo-lineup-layout-matchday .lineup-staff-strip { padding: 0 1.6cqw 1cqw; }
+.photo-lineup-layout-matchday .lineup-staff-strip > span, .photo-lineup-layout-matchday .head-coach-highlight { border: .1cqw solid var(--ink); background: #fff; color: var(--ink); box-shadow: none; }
+.photo-lineup-layout-matchday .lineup-staff-strip > span small, .photo-lineup-layout-matchday .head-coach-highlight small { color: var(--photo-team-color); }
+.photo-lineup-layout-matchday .head-coach-highlight p { color: #5b564a; }
+.photo-lineup-layout-matchday .lineup-spotlight { background: var(--paper); }
+.photo-lineup-layout-matchday .lineup-spotlight::after { background: var(--photo-team-color); }
+.photo-lineup-layout-matchday .lineup-spotlight-copy h3 { color: var(--ink); }
+.photo-lineup-layout-matchday .lineup-spotlight-copy p { color: #5b564a; }
+.photo-lineup-layout-matchday .bench-player { background: #fff; color: var(--ink); }
+.photo-lineup-layout-matchday .bench-player > b { color: var(--photo-team-color); }
+.photo-lineup-layout-matchday .bench-list { background: transparent; }
+.photo-lineup-layout-matchday .tactical-board { background: var(--paper); }
+.photo-lineup-layout-matchday .tactical-board aside strong { color: var(--ink); }
+.photo-lineup-layout-matchday .tactical-board aside span { color: #5b564a; }
+.photo-lineup-layout-matchday .lineup-empty-stage span { color: #5b564a; }
+@keyframes matchday-unfold { 0% { opacity: 0; transform: perspective(90cqw) rotateX(-78deg); } 60% { opacity: 1; } 100% { opacity: 1; transform: perspective(90cqw) rotateX(0); } }
+@keyframes matchday-fold { to { opacity: 0; transform: perspective(90cqw) rotateX(-78deg); } }
+@keyframes matchday-stamp { 0% { opacity: 0; transform: scale(1.4); } 55% { opacity: 1; transform: scale(.96); } 100% { opacity: 1; transform: scale(1); } }
+section.photo-lineup.photo-lineup-layout-matchday.is-entering { animation: matchday-unfold .7s cubic-bezier(.22,1,.36,1) both; animation-delay: var(--photo-lineup-motion-offset, 0ms); }
+section.photo-lineup.photo-lineup-layout-matchday.is-exiting { animation: matchday-fold .5s cubic-bezier(.7,0,.84,0) both; animation-delay: calc(200ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-matchday.is-entering .photo-player { animation: matchday-stamp .42s cubic-bezier(.22,1,.36,1) both; animation-delay: calc(520ms + var(--player-index, 0) * 80ms + var(--photo-lineup-motion-offset, 0ms)); }
+section.photo-lineup.photo-lineup-layout-matchday.is-exiting .photo-player { animation: lineup-fade-out .25s ease-in both; animation-delay: calc(var(--player-index, 0) * 15ms + var(--photo-lineup-motion-offset, 0ms)); }
+
+/* Esquema tático · foto do atleta no lugar do número (--formation-photo = fator de tamanho) */
+.tactical-player b.has-photo { width: calc(3.7cqw * var(--formation-photo, 1)); height: calc(3.7cqw * var(--formation-photo, 1)); overflow: hidden; padding: 0; }
+.tactical-player b.has-photo img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: center top; }
+.photo-lineup-layout-sidebar .tactical-player b.has-photo { width: calc(2.5cqw * var(--formation-photo, 1)); height: calc(2.5cqw * var(--formation-photo, 1)); }

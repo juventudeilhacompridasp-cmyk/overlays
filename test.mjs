@@ -446,6 +446,13 @@ try {
   dashboard.click('appearance-option', 'photoLineupAnimation|wipe');
   dashboard.click('appearance-option', 'photoLineupAnimation|invalida');
   verify('Presentation style and animation choices persist and reject unknown values', dashboard.getState().appearance.photoLineupStyle === 'premier' && dashboard.getState().appearance.photoLineupAnimation === 'slide');
+  verify('Lineup layout concepts and formation photo options are selectable', ['classic','tunnel','poster','sidebar','stadium','matchday'].every(layout => dashboard.app.innerHTML.includes(`data-value="photoLineupLayout|${layout}"`)) && ['number','photo'].every(mark => dashboard.app.innerHTML.includes(`data-value="photoLineupFormationMark|${mark}"`)));
+  dashboard.click('appearance-option', 'photoLineupLayout|stadium');
+  dashboard.click('appearance-option', 'photoLineupLayout|invalido');
+  dashboard.click('appearance-option', 'photoLineupFormationMark|photo');
+  verify('Lineup layout and formation mark persist and reject unknown values', dashboard.getState().appearance.photoLineupLayout === 'classic' && dashboard.getState().appearance.photoLineupFormationMark === 'photo');
+  verify('Lineup layout concepts are backed by stylesheet rules and keyframes', ['tunnel','poster','sidebar','stadium','matchday'].every(layout => stylesheet.includes(`photo-lineup-layout-${layout}`)) && ['@keyframes tunnel-rise','@keyframes poster-deal','@keyframes sidebar-arrive','@keyframes stadium-boot','@keyframes matchday-unfold','.tactical-player b.has-photo'].every(rule => stylesheet.includes(rule)));
+  dashboard.click('appearance-option', 'photoLineupFormationMark|number');
   dashboard.click('appearance-option', 'photoLineupAnimation|cascade');
   verify('Presentation animations are backed by stylesheet rules with an OBS-safe fallback', dashboard.getState().appearance.photoLineupAnimation === 'cascade' && ['photo-lineup-style-premier','photo-lineup-style-champions','photo-lineup-style-diagonal','@keyframes lineup-wipe-in','@keyframes lineup-split-in','photo-lineup-anim-cascade','@keyframes obs-enter-up'].every(rule => stylesheet.includes(rule)));
   verify('Photo-lineup appearance controls include surface, rounding, sponsor count, and sponsor bar size', dashboard.app.innerHTML.includes('Acabamento da escalação com fotos') && dashboard.app.innerHTML.includes('data-appearance="photoLineupSurface"') && dashboard.app.innerHTML.includes('data-appearance="photoLineupSponsorCount"') && dashboard.app.innerHTML.includes('data-appearance="photoLineupSponsorBarSize"'));
