@@ -68,9 +68,9 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
   "Campeonatos" com a contagem de partidas de cada um.
 
 ### Alterado
-- Com `?room=` (partida selecionada) a barra lateral mostra o cabeçalho da partida, o link "← Plataforma" e apenas os
-  módulos da partida (placar, eventos, escalações, patrocinadores, barra, builder, pré-jogo, relatório, aparência).
-  URLs existentes com `?room=` continuam funcionando; módulos da plataforma acessados sem sala caem na visão geral.
+- Com `?room=` (partida selecionada) a barra lateral mostra o cabeçalho da partida, o link "← Plataforma" e a lista
+  completa de módulos (agrupados como antes). URLs existentes com `?room=` continuam funcionando; módulos da plataforma
+  acessados sem sala caem na visão geral. A Central de módulos passou a ter 16 cartões (inclui Delegações).
 
 ## [31] - 2026-09-29
 
