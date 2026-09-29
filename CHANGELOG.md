@@ -26,6 +26,22 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+### Adicionado
+- Versionamento visível: a versão vem de `package.json` (`31.0.0`, correspondente à seção `[31]` deste changelog;
+  ao publicar a seção `[N]`, atualize `version` para `N.0.0`). `GET /health` passa a devolver `version` no servidor
+  Node e no Worker (`build.mjs` embute a versão no build). A interface mostra "Versão X" no rodapé das telas de
+  login (administrador e equipe) e no rodapé da barra lateral do painel.
+- Visão geral da plataforma: abrir `/` ou `/manage/*` sem `?room=` é o "modo plataforma", sem partida selecionada
+  (a sala não é mais gerada aleatoriamente nem restaurada de `localStorage`; `overlay`, `preview` e `team` mantêm o
+  comportamento anterior). Mostra só os módulos da plataforma (Visão geral, Campeonatos, Partidas, Times, Usuários/Acessos,
+  Avisos e logs), sem botão "Desativar todos", seletor de partida ou saídas OBS. O dashboard ganhou a seção
+  "Campeonatos" com a contagem de partidas de cada um.
+
+### Alterado
+- Com `?room=` (partida selecionada) a barra lateral mostra o cabeçalho da partida, o link "← Plataforma" e apenas os
+  módulos da partida (placar, eventos, escalações, patrocinadores, barra, builder, pré-jogo, relatório, aparência).
+  URLs existentes com `?room=` continuam funcionando; módulos da plataforma acessados sem sala caem na visão geral.
+
 ## [31] - 2026-09-29
 
 ### Adicionado

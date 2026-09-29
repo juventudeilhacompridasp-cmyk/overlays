@@ -27,8 +27,10 @@ for (const filename of await fs.readdir(path.join(root, 'public'))) {
 const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
   .replace(/^export \{[^}]*\};\s*/gm, '');
 
+const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const worker = `${authModule}
 const assets = ${JSON.stringify(assetMap)};
+const APP_VERSION = ${JSON.stringify(appVersion)};
 const fallbackStates = new Map();
 let databaseReady;
 let legacyPhotosHydrated = false;
@@ -222,7 +224,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const room = safeRoom(url.searchParams.get('room'));
-    if (url.pathname === '/health') return Response.json({ ok: true, service: 'juventude-overlay-studio' }, { headers: { 'cache-control': 'no-store' } });
+    if (url.pathname === '/health') return Response.json({ ok: true, service: 'juventude-overlay-studio', version: APP_VERSION }, { headers: { 'cache-control': 'no-store' } });
 
     if (url.pathname === '/api/auth/admin/status') {
       const admins = await readState(env, '__admins__');

@@ -4,6 +4,7 @@ import path from 'node:path';
 import * as auth from './auth.mjs';
 
 const root = path.join(import.meta.dirname, 'public');
+const APP_VERSION = JSON.parse(await fs.readFile(path.join(import.meta.dirname, 'package.json'), 'utf8')).version;
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || '0.0.0.0';
 const storagePath = process.env.OVERLAY_STATE_FILE || path.join(import.meta.dirname, '.data', 'overlay-state.json');
@@ -151,7 +152,7 @@ const server = http.createServer(async (request, response) => {
   const room = String(url.searchParams.get('room') || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
   if (url.pathname === '/health') {
     response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    response.end(JSON.stringify({ ok: true, service: 'juventude-overlay-studio' }));
+    response.end(JSON.stringify({ ok: true, service: 'juventude-overlay-studio', version: APP_VERSION }));
     return;
   }
 
