@@ -218,11 +218,12 @@ const SPORTS = {
   },
 };
 
+// Posições [x, y] em % do meio campo exibido: x = profundidade (goleiro à esquerda, ataque à direita), y = largura.
 const FORMATIONS = {
-  '4-3-3': [[50,89],[17,70],[39,73],[61,73],[83,70],[27,48],[50,54],[73,48],[18,24],[50,18],[82,24]],
-  '4-4-2': [[50,89],[17,70],[39,73],[61,73],[83,70],[17,45],[39,49],[61,49],[83,45],[36,20],[64,20]],
-  '4-2-3-1': [[50,89],[17,70],[39,73],[61,73],[83,70],[37,55],[63,55],[18,35],[50,31],[82,35],[50,13]],
-  '3-5-2': [[50,89],[25,70],[50,74],[75,70],[12,48],[35,51],[50,43],[65,51],[88,48],[35,19],[65,19]],
+  '4-3-3': [[8,50],[27,14],[27,38],[27,62],[27,86],[52,25],[52,50],[52,75],[78,18],[80,50],[78,82]],
+  '4-4-2': [[8,50],[27,14],[27,38],[27,62],[27,86],[52,14],[52,38],[52,62],[52,86],[78,35],[78,65]],
+  '4-2-3-1': [[8,50],[27,14],[27,38],[27,62],[27,86],[44,36],[44,64],[62,18],[62,50],[62,82],[82,50]],
+  '3-5-2': [[8,50],[27,25],[27,50],[27,75],[50,8],[46,50],[54,30],[54,70],[50,92],[80,35],[80,65]],
 };
 
 const TYPEFACES = {
@@ -250,7 +251,7 @@ function defaultAppearance() {
     lineupScale: 100, lineupFont: 100, lineupTypeface: 'rajdhani', lineupX: 7, lineupY: 18, lineupStyle: 'panel',
     photoLineupScale: 100, photoLineupFont: 100, photoLineupTypeface: 'rajdhani', photoLineupX: 7, photoLineupY: 12, photoLineupSurface: 96, photoLineupRadius: 2, photoLineupSponsorCount: 6, photoLineupSponsorBarSize: 100, photoLineupIndividualDuration: 3, photoLineupPanelDuration: 5, photoLineupStyle: 'editorial',
     sponsorScale: 100, sponsorFont: 100, sponsorTypeface: 'rajdhani', sponsorX: 78, sponsorY: 7, sponsorFormat: 'banner-name', sponsorAnimation: 'fade', sponsorAnimationSpeed: 100, sponsorDuration: 10, sponsorStyle: 'boxed',
-    sponsorBarDuration: 10, sponsorBarAnimationSpeed: 100, sponsorBarTransition: 'fade', sponsorBarFit: 'cover', sponsorBarScale: 100, sponsorBarOpacity: 100, sponsorBarRadius: 0, sponsorBarBackground: '#08090d',
+    sponsorBarDuration: 10, sponsorBarAnimationSpeed: 100, sponsorBarTransition: 'fade', sponsorBarFit: 'cover', sponsorBarScale: 100, sponsorBarX: 50, sponsorBarY: 91, sponsorBarOpacity: 100, sponsorBarRadius: 0, sponsorBarBackground: '#08090d',
     periodScale: 100, periodFont: 100, periodSurface: 100, extraTimeScale: 100,
     goalText: 'GOOOL', goalWordDuration: 2, goalTeamDuration: 2, goalAnimation: 'typewriter', cardDisplayMode: 'lower-third',
   };
@@ -933,7 +934,7 @@ function renderSponsorBarOverlay() {
   const media = videoMode
     ? `<video class="sponsor-wide-media sponsor-fit-${escapeHtml(appearance.sponsorBarFit || 'cover')}" src="${escapeHtml(state.sponsorBarVideo)}" autoplay muted loop playsinline preload="auto" aria-label="Vídeo da barra de patrocinadores"></video>`
     : asset ? `<img class="sponsor-wide-media sponsor-fit-${escapeHtml(appearance.sponsorBarFit || 'cover')}" src="${escapeHtml(asset)}" alt="Banner de patrocinador">` : `<div class="sponsor-wide-placeholder"><strong>BARRA DE PATROCINADORES</strong><small>1500 × 200</small></div>`;
-  return `<div class="sponsor-wide-bar sponsor-style-${escapeHtml(appearance.sponsorStyle || 'boxed')}${transitionClass}" style="--sponsor-motion-duration:${duration}ms;--sponsor-motion-offset:${offset}ms;--sponsor-bar-scale:${clampNumber(appearance.sponsorBarScale, 60, 180, 100) / 100};--sponsor-bar-opacity:${clampNumber(appearance.sponsorBarOpacity, 20, 100, 100) / 100};--sponsor-bar-radius:${clampNumber(appearance.sponsorBarRadius, 0, 24, 0)}px;--sponsor-bar-background:${safeColor(appearance.sponsorBarBackground, '#08090d')};${overlayThemeStyle('sponsorBar')}" data-overlay="sponsor-bar">${media}</div>`;
+  return `<div class="sponsor-wide-bar sponsor-style-${escapeHtml(appearance.sponsorStyle || 'boxed')}${transitionClass}" style="--sponsor-motion-duration:${duration}ms;--sponsor-motion-offset:${offset}ms;--sponsor-bar-scale:${clampNumber(appearance.sponsorBarScale, 60, 180, 100) / 100};--sponsor-bar-x:${clampNumber(appearance.sponsorBarX, 0, 100, 50)}%;--sponsor-bar-y:${clampNumber(appearance.sponsorBarY, 0, 100, 91)}%;--sponsor-bar-opacity:${clampNumber(appearance.sponsorBarOpacity, 20, 100, 100) / 100};--sponsor-bar-radius:${clampNumber(appearance.sponsorBarRadius, 0, 24, 0)}px;--sponsor-bar-background:${safeColor(appearance.sponsorBarBackground, '#08090d')};${overlayThemeStyle('sponsorBar')}" data-overlay="sponsor-bar">${media}</div>`;
 }
 
 function customOverlayMarkup(item, preview = false) {
@@ -1777,6 +1778,7 @@ function renderAppearanceTab() {
     ${renderAppearanceComponent('Escalação', 'Título e nomes dos jogadores', 'lineup')}
     ${renderAppearanceComponent('Apresentação da equipe', 'Titulares, reservas, treinador e esquema', 'photoLineup')}
     ${renderAppearanceComponent('Patrocinador', 'Marca exibida no canto superior', 'sponsor')}
+    <div class="parameter-card"><div class="parameter-card-head"><div><strong>Barra de patrocinadores</strong><small>Tamanho e posição no programa completo (a saída 1500 × 200 independente não muda de posição)</small></div><span>${escapeHtml(appearance.sponsorBarScale)}%</span></div>${appearanceRange('sponsorBarScale', 'Tamanho da barra', appearance.sponsorBarScale, 60, 180, '%')}<div class="position-controls"><strong>Posição no overlay</strong>${appearanceRange('sponsorBarX', 'Horizontal', appearance.sponsorBarX, 0, 100, '%')}${appearanceRange('sponsorBarY', 'Vertical', appearance.sponsorBarY, 0, 100, '%')}</div></div>
   </div>
   <div class="goal-settings photo-lineup-settings"><div class="section-header"><div><h3 class="section-title">Acabamento da escalação com fotos e sequência</h3><p class="help-text">Refine o painel, os tempos da sequência e a faixa de marcas exibida no rodapé.</p></div></div>${appearanceRange('photoLineupSurface', 'Opacidade da superfície', appearance.photoLineupSurface, 55, 100, '%')}${appearanceRange('photoLineupRadius', 'Arredondamento dos blocos', appearance.photoLineupRadius, 0, 20, 'px')}${appearanceRange('photoLineupIndividualDuration', 'Tempo por titular', appearance.photoLineupIndividualDuration, 2, 10, 's')}${appearanceRange('photoLineupPanelDuration', 'Tempo por painel', appearance.photoLineupPanelDuration, 3, 15, 's')}${appearanceRange('photoLineupSponsorCount', 'Máximo de patrocinadores', appearance.photoLineupSponsorCount, 1, 8, '')}${appearanceRange('photoLineupSponsorBarSize', 'Tamanho da barra de patrocinadores', appearance.photoLineupSponsorBarSize, 60, 180, '%')}</div>
   <div class="goal-settings scoreboard-style-settings"><div class="section-header"><div><h3 class="section-title">Estilo visual do placar</h3><p class="help-text">Escolha uma base e refine cantos, transparência, destaque e sombra.</p></div></div><div class="scoreboard-style-grid">${scoreboardStyles.map(([key,label,caption]) => `<button class="scoreboard-style-choice ${appearance.scoreboardStyle === key ? 'active' : ''}" data-action="scoreboard-style" data-value="${key}" aria-pressed="${appearance.scoreboardStyle === key}"><i class="style-swatch style-swatch-${key}"></i><span><strong>${label}</strong><small>${caption}</small></span></button>`).join('')}</div>${appearanceRange('scoreboardRadius', 'Arredondamento', appearance.scoreboardRadius, 0, 20, 'px')}${appearanceRange('scoreboardSurface', 'Opacidade da superfície', appearance.scoreboardSurface, 55, 100, '%')}${appearanceRange('scoreboardAccent', 'Espessura do destaque', appearance.scoreboardAccent, 0, 8, 'px')}<div class="field"><label>Sombra</label><select data-appearance="scoreboardShadow"><option value="none" ${appearance.scoreboardShadow === 'none' ? 'selected' : ''}>Sem sombra</option><option value="soft" ${appearance.scoreboardShadow === 'soft' ? 'selected' : ''}>Suave</option><option value="strong" ${appearance.scoreboardShadow === 'strong' ? 'selected' : ''}>Forte</option></select></div></div>
@@ -2169,7 +2171,7 @@ function renderEventDrawer() {
     ${drawer.type !== 'lower-third' && drawer.type !== 'sponsor' ? `<div class="field"><label for="event-team">Equipe</label><select id="event-team"><option value="home" ${selectedTeamKey === 'home' ? 'selected' : ''}>${escapeHtml(state.home.name)}</option><option value="away" ${selectedTeamKey === 'away' ? 'selected' : ''}>${escapeHtml(state.away.name)}</option></select></div>` : ''}
     ${isCardEvent ? `<div class="field"><label for="event-card-mode">Modo de exibição</label><select id="event-card-mode"><option value="lower-third" ${cardMode === 'lower-third' ? 'selected' : ''}>GC completo · como aparece atualmente</option><option value="scoreboard" ${cardMode === 'scoreboard' ? 'selected' : ''}>Integrado somente ao placar</option></select><small class="field-hint">No modo integrado, o cartão e o atleta aparecem dentro do placar por 5 segundos.</small></div>` : ''}
     ${hasAthleteSelector ? `<datalist id="event-player-options">${playerOptions}</datalist>` : ''}
-    <div class="field"><label for="event-name">${drawer.type === 'sponsor' ? 'Marca exibida' : drawer.type === 'substitution' ? 'Jogador que entra' : hasAthleteSelector ? 'Atleta' : 'Nome'}</label><input id="event-name" ${hasAthleteSelector ? 'list="event-player-options" autocomplete="off"' : ''} placeholder="${escapeHtml(config.placeholder)}" value="${drawer.type === 'sponsor' ? escapeHtml(state.sponsor) : ''}" autofocus>${hasAthleteSelector ? `<small class="field-hint">Digite algumas letras para localizar entre ${players.length} atletas de ${escapeHtml(state[selectedTeamKey].name)}.</small>` : ''}</div>
+    ${drawer.type === 'sponsor' ? `<div class="field"><label for="event-sponsor">Patrocinador</label><select id="event-sponsor">${(state.sponsors || []).map((sponsor, index) => `<option value="${index}" ${clampNumber(state.activeSponsorIndex, 0, Math.max(0, state.sponsors.length - 1), 0) === index ? 'selected' : ''}>${escapeHtml(sponsor.name)}${sponsor.banner ? '' : ' (sem banner)'}</option>`).join('')}</select><small class="field-hint">O banner e o nome cadastrados para o patrocinador escolhido entram no ar.</small></div>` : `<div class="field"><label for="event-name">${drawer.type === 'sponsor' ? 'Marca exibida' : drawer.type === 'substitution' ? 'Jogador que entra' : hasAthleteSelector ? 'Atleta' : 'Nome'}</label><input id="event-name" ${hasAthleteSelector ? 'list="event-player-options" autocomplete="off"' : ''} placeholder="${escapeHtml(config.placeholder)}" value="${drawer.type === 'sponsor' ? escapeHtml(state.sponsor) : ''}" autofocus>${hasAthleteSelector ? `<small class="field-hint">Digite algumas letras para localizar entre ${players.length} atletas de ${escapeHtml(state[selectedTeamKey].name)}.</small>` : ''}</div>`}
     ${config.note ? `<div class="field"><label for="event-note">${drawer.type === 'substitution' ? 'Jogador que sai' : 'Complemento'}</label><input id="event-note" ${drawer.type === 'substitution' ? 'list="event-player-options" autocomplete="off"' : ''} placeholder="${escapeHtml(config.note)}"></div>` : ''}
     ${drawer.type === 'lower-third' ? '<div class="field"><label for="event-title">Título da tarja</label><input id="event-title" value="AO VIVO"></div>' : ''}
     <button class="button primary" data-action="confirm-event" style="width:100%;margin-top:8px">${icons.eye} ${drawer.type === 'sponsor' ? 'Aplicar patrocinador' : 'Exibir na transmissão'}</button>
@@ -2182,7 +2184,7 @@ function outputFingerprint(layer) {
   if (layer === 'scoreboard') return JSON.stringify({ ...common, competition: state.competition, appearance: appearanceFor('scoreboard'), home: state.home, away: state.away, clock: state.clock, period: state.period, extraTime: state.extraTime, sportData: state.sportData, visible: state.visible.scoreboard, goal: state.goalGraphic ? { ...state.goalGraphic, exiting: undefined } : null, card: state.scoreboardCard ? { ...state.scoreboardCard, exiting: undefined } : null });
   if (layer === 'event') return JSON.stringify({ ...common, appearance: appearanceFor('event'), activeEvent: state.activeEvent });
   if (layer === 'sponsor') return JSON.stringify({ ...common, appearance: appearanceFor('sponsor'), visible: state.visible.sponsor, sponsors: state.sponsors.map(sponsor => ({ id: sponsor.id, name: sponsor.name, banner: sponsor.banner, logo: sponsor.logo })), activeSponsorIndex: state.activeSponsorIndex });
-  if (layer === 'sponsor-bar') return JSON.stringify({ ...common, appearance: { sponsorBarDuration: state.appearance?.sponsorBarDuration, sponsorBarAnimationSpeed: state.appearance?.sponsorBarAnimationSpeed, sponsorBarTransition: state.appearance?.sponsorBarTransition, sponsorBarFit: state.appearance?.sponsorBarFit, sponsorBarScale: state.appearance?.sponsorBarScale, sponsorBarOpacity: state.appearance?.sponsorBarOpacity, sponsorBarRadius: state.appearance?.sponsorBarRadius, sponsorBarBackground: state.appearance?.sponsorBarBackground }, visible: state.visible.sponsorBar, items: state.sponsorBarItems, activeSponsorIndex: state.sponsorBarActiveIndex, mode: state.sponsorBarMode, video: state.sponsorBarVideo });
+  if (layer === 'sponsor-bar') return JSON.stringify({ ...common, appearance: { sponsorBarDuration: state.appearance?.sponsorBarDuration, sponsorBarAnimationSpeed: state.appearance?.sponsorBarAnimationSpeed, sponsorBarTransition: state.appearance?.sponsorBarTransition, sponsorBarFit: state.appearance?.sponsorBarFit, sponsorBarScale: state.appearance?.sponsorBarScale, sponsorBarX: state.appearance?.sponsorBarX, sponsorBarY: state.appearance?.sponsorBarY, sponsorBarOpacity: state.appearance?.sponsorBarOpacity, sponsorBarRadius: state.appearance?.sponsorBarRadius, sponsorBarBackground: state.appearance?.sponsorBarBackground }, visible: state.visible.sponsorBar, items: state.sponsorBarItems, activeSponsorIndex: state.sponsorBarActiveIndex, mode: state.sponsorBarMode, video: state.sponsorBarVideo });
   if (layer === 'lineup') return JSON.stringify({ ...common, appearance: appearanceFor('lineup'), visible: state.visible.lineup, lineupTeam: state.lineupTeam, home: state.home, away: state.away });
   if (layer === 'custom') { const item = selectedCustomOverlay(); return JSON.stringify(item ? { ...item, transition: undefined } : null); }
   return JSON.stringify({ ...common, appearance: appearanceFor('photoLineup'), visible: state.visible.photoLineup, lineupTeam: state.lineupTeam, selectedTeams: state.selectedTeams, home: state.home, away: state.away, teamCatalog, stage: state.photoLineupStage, player: state.photoLineupPlayerIndex, showSponsors: state.photoLineupShowSponsors, sponsor: activeSponsor() });
@@ -2419,20 +2421,19 @@ function confirmEvent() {
   const type = drawer.type;
   const cardMode = (type === 'yellow' || type === 'red') && (document.getElementById('event-card-mode')?.value === 'scoreboard' || drawer.cardMode === 'scoreboard') ? 'scoreboard' : 'lower-third';
   const teamKey = document.getElementById('event-team')?.value || 'home';
-  const name = document.getElementById('event-name')?.value.trim();
-  const note = document.getElementById('event-note')?.value.trim() || '';
-  if (!name) { toast('Informe o nome antes de colocar no ar.'); return; }
   if (type === 'sponsor') {
+    const chosen = Number(document.getElementById('event-sponsor')?.value);
     drawer = null;
     commit(draft => {
-      const sponsor = activeSponsor(draft);
-      sponsor.name = name;
-      draft.sponsor = name;
+      draft.activeSponsorIndex = clampNumber(chosen, 0, Math.max(0, (draft.sponsors || []).length - 1), 0);
       putSponsorOnAir(draft);
     }, { immediate: true });
     toast(`Patrocinador exibido por ${clampNumber(state.appearance.sponsorDuration, 3, 60, 10)} segundos.`);
     return;
   }
+  const name = document.getElementById('event-name')?.value.trim();
+  const note = document.getElementById('event-note')?.value.trim() || '';
+  if (!name) { toast('Informe o nome antes de colocar no ar.'); return; }
   const titles = { yellow: 'CARTÃO AMARELO', red: 'CARTÃO VERMELHO', substitution: 'SUBSTITUIÇÃO', goal: 'GOOOL', 'lower-third': document.getElementById('event-title')?.value.trim() || 'AO VIVO' };
   const team = state[teamKey];
   const eventNote = type === 'substitution' && note ? `Entra: ${name} · Sai: ${note}` : type === 'lower-third' ? note : `${team.name}${note ? ` · ${note}` : ''}`;
@@ -3204,7 +3205,7 @@ app.addEventListener('input', event => {
   if (target.matches('[data-appearance]')) {
     const key = target.dataset.appearance;
     commit(draft => {
-      const numericFields = ['scoreboardScale','scoreboardFont','scoreboardX','scoreboardY','scoreboardRadius','scoreboardSurface','scoreboardAccent','scoreboardAnimationSpeed','periodScale','periodFont','periodSurface','extraTimeScale','eventScale','eventFont','eventX','eventY','lineupScale','lineupFont','lineupX','lineupY','photoLineupScale','photoLineupFont','photoLineupX','photoLineupY','photoLineupSurface','photoLineupRadius','photoLineupSponsorCount','photoLineupSponsorBarSize','photoLineupIndividualDuration','photoLineupPanelDuration','sponsorScale','sponsorFont','sponsorX','sponsorY','sponsorDuration','sponsorAnimationSpeed','sponsorBarDuration','sponsorBarAnimationSpeed','sponsorBarScale','sponsorBarOpacity','sponsorBarRadius','goalWordDuration','goalTeamDuration'];
+      const numericFields = ['scoreboardScale','scoreboardFont','scoreboardX','scoreboardY','scoreboardRadius','scoreboardSurface','scoreboardAccent','scoreboardAnimationSpeed','periodScale','periodFont','periodSurface','extraTimeScale','eventScale','eventFont','eventX','eventY','lineupScale','lineupFont','lineupX','lineupY','photoLineupScale','photoLineupFont','photoLineupX','photoLineupY','photoLineupSurface','photoLineupRadius','photoLineupSponsorCount','photoLineupSponsorBarSize','photoLineupIndividualDuration','photoLineupPanelDuration','sponsorScale','sponsorFont','sponsorX','sponsorY','sponsorDuration','sponsorAnimationSpeed','sponsorBarDuration','sponsorBarAnimationSpeed','sponsorBarScale','sponsorBarX','sponsorBarY','sponsorBarOpacity','sponsorBarRadius','goalWordDuration','goalTeamDuration'];
       if (numericFields.includes(key)) {
         const isPosition = key.endsWith('X') || key.endsWith('Y');
         const bounds = {
