@@ -1,12 +1,11 @@
 const initialParams = new URLSearchParams(location.search);
 let requestedRoom = initialParams.get('room');
-if (!requestedRoom) {
+const isAdminRoute = !['/overlay', '/preview', '/team'].includes(location.pathname);
+if (!requestedRoom && !isAdminRoute) {
   try { requestedRoom = localStorage.getItem('juventude.overlay.lastRoom'); } catch {}
-  if (location.pathname === '/') requestedRoom ||= `partida-${Math.random().toString(36).slice(2, 8)}`;
-  if (requestedRoom) globalThis.history?.replaceState?.({}, '', `${location.pathname}?room=${encodeURIComponent(requestedRoom)}`);
 }
 const ROOM_ID = (requestedRoom || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
-try { localStorage.setItem('juventude.overlay.lastRoom', ROOM_ID); } catch {}
+if (requestedRoom) { try { localStorage.setItem('juventude.overlay.lastRoom', ROOM_ID); } catch {} }
 const STORAGE_KEY = `juventude.overlay-studio.v2.${ROOM_ID}`;
 const TEAM_CATALOG_KEY = 'juventude.overlay-team-catalog.v1';
 const CHANNEL_NAME = `juventude-overlay-live.${ROOM_ID}`;
@@ -15,8 +14,12 @@ const isOutput = location.pathname === '/overlay';
 const isPreview = location.pathname === '/preview';
 const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
-const managementModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
+const platformMode = isAdminPanel && !requestedRoom;
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'audit', 'access'];
+const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
+const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
+let appVersion = '';
 const outputLayer = new URLSearchParams(location.search).get('layer') || 'all';
 const outputCustomId = new URLSearchParams(location.search).get('id') || '';
 const app = document.getElementById('app');
@@ -1689,6 +1692,9 @@ function renderDashboardModule() {
       ${liveNow.length ? `<div class="dashboard-list"><strong>Ao vivo agora</strong>${liveNow.map(matchRow).join('')}</div>` : ''}
       ${upcoming.length ? `<div class="dashboard-list"><strong>Próximas partidas</strong>${upcoming.map(matchRow).join('')}</div>` : '<div class="portal-empty">Nenhuma partida agendada.</div>'}
     </section>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Campeonatos</h3><p class="help-text">${operationsData.championships.length} campeonato${operationsData.championships.length === 1 ? '' : 's'} · escolha uma partida para abrir seus painéis e overlays.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('championships'))}">Gerenciar campeonatos</a></div>
+      <div class="dashboard-list">${operationsData.championships.map(item => `<div class="dashboard-mini-row"><span>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</span><small>${matches.filter(match => match.championshipId === item.id).length} partida(s)</small></div>`).join('') || '<div class="portal-empty">Nenhum campeonato cadastrado.</div>'}</div>
+    </section>
     <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Atividade e avisos</h3><p class="help-text">${unread} aviso${unread === 1 ? '' : 's'} não lido${unread === 1 ? '' : 's'} de delegações das equipes.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('audit'))}">Ver avisos e logs</a></div>
       <div class="dashboard-list">${recentLogs}</div>
     </section>
@@ -1857,7 +1863,23 @@ function renderOverlayCard(key, title, caption, icon, active) {
 }
 
 function moduleUrl(key = '') {
-  return `${location.origin}/manage${key ? `/${key}` : ''}?room=${encodeURIComponent(ROOM_ID)}`;
+  return `${location.origin}/manage${key ? `/${key}` : ''}${platformMode ? '' : `?room=${encodeURIComponent(ROOM_ID)}`}`;
+}
+
+function platformUrl(key = 'dashboard') {
+  return `${location.origin}/manage/${key}`;
+}
+
+function versionLabel() {
+  return `Versão ${appVersion || '…'}`;
+}
+
+async function loadAppVersion() {
+  try {
+    const response = await fetch('/health', { cache: 'no-store' });
+    const data = response.ok ? await response.json() : {};
+    if (data.version) { appVersion = String(data.version).slice(0, 20); render(); }
+  } catch {}
 }
 
 function renderScoreboardModuleControls() {
@@ -2109,16 +2131,26 @@ function renderModuleHub() {
 }
 
 function renderManagementSidebar(activeKey = 'overview') {
-  const groupLabels = { championships: 'Organização', scoreboard: 'Overlays', pregame: 'Partida', teams: 'Configuração' };
-  const links = MANAGEMENT_MODULES.map(item => `${groupLabels[item.key] ? `<span class="module-sidebar-label ${item.key === 'scoreboard' ? '' : 'module-sidebar-label-spaced'}">${groupLabels[item.key]}</span>` : ''}<a class="${activeKey === item.key ? 'active' : ''}" href="${escapeHtml(moduleUrl(item.key))}">${item.icon}<span>${escapeHtml(item.label)}</span></a>`).join('');
-  return `<aside class="module-sidebar" aria-label="Navegação dos overlays"><a class="module-sidebar-overview ${activeKey === 'overview' ? 'active' : ''}" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.monitor}<span>Visão geral</span></a>${links}<a class="module-sidebar-home ${activeKey === 'hub' ? 'active' : ''}" href="${escapeHtml(moduleUrl())}">${icons.layers}<span>Central de módulos</span></a></aside>`;
+  const link = (item, href = moduleUrl(item.key)) => `<a class="${activeKey === item.key ? 'active' : ''}" href="${escapeHtml(href)}">${item.icon}<span>${escapeHtml(item.label)}</span></a>`;
+  const byKey = keys => MANAGEMENT_MODULES.filter(item => keys.includes(item.key));
+  const group = (label, items, hrefFor) => `<span class="module-sidebar-label module-sidebar-label-spaced">${label}</span>${items.map(item => link(item, hrefFor(item))).join('')}`;
+  const footer = `<p class="app-version module-sidebar-version">${versionLabel()}</p>`;
+  if (platformMode) {
+    const platformHref = item => platformUrl(item.key);
+    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${group('Organização', byKey(['championships', 'matches']), platformHref)}${group('Configuração', byKey(['teams', 'access']), platformHref)}${group('Histórico', byKey(['audit']), platformHref)}${footer}</aside>`;
+  }
+  const matchTitle = `${escapeHtml(state.home.short)} × ${escapeHtml(state.away.short)}`;
+  const matchModules = MANAGEMENT_MODULES.filter(item => !PLATFORM_MODULE_KEYS.includes(item.key));
+  const labelBefore = { scoreboard: 'Overlays', pregame: 'Partida', appearance: 'Configuração' };
+  const links = matchModules.map(item => `${labelBefore[item.key] ? `<span class="module-sidebar-label module-sidebar-label-spaced">${labelBefore[item.key]}</span>` : ''}${link(item)}`).join('');
+  return `<aside class="module-sidebar" aria-label="Navegação da partida"><a class="module-sidebar-back" href="${escapeHtml(platformUrl('dashboard'))}">← Plataforma</a><div class="module-sidebar-match"><small>Partida selecionada</small><strong>${matchTitle}</strong><span>${escapeHtml(state.competition)}</span></div><a class="module-sidebar-overview ${activeKey === 'overview' ? 'active' : ''}" href="/?room=${encodeURIComponent(ROOM_ID)}">${icons.monitor}<span>Visão geral da partida</span></a>${links}<a class="module-sidebar-home ${activeKey === 'hub' ? 'active' : ''}" href="${escapeHtml(moduleUrl())}">${icons.layers}<span>Central de módulos</span></a>${footer}</aside>`;
 }
 
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
   const isOperational = ['dashboard', 'championships', 'matches', 'audit', 'builder', 'access'].includes(module?.key);
-  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="/?room=${encodeURIComponent(ROOM_ID)}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions"><span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span><a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a><a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button><button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','audit'].includes(module.key) ? 'Gestão da transmissão' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.label)}</h1><p>${escapeHtml(module.caption)}</p></div><a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a></header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? '' : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? '' : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','audit'].includes(module.key) ? 'Gestão da transmissão' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
 function renderMatchDashboard() {
@@ -2148,14 +2180,14 @@ function renderTeamAuthGate() {
   if (teamSession.status === 'checking') return renderAuthWait('Verificando sessão…');
   const options = teamLoginTeams.map(team => `<option value="${escapeHtml(team.id)}">${escapeHtml(team.name)}</option>`).join('');
   return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state auth-card"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><h1>Acesso da equipe</h1><p>Selecione a equipe e informe o usuário e a senha cadastrados pela organização.</p>
-    <div class="auth-form"><div class="field"><label for="team-select">Equipe</label><select id="team-select">${options || '<option value="">Nenhuma equipe cadastrada</option>'}</select></div><div class="field"><label for="team-username">Usuário</label><input id="team-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="team-password">Senha</label><input id="team-password" type="password" autocomplete="current-password" maxlength="200"></div>${teamSession.error ? `<p class="auth-error">${escapeHtml(teamSession.error)}</p>` : ''}<button class="button primary" data-action="team-login-submit" style="width:100%">Entrar</button></div></section></main>`;
+    <div class="auth-form"><div class="field"><label for="team-select">Equipe</label><select id="team-select">${options || '<option value="">Nenhuma equipe cadastrada</option>'}</select></div><div class="field"><label for="team-username">Usuário</label><input id="team-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="team-password">Senha</label><input id="team-password" type="password" autocomplete="current-password" maxlength="200"></div>${teamSession.error ? `<p class="auth-error">${escapeHtml(teamSession.error)}</p>` : ''}<button class="button primary" data-action="team-login-submit" style="width:100%">Entrar</button></div><p class="app-version">${versionLabel()}</p></section></main>`;
 }
 
 function renderAdminAuthGate() {
   if (adminSession.status === 'checking') return renderAuthWait('Verificando sessão…');
   const isSetup = adminSession.status === 'setup';
   return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state auth-card"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><h1>${isSetup ? 'Criar administrador' : 'Entrar no painel'}</h1><p>${isSetup ? 'Defina o primeiro usuário e senha do painel administrativo.' : 'Informe seu usuário e senha para acessar o painel.'}</p>
-    <div class="auth-form"><div class="field"><label for="admin-username">Usuário</label><input id="admin-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="admin-password">Senha</label><input id="admin-password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" maxlength="200"></div>${isSetup ? `<div class="field"><label for="admin-setup-token">Código de instalação</label><input id="admin-setup-token" type="password" autocomplete="off"><small>Use o código fornecido pelo responsável pela instalação.</small></div>` : ''}${adminSession.error ? `<p class="auth-error">${escapeHtml(adminSession.error)}</p>` : ''}<button class="button primary" data-action="${isSetup ? 'admin-setup-submit' : 'admin-login-submit'}" style="width:100%">${isSetup ? 'Criar administrador' : 'Entrar'}</button><a class="button subtle auth-team-link" href="/team">${icons.users} Acesso da equipe</a></div></section></main>`;
+    <div class="auth-form"><div class="field"><label for="admin-username">Usuário</label><input id="admin-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="admin-password">Senha</label><input id="admin-password" type="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" maxlength="200"></div>${isSetup ? `<div class="field"><label for="admin-setup-token">Código de instalação</label><input id="admin-setup-token" type="password" autocomplete="off"><small>Use o código fornecido pelo responsável pela instalação.</small></div>` : ''}${adminSession.error ? `<p class="auth-error">${escapeHtml(adminSession.error)}</p>` : ''}<button class="button primary" data-action="${isSetup ? 'admin-setup-submit' : 'admin-login-submit'}" style="width:100%">${isSetup ? 'Criar administrador' : 'Entrar'}</button><a class="button subtle auth-team-link" href="/team">${icons.users} Acesso da equipe</a></div><p class="app-version">${versionLabel()}</p></section></main>`;
 }
 
 function renderTeamPortal() {
@@ -2275,7 +2307,7 @@ function rememberFocusedField() {
 
 function ensureEmergencyButton() {
   const existing = document.querySelector('[data-emergency-hide-all]');
-  if (!isAdminPanel || adminSession.status !== 'authenticated') {
+  if (!isAdminPanel || platformMode || adminSession.status !== 'authenticated') {
     existing?.remove();
     return;
   }
@@ -2289,7 +2321,7 @@ function ensureEmergencyButton() {
 }
 
 function ensureMatchSwitcher() {
-  if (!isAdminPanel || adminSession.status !== 'authenticated' || !operationsData.matches.length || document.getElementById('active-match-switcher')) return;
+  if (!isAdminPanel || platformMode || adminSession.status !== 'authenticated' || !operationsData.matches.length || document.getElementById('active-match-switcher')) return;
   const actions = document.querySelector('.top-actions');
   if (!actions) return;
   const wrapper = document.createElement('label');
@@ -2309,7 +2341,7 @@ function render() {
     app.innerHTML = `<div class="full-preview-stage">${renderPreviewBackground()}${previewCompositeMarkup()}<div class="safe-guides"><i></i><i></i></div><div class="monitor-label">VISUALIZAÇÃO COMPLETA · ${escapeHtml(currentSport().label.toUpperCase())} · SALA ${escapeHtml(ROOM_ID)}</div></div>`;
   } else if (isAdminPanel && adminSession.status !== 'authenticated') {
     app.innerHTML = renderAdminAuthGate();
-  } else if (isManagement) {
+  } else if (isManagement || platformMode) {
     app.innerHTML = renderModuleApp();
   } else app.innerHTML = renderApp();
   if (remembered?.selector) {
@@ -3610,6 +3642,7 @@ render();
 if (isTeamPortal) checkTeamSession();
 else {
   if (isAdminPanel) checkAdminSession();
+  if (!isOutput) loadAppVersion();
   initializeSharedState();
   initializeTeamCatalog();
   setInterval(pollServer, isOutput || isPreview ? 320 : 800);
