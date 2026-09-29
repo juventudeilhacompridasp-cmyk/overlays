@@ -20,7 +20,7 @@ const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -55,6 +55,8 @@ function brandMark() {
 
 const MANAGEMENT_MODULES = [
   { key: 'dashboard', label: 'Dashboard', caption: 'Visão geral de agenda, avisos, acessos e estatísticas da plataforma', layer: 'all', icon: icons.monitor },
+  { key: 'live', label: 'Ao vivo agora', caption: 'Partidas em andamento, placar, o que está no ar e atalhos de emergência', layer: 'all', icon: icons.monitor },
+  { key: 'standings', label: 'Classificação e súmulas', caption: 'Tabela do campeonato, artilharia, cartões e súmula de cada partida', layer: 'all', icon: icons.list },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
   { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
   { key: 'scoreboard', label: 'Placar', caption: 'Resultado, tempo e formato', layer: 'scoreboard', icon: icons.monitor },
@@ -71,6 +73,7 @@ const MANAGEMENT_MODULES = [
   { key: 'appearance', label: 'Aparência', caption: 'Estilos, posições e animações', layer: 'all', icon: icons.eye },
   { key: 'announcements', label: 'Comunicados', caption: 'Recados da organização para todas as equipes ou para equipes específicas', layer: 'all', icon: icons.text },
   { key: 'audit', label: 'Avisos e logs', caption: 'Delegações concluídas e histórico de ações', layer: 'all', icon: icons.list },
+  { key: 'backup', label: 'Backup e exportação', caption: 'Cópia dos dados da plataforma e planilhas CSV', layer: 'all', icon: icons.list },
   { key: 'access', label: 'Usuários/Acessos', caption: 'Administradores do painel e usuários dos times', layer: 'all', icon: icons.lock },
 ];
 
@@ -506,7 +509,9 @@ let pushTimeout = null;
 let teamCatalogPushTimeout = null;
 let teamPortalTeam = null;
 let teamPortalStatus = isTeamPortal ? 'loading' : 'idle';
-let adminSession = { status: isAdminPanel ? 'checking' : 'idle', username: null, error: '' };
+let adminSession = { status: isAdminPanel ? 'checking' : 'idle', username: null, role: 'admin', error: '' };
+const ADMIN_ROLE_LABELS = { admin: 'Administrador', operator: 'Operador', viewer: 'Leitor' };
+const ADMIN_ROLE_HINTS = { admin: 'Acesso total, inclusive usuários e acessos', operator: 'Opera transmissão e cadastros; não gerencia usuários', viewer: 'Somente leitura; não altera nada' };
 let teamSession = { status: isTeamPortal ? 'checking' : 'idle', teamId: null, teamName: null, error: '' };
 let teamLoginTeams = [];
 let accessAdmins = [];
@@ -1436,7 +1441,7 @@ async function checkAdminSession() {
     if (!statusData.hasAdmins) { adminSession = { status: 'setup', username: null, error: '' }; render(); return; }
     const response = await fetch('/api/auth/admin/session', { cache: 'no-store' });
     const data = response.ok ? await response.json() : { authenticated: false };
-    adminSession = { status: data.authenticated ? 'authenticated' : 'login', username: data.username || null, error: '' };
+    adminSession = { status: data.authenticated ? 'authenticated' : 'login', username: data.username || null, role: data.role || 'admin', error: '' };
     if (data.authenticated) { loadAccessData(); loadOperationsData(); }
   } catch {
     adminSession = { status: 'login', username: null, error: 'Falha ao verificar a sessão.' };
@@ -1451,7 +1456,7 @@ async function submitAdminAuth(mode, username, password, setupToken) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) { adminSession = { ...adminSession, error: data.error || 'Não foi possível entrar.' }; render(); return; }
-    adminSession = { status: 'authenticated', username: data.username, error: '' };
+    adminSession = { status: 'authenticated', username: data.username, role: data.role || 'admin', error: '' };
     render();
     loadAccessData();
     loadOperationsData();
@@ -1913,7 +1918,7 @@ function renderAccessModule() {
   const matches = (...values) => !term || values.some(value => String(value || '').toLowerCase().includes(term));
   const adminCards = accessAdmins.filter(account => matches(account.username)).map(account => {
     const isSelf = account.username === adminSession.username;
-    return `<article class="access-card"><div class="access-card-head">${avatarBadge(account.username)}<div><strong>${escapeHtml(account.username)}${isSelf ? ' <em class="access-you">você</em>' : ''}</strong><small>Acesso completo ao painel</small></div></div><dl class="access-meta"><div><dt>Último acesso</dt><dd>${escapeHtml(relativeTime(account.lastLoginAt))}</dd></div><div><dt>Criado em</dt><dd>${account.createdAt ? new Date(account.createdAt).toLocaleDateString('pt-BR') : '—'}</dd></div></dl>${revealBox(`admin:${account.id}`)}<div class="access-card-actions"><button class="button subtle" data-action="admin-reset-password" data-value="${escapeHtml(account.id)}">Redefinir senha</button><button class="button subtle" data-action="remove-admin-account" data-value="${escapeHtml(account.id)}" ${accessAdmins.length <= 1 || isSelf ? 'disabled' : ''} title="${isSelf ? 'Você não pode remover a própria conta' : 'Remover administrador'}">Remover</button></div></article>`;
+    return `<article class="access-card"><div class="access-card-head">${avatarBadge(account.username)}<div><strong>${escapeHtml(account.username)}${isSelf ? ' <em class="access-you">você</em>' : ''}</strong><small>${escapeHtml(ADMIN_ROLE_HINTS[account.role] || ADMIN_ROLE_HINTS.admin)}</small></div></div><div class="field access-role-field"><label for="role-${escapeHtml(account.id)}">Papel</label><select id="role-${escapeHtml(account.id)}" data-admin-role="${escapeHtml(account.id)}">${Object.entries(ADMIN_ROLE_LABELS).map(([value, label]) => `<option value="${value}" ${(account.role || 'admin') === value ? 'selected' : ''}>${label}</option>`).join('')}</select></div><dl class="access-meta"><div><dt>Último acesso</dt><dd>${escapeHtml(relativeTime(account.lastLoginAt))}</dd></div><div><dt>Criado em</dt><dd>${account.createdAt ? new Date(account.createdAt).toLocaleDateString('pt-BR') : '—'}</dd></div></dl>${revealBox(`admin:${account.id}`)}<div class="access-card-actions"><button class="button subtle" data-action="admin-reset-password" data-value="${escapeHtml(account.id)}">Redefinir senha</button><button class="button subtle" data-action="remove-admin-account" data-value="${escapeHtml(account.id)}" ${accessAdmins.length <= 1 || isSelf ? 'disabled' : ''} title="${isSelf ? 'Você não pode remover a própria conta' : 'Remover administrador'}">Remover</button></div></article>`;
   }).join('') || '<div class="portal-empty">Nenhum administrador encontrado.</div>';
   const teamCards = teamCatalog.filter(team => {
     const users = usersByTeam.get(team.id) || [];
@@ -1931,8 +1936,8 @@ function renderAccessModule() {
   const filterChips = [['all', 'Todos'], ['with', 'Com acesso'], ['without', 'Sem acesso']].map(([value, label]) => `<button class="access-chip ${accessTeamFilter === value ? 'active' : ''}" data-action="access-team-filter" data-value="${value}" aria-pressed="${accessTeamFilter === value}">${label}</button>`).join('');
   return `<div class="module-section access-screen"><div class="dashboard-stats">${tiles.map(([value, label]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div>${alerts}
     <div class="access-toolbar"><input type="search" data-access-search value="${escapeHtml(accessSearch)}" maxlength="60" placeholder="Buscar por equipe ou usuário" aria-label="Buscar acessos"><div class="access-chips" role="group" aria-label="Filtrar equipes">${filterChips}</div></div>
-    <section class="access-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas com acesso completo ao painel e a todos os times. Mantenha ao menos um administrador ativo.</p></div></div>
-      <div class="access-grid">${adminCards}<article class="access-card access-new"><div class="access-card-head">${avatarBadge('+')}<div><strong>Novo administrador</strong><small>Acesso completo ao painel</small></div></div><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><div class="password-field"><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres" data-pw-meter><button type="button" class="button square subtle" data-action="generate-admin-password" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-admin-credentials" title="Copiar usuário e senha">${icons.copy}</button></div>${passwordMeter()}</div><button class="button primary access-row-save" data-action="add-admin-account">+ Adicionar administrador</button></article></div></section>
+    <section class="access-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas do painel e seus papéis: administrador (acesso total), operador (transmissão e cadastros) e leitor (somente leitura). Mantenha ao menos um administrador com acesso total.</p></div></div>
+      <div class="access-grid">${adminCards}<article class="access-card access-new"><div class="access-card-head">${avatarBadge('+')}<div><strong>Nova conta do painel</strong><small>Escolha o papel e defina a senha</small></div></div><div class="field"><label for="access-admin-role">Papel</label><select id="access-admin-role">${Object.entries(ADMIN_ROLE_LABELS).map(([value, label]) => `<option value="${value}">${label} · ${escapeHtml(ADMIN_ROLE_HINTS[value])}</option>`).join('')}</select></div><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><div class="password-field"><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres" data-pw-meter><button type="button" class="button square subtle" data-action="generate-admin-password" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-admin-credentials" title="Copiar usuário e senha">${icons.copy}</button></div>${passwordMeter()}</div><button class="button primary access-row-save" data-action="add-admin-account">+ Adicionar administrador</button></article></div></section>
     <section class="access-section"><div class="section-header"><div><h3 class="section-title">Usuários dos times</h3><p class="help-text">Cada time acessa <strong>/team</strong> com o usuário e a senha definidos aqui para cadastrar atletas, fotos e comissão técnica. Uma equipe pode ter vários usuários.</p></div></div><div class="access-grid">${teamCards}</div></section></div>`;
 }
 
@@ -1970,6 +1975,162 @@ function renderChampionshipsModule() {
   const editor = championshipDraft || selected || { name: '', season: '', startDate: '', endDate: '', status: 'planned' };
   const list = operationsData.championships.map(item => `<button class="operations-item ${item.id === selected?.id ? 'active' : ''}" data-action="select-championship" data-value="${escapeHtml(item.id)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.season || 'Temporada não informada')} · ${operationDate(item.startDate)} → ${operationDate(item.endDate)}</small></span><b>${item.status === 'active' ? 'Em andamento' : item.status === 'finished' ? 'Encerrado' : 'Planejado'}</b></button>`).join('') || '<div class="portal-empty">Nenhum campeonato cadastrado.</div>';
   return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Campeonatos</strong><small>${operationsData.championships.length} cadastrado${operationsData.championships.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-championship">+ Novo</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar campeonato' : 'Novo campeonato'}</h3><p class="help-text">O campeonato organiza temporadas, partidas e a identidade usada na transmissão.</p></div></div><div class="field"><label for="championship-name">Nome</label><input id="championship-name" maxlength="100" value="${escapeHtml(editor.name || '')}" placeholder="Ex.: Campeonato Municipal"></div><div class="field-row"><div class="field"><label for="championship-season">Temporada</label><input id="championship-season" maxlength="40" value="${escapeHtml(editor.season || '')}" placeholder="2026"></div><div class="field"><label for="championship-status">Status</label><select id="championship-status"><option value="planned" ${editor.status === 'planned' ? 'selected' : ''}>Planejado</option><option value="active" ${editor.status === 'active' ? 'selected' : ''}>Em andamento</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Encerrado</option></select></div></div><div class="field-row"><div class="field"><label for="championship-start">Início</label><input id="championship-start" type="date" value="${escapeHtml(editor.startDate || '')}"></div><div class="field"><label for="championship-end">Fim</label><input id="championship-end" type="date" value="${escapeHtml(editor.endDate || '')}"></div></div><div class="operations-actions"><button class="button primary" data-action="save-championship" data-value="${escapeHtml(selected?.id || '')}">Salvar campeonato</button>${selected ? '<button class="button subtle danger" data-action="delete-championship" data-value="' + escapeHtml(selected.id) + '">Excluir</button>' : ''}</div></section></div>`;
+}
+
+let standingsRooms = {};
+let standingsChampionshipId = '';
+let standingsSummaryId = '';
+let standingsLoadedAt = 0;
+
+async function loadStandingsRooms(force = false) {
+  if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'standings') return;
+  if (!force && Date.now() - standingsLoadedAt < 12000) return;
+  standingsLoadedAt = Date.now();
+  const wanted = operationsData.matches.filter(match => ['finished', 'live'].includes(match.status) && (!standingsChampionshipId || match.championshipId === standingsChampionshipId)).slice(0, 80);
+  await Promise.all(wanted.map(async match => {
+    try {
+      const response = await fetch(`/api/state?room=${encodeURIComponent(match.room)}&ts=${Date.now()}`, { cache: 'no-store' });
+      if (response.ok) standingsRooms[match.room] = await response.json();
+    } catch {}
+  }));
+  if (managementModule === 'standings') render();
+}
+
+function eventKind(title) {
+  const value = String(title || '').toLocaleLowerCase('pt-BR');
+  return /go+l|cesta|ponto/.test(value) ? 'goal' : /amarelo/.test(value) ? 'yellow' : /vermelho/.test(value) ? 'red' : /substitui/.test(value) ? 'sub' : '';
+}
+
+function computeStandings(matches) {
+  const table = new Map();
+  const row = id => { if (!table.has(id)) table.set(id, { id, name: operationTeamName(id), played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, points: 0 }); return table.get(id); };
+  const scorers = new Map();
+  const cards = new Map();
+  for (const match of matches) {
+    const remote = standingsRooms[match.room];
+    if (!remote) continue;
+    const sides = { [remote.home?.short]: match.homeTeamId, [remote.away?.short]: match.awayTeamId };
+    for (const event of remote.events || []) {
+      const kind = eventKind(event.title);
+      const teamId = sides[event.team];
+      const name = String(event.name || '').trim();
+      if (!kind || !teamId || !name || kind === 'sub') continue;
+      const key = `${name}|${teamId}`;
+      if (kind === 'goal') scorers.set(key, { name, teamId, goals: (scorers.get(key)?.goals || 0) + 1 });
+      else cards.set(key, { name, teamId, yellow: (cards.get(key)?.yellow || 0) + (kind === 'yellow' ? 1 : 0), red: (cards.get(key)?.red || 0) + (kind === 'red' ? 1 : 0) });
+    }
+    if (match.status !== 'finished') continue;
+    const home = row(match.homeTeamId); const away = row(match.awayTeamId);
+    const hs = Number(remote.home?.score || 0); const as = Number(remote.away?.score || 0);
+    home.played++; away.played++; home.gf += hs; home.ga += as; away.gf += as; away.ga += hs;
+    if (hs > as) { home.won++; away.lost++; home.points += 3; } else if (hs < as) { away.won++; home.lost++; away.points += 3; } else { home.drawn++; away.drawn++; home.points++; away.points++; }
+  }
+  const ranking = [...table.values()].sort((a, b) => b.points - a.points || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.name.localeCompare(b.name, 'pt-BR'));
+  return { ranking, scorers: [...scorers.values()].sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name, 'pt-BR')).slice(0, 10), cards: [...cards.values()].sort((a, b) => (b.red * 3 + b.yellow) - (a.red * 3 + a.yellow)).slice(0, 10) };
+}
+
+function renderMatchSummary(match) {
+  const remote = standingsRooms[match.room];
+  if (!remote) return '<div class="portal-empty">Carregando súmula…</div>';
+  const kindLabel = { goal: 'Gol', yellow: 'Cartão amarelo', red: 'Cartão vermelho', sub: 'Substituição' };
+  const rows = [...(remote.events || [])].reverse().map(event => ({ event, kind: eventKind(event.title) })).filter(item => item.kind).map(({ event, kind }) => `<tr><td>${escapeHtml(event.minute || '')}</td><td>${escapeHtml(kindLabel[kind])}</td><td>${escapeHtml(event.team || '')}</td><td>${escapeHtml(event.name || '—')}${event.note ? ` <small>(${escapeHtml(event.note)})</small>` : ''}</td><td>${escapeHtml(event.score || '')}</td></tr>`).join('') || '<tr><td colspan="5">Nenhum lance registrado.</td></tr>';
+  return `<section class="dashboard-section standings-summary"><div class="section-header"><div><h3 class="section-title">Súmula · ${escapeHtml(operationTeamName(match.homeTeamId))} ${Number(remote.home?.score || 0)} × ${Number(remote.away?.score || 0)} ${escapeHtml(operationTeamName(match.awayTeamId))}</h3><p class="help-text">${escapeHtml(operationChampionshipName(match.championshipId))}${match.round ? ` · ${escapeHtml(match.round)}` : ''} · ${escapeHtml(operationDate(match.kickoffAt, true))}${match.venue ? ` · ${escapeHtml(match.venue)}` : ''}</p></div><div class="operations-actions"><button class="button subtle" data-action="standings-print">Imprimir</button><button class="button subtle" data-action="standings-summary" data-value="">Fechar</button></div></div><table class="standings-table"><thead><tr><th>Min</th><th>Lance</th><th>Equipe</th><th>Atleta</th><th>Placar</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+}
+
+function renderStandingsModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  if (!standingsChampionshipId || !operationsData.championships.some(item => item.id === standingsChampionshipId)) standingsChampionshipId = (operationsData.championships.find(item => item.status === 'active') || operationsData.championships[0])?.id || '';
+  if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato e partidas para gerar a classificação.</div>';
+  loadStandingsRooms();
+  const matches = operationsData.matches.filter(match => match.championshipId === standingsChampionshipId);
+  const done = matches.filter(match => match.status === 'finished');
+  const { ranking, scorers, cards } = computeStandings(matches);
+  const options = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === standingsChampionshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
+  const table = ranking.length ? `<table class="standings-table"><thead><tr><th>#</th><th>Equipe</th><th>P</th><th>J</th><th>V</th><th>E</th><th>D</th><th>GP</th><th>GC</th><th>SG</th></tr></thead><tbody>${ranking.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td><b>${item.points}</b></td><td>${item.played}</td><td>${item.won}</td><td>${item.drawn}</td><td>${item.lost}</td><td>${item.gf}</td><td>${item.ga}</td><td>${item.gf - item.ga}</td></tr>`).join('')}</tbody></table><p class="help-text">Pontos: vitória 3, empate 1. Considera apenas partidas finalizadas, usando o placar registrado em cada sala.</p>` : '<div class="portal-empty">Nenhuma partida finalizada neste campeonato ainda.</div>';
+  const scorerRows = scorers.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(operationTeamName(item.teamId))}</td><td><b>${item.goals}</b></td></tr>`).join('');
+  const cardRows = cards.map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(operationTeamName(item.teamId))}</td><td>${item.yellow}</td><td>${item.red}</td></tr>`).join('');
+  const matchRows = done.map(match => { const remote = standingsRooms[match.room]; return `<button class="operations-item ${standingsSummaryId === match.id ? 'active' : ''}" data-action="standings-summary" data-value="${escapeHtml(match.id)}"><span><strong>${escapeHtml(operationTeamName(match.homeTeamId))} ${remote ? Number(remote.home?.score || 0) : '–'} × ${remote ? Number(remote.away?.score || 0) : '–'} ${escapeHtml(operationTeamName(match.awayTeamId))}</strong><small>${escapeHtml(match.round || 'Rodada')} · ${escapeHtml(operationDate(match.kickoffAt, true))}</small></span><b>Súmula</b></button>`; }).join('') || '<div class="portal-empty">Sem partidas finalizadas.</div>';
+  const openMatch = done.find(match => match.id === standingsSummaryId);
+  return `<div class="module-section"><div class="field standings-select"><label for="standings-championship">Campeonato</label><select id="standings-championship">${options}</select></div>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Classificação</h3></div></div>${table}</section>
+    <div class="dashboard-grid"><section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Artilharia</h3></div></div>${scorerRows ? `<table class="standings-table"><thead><tr><th>#</th><th>Atleta</th><th>Equipe</th><th>Gols</th></tr></thead><tbody>${scorerRows}</tbody></table>` : '<div class="portal-empty">Nenhum gol com autor identificado.</div>'}</section>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Cartões</h3></div></div>${cardRows ? `<table class="standings-table"><thead><tr><th>Atleta</th><th>Equipe</th><th>🟨</th><th>🟥</th></tr></thead><tbody>${cardRows}</tbody></table>` : '<div class="portal-empty">Nenhum cartão registrado.</div>'}</section></div>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Súmulas das partidas</h3><p class="help-text">Abra a súmula com os lances registrados em cada jogo.</p></div></div><div class="dashboard-list">${matchRows}</div></section>${openMatch ? renderMatchSummary(openMatch) : ''}</div>`;
+}
+
+const LIVE_LAYER_LABELS = { scoreboard: 'Placar', sponsor: 'Patrocinador', sponsorBar: 'Barra de patrocinadores', lineup: 'Escalação simples', photoLineup: 'Apresentação', stats: 'Estatísticas' };
+let liveRooms = {};
+
+async function loadLiveRooms() {
+  if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'live') return;
+  const rooms = operationsData.matches.filter(match => match.status === 'live').map(match => match.room);
+  await Promise.all(rooms.map(async room => {
+    try {
+      const response = await fetch(`/api/state?room=${encodeURIComponent(room)}&ts=${Date.now()}`, { cache: 'no-store' });
+      if (response.ok) liveRooms[room] = await response.json();
+    } catch {}
+  }));
+  if (managementModule === 'live') render();
+}
+
+function liveClockText(remote) {
+  const sport = SPORTS[remote?.sport] || SPORTS.football;
+  const elapsed = clockSeconds(remote?.clock);
+  const seconds = sport.duration ? Math.max(0, sport.duration - elapsed) : elapsed;
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+function renderLiveModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const live = operationsData.matches.filter(match => match.status === 'live');
+  const soon = operationsData.matches.filter(match => match.status === 'scheduled' && match.kickoffAt && new Date(match.kickoffAt).getTime() - Date.now() < 24 * 3600e3 && new Date(match.kickoffAt).getTime() > Date.now() - 3600e3).sort((a, b) => String(a.kickoffAt).localeCompare(String(b.kickoffAt)));
+  const cards = live.map(match => {
+    const remote = liveRooms[match.room];
+    const visible = remote?.visible || {};
+    const onAir = Object.entries(LIVE_LAYER_LABELS).filter(([key]) => visible[key]).map(([, label]) => `<span class="portal-chip is-live">${escapeHtml(label)}</span>`).join('') || '<span class="portal-chip">Nada no ar</span>';
+    const score = remote ? `${Number(remote.home?.score || 0)} × ${Number(remote.away?.score || 0)}` : '— × —';
+    return `<article class="live-card"><header><span class="live-tag">AO VIVO</span><small>${escapeHtml(operationChampionshipName(match.championshipId))}${match.round ? ` · ${escapeHtml(match.round)}` : ''}</small></header><div class="live-score"><strong>${escapeHtml(operationTeamName(match.homeTeamId))}</strong><b>${score}</b><strong>${escapeHtml(operationTeamName(match.awayTeamId))}</strong></div><div class="live-meta"><span>${remote ? liveClockText(remote) : '—'}</span><span>Sala · ${escapeHtml(match.room)}</span></div><div class="live-onair">${onAir}</div><div class="operations-actions"><a class="button primary" href="/?room=${encodeURIComponent(match.room)}">Operar partida</a><a class="button" href="/preview?room=${encodeURIComponent(match.room)}" target="_blank" rel="noopener">Prévia</a><button class="button subtle danger" data-action="live-hide-all" data-value="${escapeHtml(match.room)}">Retirar tudo do ar</button></div></article>`;
+  }).join('');
+  const soonRows = soon.map(match => `<a class="dashboard-mini-row" href="/?room=${encodeURIComponent(match.room)}"><span>${escapeHtml(operationTeamName(match.homeTeamId))} × ${escapeHtml(operationTeamName(match.awayTeamId))}</span><small>${operationDate(match.kickoffAt, true)}</small></a>`).join('');
+  return `<div class="live-grid">${cards || '<div class="portal-empty">Nenhuma partida ao vivo agora. Marque uma partida como "Ao vivo" na agenda para acompanhá-la aqui.</div>'}</div>${soonRows ? `<section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Começam em breve</h3><p class="help-text">Partidas agendadas para as próximas 24 horas.</p></div></div><div class="dashboard-list">${soonRows}</div></section>` : ''}`;
+}
+
+function csvText(rows) {
+  const cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  return `\uFEFF${rows.map(row => row.map(cell).join(';')).join('\r\n')}`;
+}
+
+function exportRows(kind) {
+  if (kind === 'teams') {
+    const rows = [['Equipe', 'Sigla', 'Número', 'Atleta', 'Posição', 'Altura (m)', 'Função']];
+    for (const team of teamCatalog) for (const athlete of team.athletes || []) rows.push([team.name, team.short, athlete.number, athlete.name, athlete.position, athlete.height, athlete.squadRole === 'reserve' ? 'Reserva' : 'Titular']);
+    return { name: 'times-e-atletas', rows };
+  }
+  if (kind === 'matches') {
+    const status = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', cancelled: 'Cancelada' };
+    const rows = [['Campeonato', 'Rodada', 'Mandante', 'Visitante', 'Data e hora', 'Local', 'Status', 'Sala']];
+    for (const match of operationsData.matches) rows.push([operationChampionshipName(match.championshipId), match.round, operationTeamName(match.homeTeamId), operationTeamName(match.awayTeamId), match.kickoffAt, match.venue, status[match.status] || match.status, match.room]);
+    return { name: 'partidas', rows };
+  }
+  if (kind === 'championships') {
+    const rows = [['Campeonato', 'Temporada', 'Status', 'Início', 'Fim', 'Partidas']];
+    for (const item of operationsData.championships) rows.push([item.name, item.season, item.status, item.startDate, item.endDate, operationsData.matches.filter(match => match.championshipId === item.id).length]);
+    return { name: 'campeonatos', rows };
+  }
+  const rows = [['Data', 'Ação', 'Alvo', 'Responsável', 'Detalhes']];
+  for (const item of operationsData.logs) rows.push([new Date(item.createdAt).toLocaleString('pt-BR'), OPERATION_ACTION_LABELS[item.action] || item.action, item.target, item.actor, item.details]);
+  return { name: 'auditoria', rows };
+}
+
+function renderBackupModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const exports = [['teams', 'Times e atletas', `${teamCatalog.length} equipes`], ['matches', 'Partidas', `${operationsData.matches.length} partidas`], ['championships', 'Campeonatos', `${operationsData.championships.length} campeonatos`], ['logs', 'Auditoria', `${operationsData.logs.length} registros`]];
+  return `<div class="module-section"><section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Backup completo</h3><p class="help-text">Um arquivo JSON com times e atletas, campeonatos, partidas, comunicados, situação das delegações e a biblioteca de patrocínios. Não inclui senhas, sessões nem o estado ao vivo das partidas. Guarde em local seguro: contém dados de atletas.</p></div><button class="button primary" data-action="backup-json">Baixar backup (JSON)</button></section>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Planilhas (CSV)</h3><p class="help-text">Abrem direto no Excel ou no Google Planilhas.</p></div></div><div class="dashboard-list">${exports.map(([kind, label, count]) => `<div class="dashboard-mini-row"><span>${label} <small>${count}</small></span><button class="button subtle" data-action="export-csv" data-value="${kind}">Baixar CSV</button></div>`).join('')}</div></section>
+    <p class="help-text">A restauração de um backup é feita pela equipe técnica; esta tela só gera as cópias.</p></div>`;
 }
 
 let selectedAnnouncementId = '';
@@ -2482,6 +2643,9 @@ function renderModuleControls(key) {
   if (key === 'report') return renderReportModule();
   if (key === 'access') return renderAccessModule();
   if (key === 'announcements') return renderAnnouncementsModule();
+  if (key === 'live') return renderLiveModule();
+  if (key === 'standings') return renderStandingsModule();
+  if (key === 'backup') return renderBackupModule();
   let content = '';
   if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : key === 'stats' ? 'overlay-stats' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
   else if (moduleTab === 'settings') content = renderModuleSettings(key);
@@ -2590,11 +2754,11 @@ function renderModuleHub() {
 
 // Grupos do menu do Super Administrador: separados por função (operar, cadastrar, publicar, comunicar, administrar).
 const PLATFORM_MENU_GROUPS = [
-  ['operation', 'Operação', ['championships', 'matches']],
+  ['operation', 'Operação', ['live', 'championships', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
   ['content', 'Conteúdo', ['sponsors', 'sponsor-bar']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
-  ['administration', 'Administração', ['access']],
+  ['administration', 'Administração', ['access', 'backup']],
 ];
 const SIDEBAR_GROUPS_KEY = 'juventude.sidebar.groups.v1';
 let sidebarSearch = '';
@@ -2616,7 +2780,7 @@ function renderManagementSidebar(activeKey = 'overview') {
   const footer = `<p class="app-version module-sidebar-version">${versionLabel()}</p>`;
   if (platformMode) {
     const platformHref = item => platformUrl(item.key);
-    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><input type="search" class="module-sidebar-search" data-sidebar-search value="${escapeHtml(sidebarSearch)}" maxlength="40" placeholder="Buscar tela…  ( / )" aria-label="Buscar tela do menu" autocomplete="off"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${PLATFORM_MENU_GROUPS.map(([id, label, keys]) => collapsibleGroup(id, label, byKey(keys), platformHref, activeKey, link)).join('')}${footer}</aside>`;
+    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><input type="search" class="module-sidebar-search" data-sidebar-search value="${escapeHtml(sidebarSearch)}" maxlength="40" placeholder="Buscar tela…  ( / )" aria-label="Buscar tela do menu" autocomplete="off"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${PLATFORM_MENU_GROUPS.map(([id, label, keys]) => collapsibleGroup(id, label, byKey(keys.filter(key => !['access', 'backup'].includes(key) || adminSession.role === 'admin')), platformHref, activeKey, link)).join('')}${footer}</aside>`;
   }
   const matchTitle = `${escapeHtml(state.home.short)} × ${escapeHtml(state.away.short)}`;
   const groupLabels = { championships: 'Organização', scoreboard: 'Overlays', pregame: 'Partida', teams: 'Configuração' };
@@ -2627,8 +2791,8 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements'].includes(module?.key);
-  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings'].includes(module?.key);
+  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements','live','standings'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${adminSession.role === 'viewer' ? '<div class="library-banner"><div><strong>Acesso somente leitura</strong><p>Seu papel é Leitor: você pode consultar dados e prévias, mas alterações não são salvas.</p></div></div>' : ''}${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
 function renderMatchDashboard() {
@@ -3376,6 +3540,40 @@ function handleAction(action, target) {
   if (action === 'complete-team-delegation') { completeTeamDelegation(); return; }
   if (action === 'new-championship') { selectedChampionshipId = ''; championshipDraft = { name: '', season: '', startDate: '', endDate: '', status: 'planned' }; render(); return; }
   if (action === 'select-championship') { selectedChampionshipId = target.dataset.value; championshipDraft = structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || null); render(); return; }
+  if (action === 'standings-summary') { standingsSummaryId = target.dataset.value || ''; render(); return; }
+  if (action === 'standings-print') { window.print(); return; }
+  if (action === 'export-csv') {
+    const { name, rows } = exportRows(target.dataset.value);
+    downloadTextFile(`${name}-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8', csvText(rows));
+    return;
+  }
+  if (action === 'backup-json') {
+    Promise.all([fetch('/api/teams', { cache: 'no-store' }), fetch('/api/operations', { cache: 'no-store' }), fetch(`/api/state?room=${LIBRARY_ROOM}`, { cache: 'no-store' })])
+      .then(async ([teams, operations, library]) => ({ teams: teams.ok ? await teams.json() : null, operations: operations.ok ? await operations.json() : null, sponsorLibrary: library.ok ? await library.json() : null }))
+      .then(data => {
+        if (!data.teams || !data.operations) { toast('Não foi possível reunir os dados para o backup.'); return; }
+        const { teamHistory, ...operations } = data.operations;
+        downloadTextFile(`backup-plataforma-${new Date().toISOString().slice(0, 10)}.json`, 'application/json', JSON.stringify({ exportedAt: new Date().toISOString(), version: appVersion, teams: data.teams, operations, sponsorLibrary: data.sponsorLibrary && data.sponsorLibrary.updatedAt ? { sponsors: data.sponsorLibrary.sponsors, sponsorBarMode: data.sponsorLibrary.sponsorBarMode, sponsorBarVideo: data.sponsorLibrary.sponsorBarVideo, sponsorBarItems: data.sponsorLibrary.sponsorBarItems } : null }, null, 2));
+        toast('Backup gerado.');
+      })
+      .catch(() => toast('Falha de conexão ao gerar o backup.'));
+    return;
+  }
+  if (action === 'live-hide-all') {
+    const room = String(target.dataset.value || '');
+    if (!room || !confirm('Retirar do ar todos os overlays desta partida?')) return;
+    fetch(`/api/state?room=${encodeURIComponent(room)}&ts=${Date.now()}`, { cache: 'no-store' })
+      .then(response => response.json())
+      .then(remote => {
+        if (!remote?.visible) throw new Error('sem estado');
+        for (const key of Object.keys(remote.visible)) remote.visible[key] = false;
+        remote.updatedAt = Date.now();
+        return fetch(`/api/state?room=${encodeURIComponent(room)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(remote) });
+      })
+      .then(response => { if (!response.ok) throw new Error('falha'); toast('Overlays retirados do ar.'); loadLiveRooms(); })
+      .catch(() => toast('Não foi possível retirar os overlays do ar.'));
+    return;
+  }
   if (action === 'new-announcement') { selectedAnnouncementId = ''; render(); return; }
   if (action === 'select-announcement') { selectedAnnouncementId = target.dataset.value || ''; render(); return; }
   if (action === 'save-announcement') {
@@ -3676,7 +3874,7 @@ function handleAction(action, target) {
     const username = document.getElementById('access-admin-username')?.value || '';
     const password = document.getElementById('access-admin-password')?.value || '';
     if (username.trim().length < 3 || password.trim().length < 8) { toast('Informe usuário (mín. 3 letras) e senha (mín. 8 caracteres).'); return; }
-    fetch('/api/auth/admin/accounts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) })
+    fetch('/api/auth/admin/accounts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password, role: document.getElementById('access-admin-role')?.value || 'admin' }) })
       .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
       .then(({ ok, data }) => {
         if (ok) accessAdmins = data.accounts;
@@ -4497,6 +4695,19 @@ app.addEventListener('input', event => {
 
 app.addEventListener('change', event => {
   const target = event.target;
+  if (target.matches('#standings-championship')) { standingsChampionshipId = target.value; standingsSummaryId = ''; standingsLoadedAt = 0; render(); return; }
+  if (target.matches('[data-admin-role]')) {
+    const id = target.dataset.adminRole;
+    fetch('/api/auth/admin/accounts', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, role: target.value }) })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (!ok) toast(data.error || 'Não foi possível alterar o papel.');
+        else { accessAdmins = data.accounts; toast('Papel atualizado. Vale imediatamente para a sessão dessa conta.'); }
+        render();
+      })
+      .catch(() => { toast('Falha de conexão ao alterar o papel.'); render(); });
+    return;
+  }
   if (target.matches('#active-match-switcher')) {
     const room = String(target.value || '').replace(/[^a-z0-9-]/gi, '').slice(0, 48);
     if (room && room !== ROOM_ID) {
@@ -4824,6 +5035,8 @@ else {
   setInterval(pollServer, isOutput || isPreview ? 320 : 800);
   setInterval(pollTeamCatalog, isOutput || isPreview ? 1600 : 5000);
   if (isAdminPanel) setInterval(loadOperationsData, 5000);
+  if (isAdminPanel) setInterval(loadLiveRooms, 3000);
+  if (isAdminPanel) setInterval(() => loadStandingsRooms(), 15000);
 }
 setInterval(() => {
   if (isTeamPortal) return;

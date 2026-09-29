@@ -210,8 +210,13 @@ async function getOperations(env) {
   return normalizeOperations(await readState(env, '__operations__'));
 }
 
+// Papéis: admin (tudo), operator (transmissão e cadastros, sem usuários/acessos) e viewer (somente leitura).
+// Contas antigas sem o campo continuam com acesso total.
+const ADMIN_ROLES = ['admin', 'operator', 'viewer'];
+function roleOf(account) { return ADMIN_ROLES.includes(account && account.role) ? account.role : 'admin'; }
+
 function publicAdmin(item) {
-  return { id: item.id, username: item.username, createdAt: Number(item.createdAt || 0), lastLoginAt: Number(item.lastLoginAt || 0) };
+  return { id: item.id, username: item.username, role: roleOf(item), createdAt: Number(item.createdAt || 0), lastLoginAt: Number(item.lastLoginAt || 0) };
 }
 
 function addAudit(store, action, actor, target = '', details = '') {
@@ -249,7 +254,20 @@ async function getAdminSession(request, secret, env) {
   const cookies = parseCookies(request.headers.get('cookie'));
   const payload = await verifySession(cookies.joa_admin, secret);
   const admins = await readState(env, '__admins__');
-  return payload?.kind === 'admin' && admins.accounts?.some(a => a.username === payload.username && a.id === payload.accountId) ? payload : null;
+  if (!payload || payload.kind !== 'admin') return null;
+  const account = (admins.accounts || []).find(a => a.username === payload.username && a.id === payload.accountId);
+  if (!account) return null;
+  const role = roleOf(account);
+  // Leitor nunca escreve: qualquer método diferente de GET/HEAD falha fechado.
+  if (role === 'viewer' && !['GET', 'HEAD'].includes(request.method)) return null;
+  return { ...payload, role };
+}
+
+async function requireOwnerSession(request, secret, env) {
+  const session = await getAdminSession(request, secret, env);
+  if (!session) return unauthorized();
+  if (session.role !== 'admin') return Response.json({ ok: false, error: 'Permissão insuficiente' }, { status: 403 });
+  return null;
 }
 
 async function getTeamSession(request, secret, env) {
@@ -328,7 +346,7 @@ export default {
         const saved = await insertPrivateOnce(env, '__admins__', admins);
         if (saved.accounts?.[0]?.id !== admins.accounts[0].id) return Response.json({ ok: false, error: 'Administrador já configurado' }, { status: 409 });
         const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username, accountId: admins.accounts[0].id }, secret);
-        return Response.json({ ok: true, username }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
+        return Response.json({ ok: true, username, role: 'admin' }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
     if (url.pathname === '/api/auth/admin/login') {
@@ -343,7 +361,7 @@ export default {
         account.lastLoginAt = Date.now();
         await persistState(env, '__admins__', admins);
         const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username, accountId: account.id }, secret);
-        return Response.json({ ok: true, username }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
+        return Response.json({ ok: true, username, role: roleOf(account) }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
     if (url.pathname === '/api/auth/admin/logout') {
@@ -353,11 +371,12 @@ export default {
     if (url.pathname === '/api/auth/admin/session') {
       const secret = await getAuthSecret(env);
       const session = await getAdminSession(request, secret, env);
-      return Response.json({ authenticated: Boolean(session), username: session?.username || null }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ authenticated: Boolean(session), username: session?.username || null, role: session?.role || null }, { headers: { 'cache-control': 'no-store' } });
     }
     if (url.pathname === '/api/auth/admin/accounts') {
       const secret = await getAuthSecret(env);
-      if (!(await getAdminSession(request, secret, env))) return unauthorized();
+      const ownerDenied = await requireOwnerSession(request, secret, env);
+      if (ownerDenied) return ownerDenied;
       const admins = (await readState(env, '__admins__')) || { accounts: [], updatedAt: 0 };
       if (request.method === 'GET') {
         return Response.json({ accounts: (admins.accounts || []).map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
@@ -365,6 +384,8 @@ export default {
       if (request.method === 'DELETE') {
         const id = String(url.searchParams.get('id') || '');
         if ((admins.accounts || []).length <= 1) return Response.json({ ok: false, error: 'Mantenha ao menos um administrador.' }, { status: 409 });
+        const target = admins.accounts.find(item => item.id === id);
+        if (target && roleOf(target) === 'admin' && admins.accounts.filter(item => roleOf(item) === 'admin').length <= 1) return Response.json({ ok: false, error: 'Mantenha ao menos um administrador com acesso total.' }, { status: 409 });
         const remaining = admins.accounts.filter(item => item.id !== id);
         if (remaining.length === admins.accounts.length) return Response.json({ ok: false, error: 'Administrador não encontrado.' }, { status: 404 });
         admins.accounts = remaining;
@@ -377,9 +398,19 @@ export default {
           const candidate = await request.json();
           const account = (admins.accounts || []).find(item => item.id === String(candidate.id || ''));
           if (!account) return Response.json({ ok: false, error: 'Administrador não encontrado.' }, { status: 404 });
-          if (!validPassword(candidate.password)) return Response.json({ ok: false, error: 'Senha inválida' }, { status: 400 });
-          account.passwordHash = await hashPassword(candidate.password);
-          account.passwordChangedAt = Date.now();
+          const hasPassword = candidate.password !== undefined && candidate.password !== '';
+          const hasRole = candidate.role !== undefined;
+          if (!hasPassword && !hasRole) return Response.json({ ok: false, error: 'Senha inválida' }, { status: 400 });
+          if (hasPassword && !validPassword(candidate.password)) return Response.json({ ok: false, error: 'Senha inválida' }, { status: 400 });
+          if (hasRole) {
+            if (!ADMIN_ROLES.includes(candidate.role)) return Response.json({ ok: false, error: 'Papel inválido' }, { status: 400 });
+            if (roleOf(account) === 'admin' && candidate.role !== 'admin' && admins.accounts.filter(item => roleOf(item) === 'admin').length <= 1) return Response.json({ ok: false, error: 'Mantenha ao menos um administrador com acesso total.' }, { status: 409 });
+            account.role = candidate.role;
+          }
+          if (hasPassword) {
+            account.passwordHash = await hashPassword(candidate.password);
+            account.passwordChangedAt = Date.now();
+          }
           admins.updatedAt = Date.now();
           await persistState(env, '__admins__', admins);
           return Response.json({ ok: true, accounts: admins.accounts.map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
@@ -391,7 +422,7 @@ export default {
         const username = normalizeUsername(candidate.username);
         if (username.length < 3 || !validPassword(candidate.password)) return Response.json({ ok: false, error: 'Usuário ou senha inválidos' }, { status: 400 });
         if ((admins.accounts || []).some(item => item.username === username)) return Response.json({ ok: false, error: 'Usuário já existe' }, { status: 409 });
-        admins.accounts = [...(admins.accounts || []), { id: crypto.randomUUID(), username, passwordHash: await hashPassword(candidate.password), createdAt: Date.now() }];
+        admins.accounts = [...(admins.accounts || []), { id: crypto.randomUUID(), username, role: ADMIN_ROLES.includes(candidate.role) ? candidate.role : 'admin', passwordHash: await hashPassword(candidate.password), createdAt: Date.now() }];
         admins.updatedAt = Date.now();
         await persistState(env, '__admins__', admins);
         return Response.json({ ok: true, accounts: admins.accounts.map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
@@ -452,7 +483,8 @@ export default {
       const teamId = String(url.searchParams.get('teamId') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
       const secret = await getAuthSecret(env);
       if (request.method === 'PUT') {
-        if (!(await getAdminSession(request, secret, env))) return unauthorized();
+        const ownerDenied = await requireOwnerSession(request, secret, env);
+        if (ownerDenied) return ownerDenied;
         const credentials = (await readState(env, '__team_credentials__')) || { entries: [], updatedAt: 0 };
         try {
           const candidate = await request.json();
@@ -468,7 +500,8 @@ export default {
         } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
       }
       if (request.method === 'DELETE') {
-        if (!(await getAdminSession(request, secret, env))) return unauthorized();
+        const ownerDenied = await requireOwnerSession(request, secret, env);
+        if (ownerDenied) return ownerDenied;
         const credentials = (await readState(env, '__team_credentials__')) || { entries: [], updatedAt: 0 };
         const before = (credentials.entries || []).length;
         const removeUser = normalizeUsername(url.searchParams.get('username') || '');
@@ -478,7 +511,8 @@ export default {
         await persistState(env, '__team_credentials__', credentials);
         return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } });
       }
-      if (!(await getAdminSession(request, secret, env))) return unauthorized();
+      const ownerDenied = await requireOwnerSession(request, secret, env);
+      if (ownerDenied) return ownerDenied;
       const credentials = await readState(env, '__team_credentials__');
       if (teamId) {
         const entry = credentials?.entries?.find(item => item.teamId === teamId);

@@ -138,8 +138,13 @@ function teamDeadline(store, teamId) {
   return dates[0] || '';
 }
 
+// Papéis: admin (tudo), operator (transmissão e cadastros, sem usuários/acessos) e viewer (somente leitura).
+// Contas antigas sem o campo continuam com acesso total.
+const ADMIN_ROLES = ['admin', 'operator', 'viewer'];
+function roleOf(account) { return ADMIN_ROLES.includes(account?.role) ? account.role : 'admin'; }
+
 function publicAdmin(item) {
-  return { id: item.id, username: item.username, createdAt: Number(item.createdAt || 0), lastLoginAt: Number(item.lastLoginAt || 0) };
+  return { id: item.id, username: item.username, role: roleOf(item), createdAt: Number(item.createdAt || 0), lastLoginAt: Number(item.lastLoginAt || 0) };
 }
 
 function addAudit(store, action, actor, target = '', details = '') {
@@ -196,7 +201,13 @@ function clearSessionCookie(response, request, name) {
 async function getAdminSession(request) {
   const cookies = auth.parseCookies(request.headers.cookie);
   const payload = await auth.verifySession(cookies.joa_admin, AUTH_SECRET);
-  return payload?.kind === 'admin' && sharedStates.__admins__.accounts.some(a => a.username === payload.username && a.id === payload.accountId) ? payload : null;
+  if (payload?.kind !== 'admin') return null;
+  const account = sharedStates.__admins__.accounts.find(a => a.username === payload.username && a.id === payload.accountId);
+  if (!account) return null;
+  const role = roleOf(account);
+  // Leitor nunca escreve: qualquer método diferente de GET/HEAD falha fechado.
+  if (role === 'viewer' && !['GET', 'HEAD'].includes(request.method)) return null;
+  return { ...payload, role };
 }
 
 async function getTeamSession(request) {
@@ -208,6 +219,12 @@ async function getTeamSession(request) {
 async function requireAdmin(request, response) {
   const session = await getAdminSession(request);
   if (!session) sendJson(response, 401, { ok: false, error: 'Autenticação necessária' });
+  return session;
+}
+
+async function requireOwner(request, response) {
+  const session = await requireAdmin(request, response);
+  if (session && session.role !== 'admin') { sendJson(response, 403, { ok: false, error: 'Permissão insuficiente' }); return null; }
   return session;
 }
 
@@ -257,7 +274,7 @@ const server = http.createServer(async (request, response) => {
       sharedStates.__admins__.updatedAt = Date.now();
       await persist();
       await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username, accountId: account.id });
-      sendJson(response, 200, { ok: true, username });
+      sendJson(response, 200, { ok: true, username, role: 'admin' });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
   }
@@ -272,7 +289,7 @@ const server = http.createServer(async (request, response) => {
       account.lastLoginAt = Date.now();
       await persist();
       await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username, accountId: account.id });
-      sendJson(response, 200, { ok: true, username });
+      sendJson(response, 200, { ok: true, username, role: roleOf(account) });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
   }
@@ -286,12 +303,12 @@ const server = http.createServer(async (request, response) => {
 
   if (url.pathname === '/api/auth/admin/session') {
     const session = await getAdminSession(request);
-    sendJson(response, 200, { authenticated: Boolean(session), username: session?.username || null });
+    sendJson(response, 200, { authenticated: Boolean(session), username: session?.username || null, role: session?.role || null });
     return;
   }
 
   if (url.pathname === '/api/auth/admin/accounts') {
-    if (!(await requireAdmin(request, response))) return;
+    if (!(await requireOwner(request, response))) return;
     if (request.method === 'GET') {
       sendJson(response, 200, { accounts: sharedStates.__admins__.accounts.map(publicAdmin) });
       return;
@@ -299,6 +316,8 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'DELETE') {
       const id = String(url.searchParams.get('id') || '');
       if (sharedStates.__admins__.accounts.length <= 1) { sendJson(response, 409, { ok: false, error: 'Mantenha ao menos um administrador.' }); return; }
+      const target = sharedStates.__admins__.accounts.find(item => item.id === id);
+      if (target && roleOf(target) === 'admin' && sharedStates.__admins__.accounts.filter(item => roleOf(item) === 'admin').length <= 1) { sendJson(response, 409, { ok: false, error: 'Mantenha ao menos um administrador com acesso total.' }); return; }
       const remaining = sharedStates.__admins__.accounts.filter(item => item.id !== id);
       if (remaining.length === sharedStates.__admins__.accounts.length) { sendJson(response, 404, { ok: false, error: 'Administrador não encontrado.' }); return; }
       sharedStates.__admins__.accounts = remaining;
@@ -312,9 +331,19 @@ const server = http.createServer(async (request, response) => {
         const candidate = JSON.parse(await readBody(request));
         const account = sharedStates.__admins__.accounts.find(item => item.id === String(candidate.id || ''));
         if (!account) { sendJson(response, 404, { ok: false, error: 'Administrador não encontrado.' }); return; }
-        if (!validPassword(candidate.password)) { sendJson(response, 400, { ok: false, error: 'Senha inválida' }); return; }
-        account.passwordHash = await auth.hashPassword(candidate.password);
-        account.passwordChangedAt = Date.now();
+        const hasPassword = candidate.password !== undefined && candidate.password !== '';
+        const hasRole = candidate.role !== undefined;
+        if (!hasPassword && !hasRole) { sendJson(response, 400, { ok: false, error: 'Senha inválida' }); return; }
+        if (hasPassword && !validPassword(candidate.password)) { sendJson(response, 400, { ok: false, error: 'Senha inválida' }); return; }
+        if (hasRole) {
+          if (!ADMIN_ROLES.includes(candidate.role)) { sendJson(response, 400, { ok: false, error: 'Papel inválido' }); return; }
+          if (roleOf(account) === 'admin' && candidate.role !== 'admin' && sharedStates.__admins__.accounts.filter(item => roleOf(item) === 'admin').length <= 1) { sendJson(response, 409, { ok: false, error: 'Mantenha ao menos um administrador com acesso total.' }); return; }
+          account.role = candidate.role;
+        }
+        if (hasPassword) {
+          account.passwordHash = await auth.hashPassword(candidate.password);
+          account.passwordChangedAt = Date.now();
+        }
         sharedStates.__admins__.updatedAt = Date.now();
         await persist();
         sendJson(response, 200, { ok: true, accounts: sharedStates.__admins__.accounts.map(publicAdmin) });
@@ -327,7 +356,7 @@ const server = http.createServer(async (request, response) => {
       const username = normalizeUsername(candidate.username);
       if (username.length < 3 || !validPassword(candidate.password)) { sendJson(response, 400, { ok: false, error: 'Usuário ou senha inválidos' }); return; }
       if (sharedStates.__admins__.accounts.some(item => item.username === username)) { sendJson(response, 409, { ok: false, error: 'Usuário já existe' }); return; }
-      const account = { id: crypto.randomUUID(), username, passwordHash: await auth.hashPassword(candidate.password), createdAt: Date.now() };
+      const account = { id: crypto.randomUUID(), username, role: ADMIN_ROLES.includes(candidate.role) ? candidate.role : 'admin', passwordHash: await auth.hashPassword(candidate.password), createdAt: Date.now() };
       sharedStates.__admins__.accounts.push(account);
       sharedStates.__admins__.updatedAt = Date.now();
       await persist();
@@ -391,7 +420,7 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === '/api/auth/team/credentials') {
     const teamId = String(url.searchParams.get('teamId') || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
     if (request.method === 'PUT') {
-      if (!(await requireAdmin(request, response))) return;
+      if (!(await requireOwner(request, response))) return;
       try {
         const candidate = JSON.parse(await readBody(request));
         const bodyTeamId = String(candidate.teamId || teamId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
@@ -407,7 +436,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     if (request.method === 'DELETE') {
-      if (!(await requireAdmin(request, response))) return;
+      if (!(await requireOwner(request, response))) return;
       const before = sharedStates.__team_credentials__.entries.length;
       const removeUser = normalizeUsername(url.searchParams.get('username') || '');
       sharedStates.__team_credentials__.entries = sharedStates.__team_credentials__.entries.filter(item => item.teamId !== teamId || (removeUser && item.username !== removeUser));
@@ -417,7 +446,7 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, { ok: true });
       return;
     }
-    if (!(await requireAdmin(request, response))) return;
+    if (!(await requireOwner(request, response))) return;
     if (teamId) {
       const entry = sharedStates.__team_credentials__.entries.find(item => item.teamId === teamId);
       sendJson(response, 200, { teamId, username: entry?.username || null, hasPassword: Boolean(entry) });

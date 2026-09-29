@@ -4,6 +4,15 @@ O painel exige login de administrador. A tela Usuários/Acessos permite criar e 
 administradores e definir usuário/senha de cada equipe. O último administrador não pode
 ser removido. Equipes autenticadas só podem editar sua própria equipe.
 
+## Papéis das contas do painel
+
+Cada conta tem um papel: **admin** (acesso total, inclusive Usuários/Acessos e credenciais das
+equipes), **operator** (transmissão e cadastros, sem gerenciar usuários) e **viewer** (somente
+leitura). Contas sem o campo `role` valem como admin. O papel é lido da conta a cada requisição
+e o leitor falha fechado em qualquer escrita (401). O último admin não pode ser removido nem
+rebaixado. Ao criar rotas administrativas novas, use `requireAdmin` (escrita bloqueada para
+leitor) e `requireOwner`/`requireOwnerSession` para o que só o admin pode fazer.
+
 ## Primeiro administrador
 
 No Sites, configure OVERLAY_SETUP_TOKEN como segredo de ambiente com pelo menos 32

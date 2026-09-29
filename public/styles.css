@@ -2060,3 +2060,27 @@ a.dashboard-mini-row:hover { border-color: rgba(216,173,86,.45); background: rgb
 .portal-announcement.is-pinned { border-color: rgba(216,173,86,.4); }
 .announce-audience { margin-bottom: 14px; display: grid; gap: 6px; }
 .announce-team input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--gold); }
+
+/* Ao vivo agora */
+.live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; margin-bottom: 18px; }
+.live-card { padding: 18px; display: grid; gap: 14px; border: 1px solid rgba(250,98,110,.35); border-radius: var(--radius); background: linear-gradient(180deg, #1a1218, #12141b); box-shadow: var(--shadow-card); }
+.live-card header { display: flex; align-items: center; gap: 10px; }
+.live-card header small { color: var(--muted-soft); font-size: 12px; }
+.live-tag { padding: 3px 9px; border-radius: 4px; background: var(--red); color: #1a0b0d; font-size: 11px; font-weight: 800; letter-spacing: .12em; animation: connection-pulse 1.6s ease-in-out infinite; }
+.live-score { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; }
+.live-score strong { font-size: 15px; }
+.live-score strong:last-child { text-align: right; }
+.live-score b { font-family: var(--heading); font-size: 42px; font-weight: 700; letter-spacing: .04em; }
+.live-meta { display: flex; justify-content: space-between; color: var(--muted-soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+.live-onair { display: flex; flex-wrap: wrap; gap: 6px; }
+.access-role-field { margin: 10px 0 6px; }
+
+/* Classificação e súmulas */
+.standings-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.standings-table th { padding: 8px 10px; border-bottom: 1px solid var(--line-strong); color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-align: left; text-transform: uppercase; }
+.standings-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.standings-table tbody tr:first-child td { color: var(--gold-bright); }
+.standings-table tbody tr:hover td { background: rgba(255,255,255,.025); }
+.standings-select { max-width: 380px; }
+@media print { .topbar, .module-sidebar, .module-page-head, .emergency-hide-all, .standings-summary .operations-actions { display: none !important; } .module-workspace { display: block; } body { background: #fff; color: #000; } }
+@media print { .dashboard-section, .module-section { background: #fff !important; color: #000 !important; box-shadow: none !important; border-color: #ccc !important; } .standings-table th, .standings-table td, .section-title, .help-text { color: #000 !important; } }
