@@ -26,6 +26,8 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+## [30] - 2026-09-29
+
 ### Adicionado
 - Aba Aparência: novo cartão "Barra de patrocinadores" com tamanho (`appearance.sponsorBarScale`, 60–180%)
   e posição horizontal/vertical (`appearance.sponsorBarX`/`sponsorBarY`, 0–100%, padrão 50/91, centro da
