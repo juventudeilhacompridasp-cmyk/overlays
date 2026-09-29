@@ -1519,3 +1519,35 @@ body.preview-output { min-width: 0; min-height: 100vh; display: grid; place-item
 .pw-meter[data-level="2"] i:nth-child(-n+2) { background: var(--yellow); }
 .pw-meter[data-level="3"] i:nth-child(-n+3) { background: #8fd66b; }
 .pw-meter[data-level="4"] i { background: var(--green); }
+
+/* Portal da equipe: campeonatos, inscrição e escalação por partida */
+.portal-tabs { margin: 14px 0; display: grid; grid-template-columns: repeat(2, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.portal-tabs button { min-height: 42px; border: 0; border-right: 1px solid var(--line); background: var(--surface-2); color: var(--muted); font-weight: 700; cursor: pointer; }
+.portal-tabs button:last-child { border-right: 0; }
+.portal-tabs button.active { background: var(--gold); color: #111; }
+.portal-champ-grid { margin-bottom: 14px; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
+.portal-champ-card { padding: 12px; display: grid; gap: 3px; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--text); cursor: pointer; }
+.portal-champ-card.active { border-color: rgba(216,173,86,.7); background: rgba(216,173,86,.09); }
+.portal-champ-card small, .portal-champ-card span { color: var(--muted); font-size: 11px; }
+.portal-registration, .portal-matches, .portal-squad { margin: 14px 0; padding: 14px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.portal-reg-list, .portal-squad-list { max-height: 340px; overflow: auto; display: grid; gap: 4px; }
+.portal-reg-row, .portal-squad-row { padding: 6px 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.portal-reg-row label:first-child { display: flex; align-items: center; gap: 8px; flex: 1; }
+.portal-reg-row small, .portal-squad-row small { margin-left: 8px; color: var(--muted); font-size: 10px; }
+.portal-reg-number { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.portal-reg-number input { width: 64px; text-align: center; }
+.portal-match { padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.portal-match.active { border-color: rgba(216,173,86,.6); }
+.portal-match small, .portal-match-status { display: block; color: var(--muted); font-size: 11px; }
+.portal-match-actions { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.portal-roles { display: flex; gap: 4px; }
+.portal-role { padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--muted-soft); font-size: 11px; font-weight: 700; cursor: pointer; }
+.portal-role.active { color: #111; }
+.portal-role-starter { background: var(--green); border-color: var(--green); }
+.portal-role-reserve { background: var(--yellow); border-color: var(--yellow); }
+.portal-role-out { background: var(--muted-soft); border-color: var(--muted-soft); }
+.portal-slots { display: grid; gap: 6px; }
+.portal-slot { padding: 6px 10px; display: grid; grid-template-columns: 130px minmax(0,1fr) auto; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12px; }
+.portal-slot span { color: var(--gold); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.portal-slot > div { display: flex; gap: 4px; }
+.portal-checks-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; }

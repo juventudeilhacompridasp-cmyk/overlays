@@ -78,6 +78,59 @@ function publicOperations(store) {
   return { ...store, teamHistory };
 }
 
+const TEAM_FORMATIONS = ['4-3-3', '4-4-2', '4-2-3-1', '3-5-2'];
+
+function rosterFingerprint(team) {
+  return JSON.stringify([team.name, team.short, team.color, team.color2, team.logo, team.athletes, team.staff, team.formation, team.sponsors]);
+}
+
+function sanitizeTeamPlanning(team, candidate, operations) {
+  const cleanId = value => String(value || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
+  const athleteIds = new Set((team.athletes || []).map(athlete => athlete.id));
+  const previousSquads = team.matchSquads && typeof team.matchSquads === 'object' ? team.matchSquads : {};
+  const registrationSource = candidate.registrations && typeof candidate.registrations === 'object' ? candidate.registrations : team.registrations || {};
+  const registrations = {};
+  for (const [rawId, entry] of Object.entries(registrationSource).slice(0, 20)) {
+    const championshipId = cleanId(rawId);
+    if (!championshipId || !operations.championships.some(item => item.id === championshipId)) continue;
+    const ids = [...new Set((Array.isArray(entry && entry.athleteIds) ? entry.athleteIds : []).map(String))].filter(id => athleteIds.has(id)).slice(0, 100);
+    const numbers = {};
+    for (const [athleteId, number] of Object.entries(entry && entry.numbers && typeof entry.numbers === 'object' ? entry.numbers : {})) {
+      const digits = String(number || '').replace(/\D/g, '').slice(0, 3);
+      if (ids.includes(athleteId) && digits) numbers[athleteId] = digits;
+    }
+    registrations[championshipId] = { athleteIds: ids, numbers, formation: TEAM_FORMATIONS.includes(entry && entry.formation) ? entry.formation : '' };
+  }
+  const squadSource = candidate.matchSquads && typeof candidate.matchSquads === 'object' ? candidate.matchSquads : previousSquads;
+  const matchSquads = {};
+  for (const [rawId, entry] of Object.entries(squadSource).slice(0, 80)) {
+    const matchId = cleanId(rawId);
+    const match = operations.matches.find(item => item.id === matchId && (item.homeTeamId === team.id || item.awayTeamId === team.id));
+    if (!match) continue;
+    if (['live', 'finished', 'cancelled'].includes(match.status)) { if (previousSquads[matchId]) matchSquads[matchId] = previousSquads[matchId]; continue; }
+    const registered = new Set((registrations[match.championshipId] && registrations[match.championshipId].athleteIds) || []);
+    if (!registered.size) continue;
+    const pick = list => [...new Set((Array.isArray(list) ? list : []).map(String))].filter(id => registered.has(id));
+    const starters = pick(entry && entry.starters).slice(0, 11);
+    const reserves = pick(entry && entry.reserves).filter(id => !starters.includes(id)).slice(0, 60);
+    const formation = TEAM_FORMATIONS.includes(entry && entry.formation) ? entry.formation : '';
+    const previous = previousSquads[matchId];
+    const same = previous && JSON.stringify([previous.starters, previous.reserves, previous.formation]) === JSON.stringify([starters, reserves, formation]);
+    matchSquads[matchId] = { starters, reserves, formation, updatedAt: same ? previous.updatedAt : Date.now() };
+  }
+  team.registrations = registrations;
+  team.matchSquads = matchSquads;
+}
+
+function teamContext(operations, catalog, teamId) {
+  const teams = (catalog && catalog.teams) || [];
+  const nameOf = id => (teams.find(item => item.id === id) || {}).name || id;
+  return {
+    championships: operations.championships.map(item => ({ id: item.id, name: item.name, season: item.season, status: item.status, startDate: item.startDate, endDate: item.endDate })),
+    matches: operations.matches.filter(match => match.homeTeamId === teamId || match.awayTeamId === teamId).map(match => ({ id: match.id, championshipId: match.championshipId, homeTeamId: match.homeTeamId, awayTeamId: match.awayTeamId, homeName: nameOf(match.homeTeamId), awayName: nameOf(match.awayTeamId), kickoffAt: match.kickoffAt, venue: match.venue, round: match.round, status: match.status, registrationDeadline: match.registrationDeadline || '' })),
+  };
+}
+
 function teamDeadline(store, teamId) {
   const dates = store.matches.filter(match => (match.homeTeamId === teamId || match.awayTeamId === teamId) && match.registrationDeadline && !['finished', 'cancelled'].includes(match.status)).map(match => match.registrationDeadline).sort();
   return dates[0] || '';
@@ -514,6 +567,7 @@ const server = http.createServer(async (request, response) => {
       for await (const chunk of request) body += chunk;
       try {
         const candidate = JSON.parse(body);
+        const rosterBefore = rosterFingerprint(team);
         team.name = String(candidate.name || team.name || '').slice(0, 80);
         team.short = String(candidate.short || team.short || 'TIM').toUpperCase().slice(0, 3);
         team.color = /^#[0-9a-f]{6}$/i.test(String(candidate.color || '')) ? candidate.color : team.color;
@@ -537,21 +591,23 @@ const server = http.createServer(async (request, response) => {
         team.coach = { name: String(headCoach?.name || candidate?.coach?.name || 'Treinador').slice(0, 100), photo: String(headCoach?.photo || candidate?.coach?.photo || '').slice(0, 500) };
         team.formation = ['4-3-3', '4-4-2', '4-2-3-1', '3-5-2'].includes(candidate?.formation) ? candidate.formation : team.formation || '4-3-3';
         team.roster = team.athletes.map(athlete => `${athlete.number || ''} ${athlete.name || ''}`.trim()).filter(Boolean).join('\n');
+        sanitizeTeamPlanning(team, candidate, operationsStore());
         const operations = operationsStore();
         const actor = (await getAdminSession(request))?.username || (await getTeamSession(request))?.username || team.name;
-        markDelegationChanged(operations, team, actor);
+        const rosterChanged = rosterFingerprint(team) !== rosterBefore;
+        if (rosterChanged) markDelegationChanged(operations, team, actor);
         snapshotTeam(operations, team, actor);
-        addAudit(operations, 'delegation.saved', actor, team.name, `${team.athletes.length} atletas; ${team.staff.length} membros da comissão.`);
+        addAudit(operations, rosterChanged ? 'delegation.saved' : 'team.planning.saved', actor, team.name, `${team.athletes.length} atletas; ${team.staff.length} membros da comissão.`);
         operations.updatedAt = Math.max(Date.now(), Number(operations.updatedAt || 0) + 1);
         sharedStates.__team_catalog__.updatedAt = operations.updatedAt;
         await persist();
         response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-        response.end(JSON.stringify({ team, delegation: operations.delegationStatus[team.id] || { status: 'draft' } }));
+        response.end(JSON.stringify({ team, delegation: operations.delegationStatus[team.id] || { status: 'draft' }, deadline: teamDeadline(operations, team.id), context: teamContext(operations, sharedStates.__team_catalog__, team.id) }));
       } catch { response.writeHead(400).end('Invalid JSON'); }
       return;
     }
     response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    response.end(JSON.stringify({ team, delegation: operationsStore().delegationStatus[team.id] || { status: 'draft' }, completion: delegationCheck(team), deadline: teamDeadline(operationsStore(), team.id) }));
+    response.end(JSON.stringify({ team, delegation: operationsStore().delegationStatus[team.id] || { status: 'draft' }, completion: delegationCheck(team), deadline: teamDeadline(operationsStore(), team.id), context: teamContext(operationsStore(), sharedStates.__team_catalog__, team.id) }));
     return;
   }
 

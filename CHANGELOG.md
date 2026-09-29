@@ -26,6 +26,23 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+### Adicionado
+- Portal da equipe (`/team`): nova aba "Campeonatos e partidas". A equipe escolhe o campeonato, inscreve os atletas que
+  disputarão aquele campeonato (com número de camisa próprio opcional e esquema tático padrão do campeonato), vê as
+  partidas da equipe no campeonato e define, para cada partida, titulares (até 11, com ordem que define a posição no
+  esquema tático), reservas e esquema. Só atletas inscritos no campeonato podem ser escalados.
+- Dados (Node e Worker): cada equipe do catálogo ganha `registrations[championshipId] = { athleteIds, numbers,
+  formation }` e `matchSquads[matchId] = { starters, reserves, formation, updatedAt }`. `PUT /api/team-portal`
+  valida tudo no servidor (campeonato e partida existentes, partida da própria equipe, atletas da equipe e inscritos
+  no campeonato da partida, máximo de 11 titulares) e ignora alterações em partidas `live`, `finished` ou `cancelled`.
+  `GET`/`PUT /api/team-portal` passam a devolver `context` com os campeonatos e as partidas da equipe (com nomes
+  dos adversários). Salvar só inscrição ou escalação não devolve a delegação aprovada para revisão nem cria versão no
+  histórico (o log usa `team.planning.saved`); só mudanças no cadastro da equipe fazem isso.
+- Overlay e painel: a apresentação da equipe usa automaticamente a escalação enviada pela equipe para a partida da
+  sala (`state.matchId`), incluindo titulares, reservas, ordem no esquema, esquema tático e números do campeonato. O
+  ajuste manual da sala (`state.squad`) continua tendo prioridade. A lista de partidas do painel mostra se cada equipe
+  já enviou a escalação.
+
 ### Alterado
 - Tela Usuários/Acessos (`/manage/access`) reconstruída: indicadores (administradores, times com acesso, usuários de
   times, pedidos de senha), alerta de pedidos de redefinição (`password-reset`) com "Gerar nova senha", busca por equipe
