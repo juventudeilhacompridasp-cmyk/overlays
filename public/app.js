@@ -2003,7 +2003,7 @@ function renderDashboardModule() {
   const aggregatedTiles = Object.entries(aggregated);
   return `<div class="dashboard-grid">
     <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Agenda e status de partidas</h3><p class="help-text">${matches.length} partida${matches.length === 1 ? '' : 's'} cadastrada${matches.length === 1 ? '' : 's'} no total.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('matches'))}">Ver agenda completa</a></div>
-      <div class="dashboard-stats">${statusCounts.map(([status, count]) => `<article><strong>${count}</strong><span>${statusLabel[status]}</span></article>`).join('')}</div>
+      <div class="dashboard-stats">${statusCounts.map(([status, count]) => `<article class="stat-${status}"><strong>${count}</strong><span>${statusLabel[status]}</span></article>`).join('')}</div>
       ${liveNow.length ? `<div class="dashboard-list"><strong>Ao vivo agora</strong>${liveNow.map(matchRow).join('')}</div>` : ''}
       ${upcoming.length ? `<div class="dashboard-list"><strong>Próximas partidas</strong>${upcoming.map(matchRow).join('')}</div>` : '<div class="portal-empty">Nenhuma partida agendada.</div>'}
     </section>
