@@ -137,10 +137,10 @@ function makeRuntime(pathname = '/?room=principal', options = {}) {
       value,
       type,
       matches(selector) {
-        if (selector === '[data-field]') return Boolean(this.dataset.field);
-        if (selector === '[data-team-field]') return Boolean(this.dataset.teamField);
-        if (selector === '[data-appearance]') return Boolean(this.dataset.appearance);
-        return false;
+        return selector.split(',').some(part => {
+          const match = part.trim().match(/^\[data-([a-z-]+)\]$/);
+          return Boolean(match && this.dataset[match[1].replace(/-([a-z])/g, (_, char) => char.toUpperCase())]);
+        });
       },
     };
     app.handlers.input({ target });
@@ -283,7 +283,57 @@ try {
   verify('Statistics overlay can be taken off air', !statsModule.getState().visible.stats);
   const builderModule = makeRuntime('/manage/builder?room=module-builder', { broadcast: false });
   builderModule.click('add-custom-overlay');
-  verify('Overlay builder creates independent configurable outputs', builderModule.getState().customOverlays.length === 1 && builderModule.app.innerHTML.includes('data-custom-field="width"') && builderModule.app.innerHTML.includes('copy-custom-url'));
+  verify('Overlay builder creates independent configurable outputs', builderModule.getState().customOverlays.length === 1 && builderModule.app.innerHTML.includes('data-size-preset') && builderModule.app.innerHTML.includes('copy-custom-url'));
+  builderModule.click('builder-template', 'mini-scoreboard');
+  const scoreboardOverlay = builderModule.getState().customOverlays[1];
+  verify('Builder templates create overlays made of positioned elements with live data tokens', scoreboardOverlay.elements.length === 6 && builderModule.app.innerHTML.includes('data-cel-text') && builderModule.app.innerHTML.includes('data-el-id') && builderModule.app.innerHTML.includes('>JUV<'));
+  builderModule.click('builder-select', 'el-3');
+  builderModule.input({ elField: 'x' }, '55.5', 'number');
+  builderModule.input({ elField: 'animIn' }, 'inexistente');
+  builderModule.input({ elField: 'src' }, 'javascript:alert(1)');
+  builderModule.input({ elField: 'w' }, '9999', 'number');
+  const editedElement = builderModule.getState().customOverlays[1].elements.find(el => el.id === 'el-3');
+  verify('Builder element edits are clamped and validated', editedElement.x === 55.5 && editedElement.animIn === 'fade' && editedElement.src === '' && editedElement.w === 300);
+  builderModule.click('builder-align', 'left');
+  verify('Builder aligns an element against the canvas', builderModule.getState().customOverlays[1].elements.find(el => el.id === 'el-3').x === 0);
+  builderModule.click('builder-z', 'el-1|up');
+  verify('Builder reorders layers', builderModule.getState().customOverlays[1].elements[1].id === 'el-1');
+  builderModule.click('builder-add', 'circle');
+  builderModule.click('builder-dup-el');
+  const elementsAfterAdd = builderModule.getState().customOverlays[1].elements;
+  verify('Builder adds and duplicates elements with unique ids', elementsAfterAdd.length === 8 && new Set(elementsAfterAdd.map(el => el.id)).size === 8);
+  builderModule.click('builder-remove-el');
+  builderModule.click('builder-stagger');
+  verify('Builder removes elements and staggers entrances', builderModule.getState().customOverlays[1].elements.length === 7 && builderModule.getState().customOverlays[1].elements.some(el => el.delay >= 360));
+  builderModule.input({ customField: 'autoHide' }, '5', 'number');
+  builderModule.click('toggle-custom-overlay', builderModule.getState().customOverlays[1].id);
+  const onAir = builderModule.getState().customOverlays[1];
+  verify('Builder overlays go on air with an entrance covering the longest element animation and an auto-hide timer', onAir.visible && onAir.transition.expiresAt - onAir.transition.startedAt >= 800 && onAir.expiresAt > Date.now() + 4000);
+  builderModule.click('builder-duplicate-overlay');
+  verify('Builder duplicates a whole overlay without keeping it on air', builderModule.getState().customOverlays.length === 3 && builderModule.getState().customOverlays[2].visible === false && builderModule.getState().customOverlays[2].elements.length === 7);
+  const importFile = { size: 500, text: async () => JSON.stringify({ format: 'juventude-overlay', version: 1, overlay: { name: 'Importado', width: 800, height: 200, elements: [{ type: 'text', text: '{home.short}', x: 5, y: 5, w: 50, h: 40, animIn: 'invalida', src: 'javascript:x' }] } }) };
+  builderModule.app.handlers.change({ target: { dataset: {}, files: [importFile], value: '', matches: selector => selector === '[data-builder-import]' } });
+  await delay(50);
+  const imported = builderModule.getState().customOverlays.find(item => item.name === 'Importado');
+  verify('Builder imports exported overlays and sanitizes their elements', imported && imported.width === 800 && imported.elements.length === 1 && imported.elements[0].animIn === 'fade');
+  builderModule.click('select-custom-overlay', scoreboardOverlay.id);
+  builderModule.click('builder-save-platform');
+  await delay(400);
+  const overlayLibrary = await (await fetch(`${baseURL}/api/state?room=biblioteca-overlays`, { headers: { cookie: adminCookie } })).json();
+  verify('Overlays can be saved as platform templates in the shared library room', overlayLibrary.customOverlays?.length === 1 && overlayLibrary.customOverlays[0].visible === false && overlayLibrary.customOverlays[0].elements.length === 7);
+  const roomFromTemplate = makeRuntime('/manage/builder?room=module-builder-b', { broadcast: false });
+  roomFromTemplate.sandbox.__overlayStudio.setAdminSession('authenticated', 'admin');
+  await roomFromTemplate.sandbox.__overlayStudio.refreshPlatformOverlays();
+  await delay(200);
+  verify('Room builders list the platform templates', roomFromTemplate.app.innerHTML.includes('Modelos da plataforma') && roomFromTemplate.app.innerHTML.includes('builder-use-platform'));
+  roomFromTemplate.click('builder-use-platform', overlayLibrary.customOverlays[0].id);
+  verify('A platform template can be copied into a match without going on air', roomFromTemplate.getState().customOverlays.length === 1 && roomFromTemplate.getState().customOverlays[0].id !== overlayLibrary.customOverlays[0].id && roomFromTemplate.getState().customOverlays[0].elements.length === 7 && !roomFromTemplate.getState().customOverlays[0].visible);
+  const legacyBuilder = makeRuntime('/manage/builder?room=legacy-builder', { broadcast: false, savedState: { updatedAt: 1, customOverlays: [{ id: 'old-1', name: 'Antigo', width: 1920, height: 1080, title: 'TÍTULO ANTIGO', subtitle: 'Complemento', media: '/api/assets/x/media', mediaType: 'image', layout: 'media-text', animation: 'slide', background: '#101010', accent: '#ff0000', textColor: '#ffffff', visible: true }] } });
+  const legacyElements = legacyBuilder.getState().customOverlays[0].elements;
+  verify('Overlays created before the element builder are migrated to equivalent elements', legacyElements.some(el => el.type === 'text' && el.text === 'TÍTULO ANTIGO') && legacyElements.some(el => el.type === 'image' && el.src === '/api/assets/x/media') && legacyElements.find(el => el.name === 'Mídia').animIn === 'slide-left');
+  const customOutput = makeRuntime('/overlay?layer=custom&id=out-1&room=custom-output', { broadcast: false, savedState: { updatedAt: 1, home: { short: 'JEC', name: 'Juventude' }, customOverlays: [{ id: 'out-1', name: 'Saída', width: 1200, height: 260, visible: true, elements: [{ type: 'text', text: 'Time {home.short}', x: 5, y: 5, w: 50, h: 40 }, { type: 'text', text: 'Oculto', visible: false }] }] } });
+  verify('Custom overlay output renders visible elements without editor controls', customOutput.app.innerHTML.includes('class="cel cel-text') && customOutput.app.innerHTML.includes('Time JEC') && !customOutput.app.innerHTML.includes('Oculto') && !customOutput.app.innerHTML.includes('data-el-id') && !customOutput.app.innerHTML.includes('builder-selection'));
+  verify('Builder animations and editor are backed by stylesheet rules', ['@keyframes cel-in-pop', '@keyframes cel-out-wipe', '.cel-marquee', '.builder-selection', 'container-type: size'].filter(rule => rule !== '.cel-marquee').every(rule => stylesheet.includes(rule)) && stylesheet.includes('cel-marquee'));
   const accessModule = makeRuntime('/manage/access?room=module-access', { broadcast: false });
   await delay(300);
   verify('Access module lists administrators and per-team credential controls', accessModule.app.innerHTML.includes('Administradores do painel') && accessModule.app.innerHTML.includes('Usuários dos times') && accessModule.app.innerHTML.includes('data-action="add-admin-account"'));

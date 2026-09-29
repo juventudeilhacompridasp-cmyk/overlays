@@ -774,7 +774,7 @@ export default {
           if (!admin && !(teamSession && teamSession.teamId === ownerId)) return unauthorized();
         } else if (!(await getAdminSession(request, secret, env))) return unauthorized();
         const length = Number(request.headers.get('content-length') || 0);
-        const maxLength = assetName === 'sponsors-wide-video' ? 50000000 : assetName.endsWith('-lineup-media') ? 25000000 : assetName.endsWith('-wide') ? 8000000 : 5000000;
+        const maxLength = assetName === 'sponsors-wide-video' ? 50000000 : assetName.startsWith('custom-') || assetName.endsWith('-lineup-media') ? 25000000 : assetName.endsWith('-wide') ? 8000000 : 5000000;
         if (length > maxLength) return new Response('Asset too large', { status: 413 });
         await env.BUCKET.put(key, request.body, { httpMetadata: { contentType: request.headers.get('content-type') || 'image/png' } });
         return Response.json({ ok: true, url: '/api/assets/' + assetRoom + '/' + assetName });

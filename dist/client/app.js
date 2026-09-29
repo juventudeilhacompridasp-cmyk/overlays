@@ -6,9 +6,10 @@ if (!requestedRoom && !isAdminRoute) {
 }
 // Biblioteca de patrocínios: uma sala especial, sem partida, editada pelos módulos de patrocínio na plataforma.
 const LIBRARY_ROOM = 'biblioteca-patrocinios';
-const LIBRARY_MODULES = ['sponsors', 'sponsor-bar'];
+const BUILDER_LIBRARY_ROOM = 'biblioteca-overlays';
+const LIBRARY_MODULES = ['sponsors', 'sponsor-bar', 'builder'];
 const libraryMode = !requestedRoom && (location.pathname === '/manage' || location.pathname.startsWith('/manage/')) && LIBRARY_MODULES.includes(location.pathname.split('/').filter(Boolean)[1]);
-const ROOM_ID = libraryMode ? LIBRARY_ROOM : (requestedRoom || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
+const ROOM_ID = libraryMode ? (location.pathname.split('/').filter(Boolean)[1] === 'builder' ? BUILDER_LIBRARY_ROOM : LIBRARY_ROOM) : (requestedRoom || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
 if (requestedRoom) { try { localStorage.setItem('juventude.overlay.lastRoom', ROOM_ID); } catch {} }
 const STORAGE_KEY = `juventude.overlay-studio.v2.${ROOM_ID}`;
 const TEAM_CATALOG_KEY = 'juventude.overlay-team-catalog.v1';
@@ -20,7 +21,7 @@ const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -290,6 +291,89 @@ const TYPEFACES = {
   bebas: { label: 'Bebas Neue', stack: "'Bebas Neue', Impact, 'Arial Narrow Bold', sans-serif" },
 };
 
+// ===== Builder de overlays: elementos livres sobre um canvas (texto, imagem/vídeo, formas) =====
+const BUILDER_TYPES = ['text', 'image', 'video', 'shape'];
+const BUILDER_ANIMATIONS = [['none', 'Sem animação'], ['fade', 'Fade'], ['slide-left', 'Deslizar da esquerda'], ['slide-right', 'Deslizar da direita'], ['slide-up', 'Subir'], ['slide-down', 'Descer'], ['zoom', 'Zoom'], ['pop', 'Pop com ressalto'], ['wipe', 'Cortina'], ['flip', 'Virar']];
+const BUILDER_ANIMATION_KEYS = BUILDER_ANIMATIONS.map(([key]) => key);
+const BUILDER_TOKENS = [['{home.name}', 'Mandante'], ['{home.short}', 'Sigla mandante'], ['{home.score}', 'Placar mandante'], ['{away.name}', 'Visitante'], ['{away.short}', 'Sigla visitante'], ['{away.score}', 'Placar visitante'], ['{clock}', 'Cronômetro'], ['{period}', 'Período'], ['{competition}', 'Competição'], ['{sponsor}', 'Patrocinador'], ['{time}', 'Hora']];
+const BUILDER_IMAGE_TOKENS = [['token:home.logo', 'Escudo do mandante'], ['token:away.logo', 'Escudo do visitante'], ['token:sponsor', 'Logo do patrocinador ativo']];
+const BUILDER_SIZES = [['1920x1080', 'Tela cheia 1920 × 1080'], ['1280x720', 'Tela cheia 1280 × 720'], ['1080x1920', 'Vertical 1080 × 1920'], ['1500x200', 'Barra 1500 × 200'], ['1200x260', 'Lower third 1200 × 260'], ['800x450', 'Cartão 800 × 450'], ['600x600', 'Quadrado 600 × 600']];
+const BUILDER_ELEMENT_NAMES = { text: 'Texto', image: 'Imagem', video: 'Vídeo', shape: 'Forma' };
+
+function normalizedCustomElement(raw, index = 0) {
+  const type = BUILDER_TYPES.includes(raw?.type) ? raw.type : 'text';
+  const anim = value => BUILDER_ANIMATION_KEYS.includes(value) ? value : 'fade';
+  const optionalColor = value => value ? safeColor(value, '') : '';
+  const src = String(raw?.src || '').slice(0, 500);
+  return {
+    id: String(raw?.id || `el-${index + 1}`).replace(/[^a-z0-9-]/gi, '').slice(0, 24) || `el-${index + 1}`,
+    type,
+    name: String(raw?.name || BUILDER_ELEMENT_NAMES[type]).slice(0, 60),
+    x: clampNumber(raw?.x, -100, 200, 10), y: clampNumber(raw?.y, -100, 200, 10),
+    w: clampNumber(raw?.w, 0.5, 300, 30), h: clampNumber(raw?.h, 0.5, 300, 12),
+    rotation: clampNumber(raw?.rotation, -360, 360, 0), opacity: clampNumber(raw?.opacity, 0, 100, 100),
+    visible: raw?.visible !== false, locked: Boolean(raw?.locked),
+    text: String(raw?.text ?? (type === 'text' ? 'Texto' : '')).slice(0, 400),
+    font: raw?.font === 'global' || TYPEFACES[raw?.font] ? raw.font : 'global',
+    size: clampNumber(raw?.size, 6, 800, 48),
+    weight: [400, 500, 600, 700, 800, 900].includes(Number(raw?.weight)) ? Number(raw.weight) : 700,
+    color: safeColor(raw?.color, '#ffffff'),
+    align: ['left', 'center', 'right'].includes(raw?.align) ? raw.align : 'left',
+    valign: ['top', 'middle', 'bottom'].includes(raw?.valign) ? raw.valign : 'middle',
+    transform: raw?.transform === 'uppercase' ? 'uppercase' : 'none',
+    spacing: clampNumber(raw?.spacing, -10, 40, 0), lineHeight: clampNumber(raw?.lineHeight, 70, 220, 110),
+    italic: Boolean(raw?.italic), marquee: Boolean(raw?.marquee), marqueeSpeed: clampNumber(raw?.marqueeSpeed, 2, 90, 14),
+    fill: optionalColor(raw?.fill), fill2: optionalColor(raw?.fill2), fillAngle: clampNumber(raw?.fillAngle, 0, 360, 135), fillOpacity: clampNumber(raw?.fillOpacity, 0, 100, 100),
+    radius: clampNumber(raw?.radius, 0, 800, 0), borderColor: safeColor(raw?.borderColor, '#ffffff'), borderWidth: clampNumber(raw?.borderWidth, 0, 80, 0),
+    shadow: ['none', 'soft', 'strong'].includes(raw?.shadow) ? raw.shadow : 'none', padding: clampNumber(raw?.padding, 0, 300, 0),
+    src: /^(\/api\/assets\/|https?:\/\/|token:)/.test(src) ? src : '',
+    fit: raw?.fit === 'contain' ? 'contain' : 'cover', shape: raw?.shape === 'circle' ? 'circle' : 'rect',
+    animIn: anim(raw?.animIn), animOut: raw?.animOut === 'same' || BUILDER_ANIMATION_KEYS.includes(raw?.animOut) ? raw.animOut : 'same',
+    delay: clampNumber(raw?.delay, 0, 10000, 0), duration: clampNumber(raw?.duration, 100, 5000, 600),
+  };
+}
+
+// Overlays criados antes do Builder por elementos (mídia + título + texto) viram elementos equivalentes.
+function legacyCustomElements(item) {
+  const w = clampNumber(item?.width, 200, 3840, 1920);
+  const background = safeColor(item?.background, '#10131a');
+  const accent = safeColor(item?.accent, '#2f7df6');
+  const textColor = safeColor(item?.textColor, '#ffffff');
+  const media = String(item?.media || '');
+  const layout = ['media', 'text', 'media-text'].includes(item?.layout) ? item.layout : 'media-text';
+  const animIn = ['fade', 'slide', 'zoom'].includes(item?.animation) ? { fade: 'fade', slide: 'slide-left', zoom: 'zoom' }[item.animation] : 'fade';
+  const base = { animIn, animOut: 'same', delay: 0, duration: 650 };
+  const list = [{ ...base, id: 'el-bg', type: 'shape', name: 'Fundo', x: 0, y: 0, w: 100, h: 100, fill: background }];
+  const hasMedia = layout !== 'text';
+  const hasText = layout !== 'media';
+  const textX = hasMedia && hasText ? 57 : 0;
+  if (hasMedia) list.push({ ...base, id: 'el-media', type: /\.(mp4|webm)(\?|$)/i.test(media) || item?.mediaType === 'video' ? 'video' : 'image', name: 'Mídia', x: 0, y: 0, w: hasText ? 57 : 100, h: 100, src: media, fit: 'cover' });
+  if (hasText) {
+    list.push({ ...base, id: 'el-accent', type: 'shape', name: 'Destaque', x: textX, y: 0, w: 0.5, h: 100, fill: accent });
+    const pad = (100 - textX) * 0.08;
+    list.push({ ...base, id: 'el-title', type: 'text', name: 'Título', x: textX + pad, y: 20, w: 100 - textX - pad * 2, h: 36, text: String(item?.title || '').slice(0, 120), size: Math.round(w * 0.042 * ((100 - textX) / 43)), weight: 800, color: textColor, transform: 'uppercase', lineHeight: 95, valign: 'bottom' });
+    list.push({ ...base, id: 'el-subtitle', type: 'text', name: 'Texto complementar', x: textX + pad, y: 60, w: 100 - textX - pad * 2, h: 30, text: String(item?.subtitle || '').slice(0, 240), size: Math.round(w * 0.016), weight: 500, color: textColor, opacity: 75, valign: 'top' });
+  }
+  return list;
+}
+
+function normalizedCustomElements(item) {
+  const source = Array.isArray(item?.elements) ? item.elements : legacyCustomElements(item);
+  const seen = new Set();
+  return source.slice(0, 60).map((raw, index) => {
+    const element = normalizedCustomElement(raw, index);
+    while (seen.has(element.id)) element.id = `${element.id.slice(0, 20)}-${index}`;
+    seen.add(element.id);
+    return element;
+  });
+}
+
+function newBuilderId(prefix, taken = []) {
+  let id;
+  do { id = `${prefix}-${Math.random().toString(36).slice(2, 8)}`; } while (taken.includes(id));
+  return id;
+}
+
 function freshSportData() {
   return {
     volleyball: { sets: { home: 0, away: 0 }, serve: 'home', timeouts: { home: 0, away: 0 } },
@@ -431,6 +515,9 @@ function normalizeState(saved) {
     animation: ['fade','slide','zoom'].includes(item?.animation) ? item.animation : 'fade',
     background: safeColor(item?.background, '#10131a'), accent: safeColor(item?.accent, '#2f7df6'), textColor: safeColor(item?.textColor, '#ffffff'),
     visible: Boolean(item?.visible), transition: item?.transition && typeof item.transition === 'object' ? item.transition : null,
+    elements: normalizedCustomElements(item),
+    canvasBg: item?.canvasBg ? safeColor(item.canvasBg, '') : '',
+    autoHide: clampNumber(item?.autoHide, 0, 3600, 0), expiresAt: Number(item?.expiresAt) > 0 ? Number(item.expiresAt) : 0,
   }));
   const savedClock = saved.clock && typeof saved.clock === 'object' ? saved.clock : {};
   const clockElapsed = Number.isFinite(Number(savedClock.elapsed)) ? Math.max(0, Number(savedClock.elapsed)) : 0;
@@ -1166,16 +1253,81 @@ function renderSponsorBarOverlay() {
   return `<div class="sponsor-wide-bar sponsor-style-${escapeHtml(appearance.sponsorStyle || 'boxed')} sponsor-bar-border-${borderStyle} sponsor-bar-shadow-${shadowStyle}${transitionClass}" style="--sponsor-motion-duration:${duration}ms;--sponsor-motion-offset:${offset}ms;--sponsor-bar-scale:${clampNumber(appearance.sponsorBarScale, 60, 180, 100) / 100};--sponsor-bar-x:${clampNumber(appearance.sponsorBarX, 0, 100, 50)}%;--sponsor-bar-y:${clampNumber(appearance.sponsorBarY, 0, 100, 91)}%;--sponsor-bar-opacity:${clampNumber(appearance.sponsorBarOpacity, 20, 100, 100) / 100};--sponsor-bar-radius:${clampNumber(appearance.sponsorBarRadius, 0, 24, 0)}px;--sponsor-bar-background:${safeColor(appearance.sponsorBarBackground, '#08090d')};${overlayThemeStyle('sponsorBar')}" data-overlay="sponsor-bar">${media}</div>`;
 }
 
-function customOverlayMarkup(item, preview = false) {
+function builderTokenValues() {
+  const sport = currentSport();
+  return {
+    'home.name': state.home.name, 'home.short': state.home.short, 'home.score': state.home.score,
+    'away.name': state.away.name, 'away.short': state.away.short, 'away.score': state.away.score,
+    clock: clockText(), period: (sport.periods || []).find(([value]) => value === state.period)?.[1] || '',
+    competition: state.competition, sponsor: activeSponsor()?.name || '', time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+  };
+}
+
+function resolveBuilderText(template, values = builderTokenValues()) {
+  return String(template ?? '').replace(/\{([a-z.]+)\}/g, (match, key) => (key in values ? String(values[key] ?? '') : match));
+}
+
+function resolveBuilderSource(src) {
+  if (src === 'token:home.logo') return state.home.logo || '';
+  if (src === 'token:away.logo') return state.away.logo || '';
+  if (src === 'token:sponsor') { const sponsor = activeSponsor(); return sponsor?.logo || sponsor?.banner || ''; }
+  return src || '';
+}
+
+// Duração total da entrada/saída: o maior (atraso + duração) entre os elementos animados.
+function customTransitionDuration(item) {
+  const spans = (item.elements || []).filter(el => el.visible && (el.animIn !== 'none' || el.animOut !== 'same')).map(el => el.delay + el.duration);
+  return Math.max(400, ...spans) + 120;
+}
+
+function builderElementStyle(el, item, index) {
+  const unit = value => `${(value / item.width * 100).toFixed(4)}cqw`;
+  const parts = [`left:${el.x}%`, `top:${el.y}%`, `width:${el.w}%`, `height:${el.h}%`, `rotate:${el.rotation}deg`, `--cel-o:${el.opacity / 100}`, `opacity:${el.opacity / 100}`, `z-index:${index + 1}`, `--cel-delay:${el.delay}ms`, `--cel-dur:${el.duration}ms`];
+  if (el.fill) {
+    const alpha = el.fillOpacity;
+    const paint = color => (alpha < 100 ? `color-mix(in srgb, ${color} ${alpha}%, transparent)` : color);
+    parts.push(el.fill2 ? `background:linear-gradient(${el.fillAngle}deg, ${paint(el.fill)}, ${paint(el.fill2)})` : `background:${paint(el.fill)}`);
+  }
+  if (el.borderWidth) parts.push(`border:${unit(el.borderWidth)} solid ${el.borderColor}`);
+  parts.push(`border-radius:${el.shape === 'circle' && el.type === 'shape' ? '50%' : unit(el.radius)}`);
+  if (el.shadow === 'soft') parts.push(`box-shadow:0 ${unit(6)} ${unit(18)} rgba(0,0,0,.35)`);
+  if (el.shadow === 'strong') parts.push(`box-shadow:0 ${unit(10)} ${unit(32)} rgba(0,0,0,.65)`);
+  return parts.join(';');
+}
+
+function builderElementMarkup(el, item, index, values, editor) {
+  const editorAttrs = editor ? ` data-el-id="${escapeHtml(el.id)}"` : '';
+  const classes = `cel cel-${el.type} cel-in-${el.animIn} cel-out-${el.animOut === 'same' ? el.animIn : el.animOut}${el.locked && editor ? ' is-locked' : ''}`;
+  const unit = value => `${(value / item.width * 100).toFixed(4)}cqw`;
+  let inner = '';
+  if (el.type === 'text') {
+    const template = el.text;
+    const font = (TYPEFACES[el.font === 'global' ? state.typeface : el.font] || TYPEFACES.rajdhani).stack;
+    const justify = { left: 'flex-start', center: 'center', right: 'flex-end' }[el.align];
+    const alignItems = { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[el.valign];
+    const style = `justify-content:${justify};align-items:${alignItems};text-align:${el.align};font-family:${escapeHtml(font)};font-size:${unit(el.size)};font-weight:${el.weight};color:${el.color};letter-spacing:${el.spacing / 100}em;line-height:${el.lineHeight / 100};text-transform:${el.transform};font-style:${el.italic ? 'italic' : 'normal'};padding:${unit(el.padding)}`;
+    const dynamic = template.includes('{') ? ` data-cel-text="${escapeHtml(template)}"` : '';
+    inner = `<div class="cel-text${el.marquee ? ' is-marquee' : ''}" style="${style};--marquee-dur:${el.marqueeSpeed}s"><span${dynamic}>${escapeHtml(resolveBuilderText(template, values))}</span></div>`;
+  } else if (el.type === 'image' || el.type === 'video') {
+    const src = resolveBuilderSource(el.src);
+    const dynamicSrc = el.src.startsWith('token:') ? ` data-cel-src="${escapeHtml(el.src)}"` : '';
+    if (!src) inner = editor ? `<div class="cel-empty">${{ 'token:home.logo': 'ESCUDO MANDANTE', 'token:away.logo': 'ESCUDO VISITANTE', 'token:sponsor': 'LOGO DO PATROCINADOR' }[el.src] || (el.type === 'video' ? 'VÍDEO' : 'IMAGEM')}</div>` : '';
+    else inner = el.type === 'video'
+      ? `<video src="${escapeHtml(src)}" style="object-fit:${el.fit}" autoplay muted loop playsinline preload="auto"></video>`
+      : `<img src="${escapeHtml(src)}" style="object-fit:${el.fit}" alt=""${dynamicSrc}>`;
+  }
+  return `<div class="${classes}"${editorAttrs} style="${builderElementStyle(el, item, index)}">${inner}</div>`;
+}
+
+function customOverlayMarkup(item, preview = false, options = {}) {
   if (!item) return '<div class="broadcast-layer custom-overlay-output"></div>';
-  const transition = item.transition && Number(item.transition.expiresAt || 0) > Date.now() ? item.transition.type : '';
+  const editor = Boolean(options.editor);
+  const transition = options.animate || (item.transition && Number(item.transition.expiresAt || 0) > Date.now() ? item.transition.type : '');
   if (!preview && !item.visible && transition !== 'exit') return '<div class="broadcast-layer custom-overlay-output"></div>';
-  const media = item.media ? (item.mediaType === 'video'
-    ? `<video src="${escapeHtml(item.media)}" autoplay muted loop playsinline preload="auto"></video>`
-    : `<img src="${escapeHtml(item.media)}" alt="">`) : '<div class="custom-overlay-placeholder">MÍDIA</div>';
-  const text = `<div class="custom-overlay-copy">${item.title ? `<strong>${escapeHtml(item.title)}</strong>` : ''}${item.subtitle ? `<span>${escapeHtml(item.subtitle)}</span>` : ''}</div>`;
-  const content = item.layout === 'media' ? media : item.layout === 'text' ? text : `${media}${text}`;
-  return `<div class="broadcast-layer custom-overlay-output"><section class="custom-overlay custom-layout-${escapeHtml(item.layout)} custom-animation-${escapeHtml(item.animation)}${transition ? ` is-${transition === 'enter' ? 'entering' : 'exiting'}` : ''}" style="--custom-bg:${safeColor(item.background, '#10131a')};--custom-accent:${safeColor(item.accent, '#2f7df6')};--custom-text:${safeColor(item.textColor, '#ffffff')}" data-overlay="custom">${content}</section></div>`;
+  const values = builderTokenValues();
+  const elements = (item.elements || []).map((el, index) => (el.visible || editor ? { el, index } : null)).filter(Boolean);
+  const content = elements.map(({ el, index }) => (el.visible ? builderElementMarkup(el, item, index, values, editor) : '')).join('');
+  return `<div class="broadcast-layer custom-overlay-output"><section class="custom-overlay${transition ? ` is-${transition === 'enter' ? 'entering' : 'exiting'}` : ''}" style="${item.canvasBg ? `background:${item.canvasBg};` : ''}" data-overlay="custom">${content}</section></div>`;
 }
 
 function renderCustomOverlay() { return customOverlayMarkup(selectedCustomOverlay()); }
@@ -2614,22 +2766,165 @@ function customOverlayUrl(item) {
   return `${location.origin}/overlay?layer=custom&id=${encodeURIComponent(item.id)}&room=${encodeURIComponent(ROOM_ID)}`;
 }
 
+const BUILDER_TEMPLATES = [
+  { key: 'blank', name: 'Em branco', caption: 'Comece do zero', width: 1920, height: 1080, elements: [] },
+  { key: 'lower-third', name: 'Lower third', caption: 'Nome e cargo com barra de destaque', width: 1200, height: 260, elements: [
+    { type: 'shape', name: 'Faixa de destaque', x: 0, y: 18, w: 1.4, h: 64, fill: '#d8ad56', animIn: 'wipe', duration: 500 },
+    { type: 'shape', name: 'Painel', x: 1.4, y: 18, w: 98.6, h: 64, fill: '#10131a', fillOpacity: 94, animIn: 'slide-left', delay: 120, duration: 600 },
+    { type: 'text', name: 'Nome', text: 'NOME DO ENTREVISTADO', x: 5, y: 24, w: 90, h: 32, size: 54, weight: 800, transform: 'uppercase', valign: 'bottom', animIn: 'slide-left', delay: 280 },
+    { type: 'text', name: 'Cargo', text: 'Cargo ou função', x: 5, y: 56, w: 90, h: 20, size: 30, weight: 500, color: '#d8ad56', valign: 'top', animIn: 'fade', delay: 460 },
+  ] },
+  { key: 'mini-scoreboard', name: 'Mini-placar', caption: 'Placar compacto com tempo', width: 900, height: 200, elements: [
+    { type: 'shape', name: 'Fundo', x: 0, y: 6, w: 100, h: 88, fill: '#0d0f15', radius: 18, shadow: 'soft', animIn: 'zoom' },
+    { type: 'text', name: 'Mandante', text: '{home.short}', x: 3, y: 10, w: 26, h: 60, size: 64, weight: 800, align: 'center', animIn: 'fade', delay: 200 },
+    { type: 'shape', name: 'Caixa do placar', x: 30, y: 12, w: 40, h: 62, fill: '#d8ad56', radius: 14, animIn: 'pop', delay: 120 },
+    { type: 'text', name: 'Placar', text: '{home.score} × {away.score}', x: 30, y: 12, w: 40, h: 62, size: 78, weight: 800, align: 'center', color: '#10131a', animIn: 'pop', delay: 240 },
+    { type: 'text', name: 'Visitante', text: '{away.short}', x: 71, y: 10, w: 26, h: 60, size: 64, weight: 800, align: 'center', animIn: 'fade', delay: 200 },
+    { type: 'text', name: 'Tempo', text: '{clock} · {period}', x: 30, y: 74, w: 40, h: 18, size: 30, weight: 600, align: 'center', color: '#b4b6c2', animIn: 'fade', delay: 400 },
+  ] },
+  { key: 'announcement', name: 'Aviso central', caption: 'Cartão com título, texto e patrocinador', width: 1280, height: 720, elements: [
+    { type: 'shape', name: 'Fundo', x: 0, y: 0, w: 100, h: 100, fill: '#0d1230', fill2: '#1b1240', fillAngle: 145, animIn: 'fade' },
+    { type: 'shape', name: 'Linha', x: 8, y: 30, w: 14, h: 0.8, fill: '#d8ad56', animIn: 'wipe', delay: 200, duration: 600 },
+    { type: 'text', name: 'Título', text: 'AVISO IMPORTANTE', x: 8, y: 32, w: 84, h: 24, size: 96, weight: 800, transform: 'uppercase', valign: 'top', animIn: 'slide-up', delay: 300 },
+    { type: 'text', name: 'Texto', text: 'Escreva aqui a mensagem para o público.', x: 8, y: 58, w: 70, h: 24, size: 38, weight: 500, color: '#c9cbe0', valign: 'top', animIn: 'fade', delay: 550 },
+    { type: 'image', name: 'Patrocinador', src: 'token:sponsor', x: 76, y: 74, w: 16, h: 16, fit: 'contain', animIn: 'fade', delay: 700 },
+  ] },
+  { key: 'halftime', name: 'Intervalo / resultado', caption: 'Tela cheia com escudos e placar', width: 1920, height: 1080, elements: [
+    { type: 'shape', name: 'Fundo', x: 0, y: 0, w: 100, h: 100, fill: '#0a0b10', fill2: '#1a1330', fillAngle: 160, animIn: 'fade' },
+    { type: 'text', name: 'Competição', text: '{competition}', x: 10, y: 8, w: 80, h: 8, size: 44, weight: 600, align: 'center', color: '#d8ad56', transform: 'uppercase', spacing: 12, animIn: 'fade', delay: 200 },
+    { type: 'image', name: 'Escudo mandante', src: 'token:home.logo', x: 10, y: 28, w: 20, h: 36, fit: 'contain', animIn: 'slide-left', delay: 300 },
+    { type: 'image', name: 'Escudo visitante', src: 'token:away.logo', x: 70, y: 28, w: 20, h: 36, fit: 'contain', animIn: 'slide-right', delay: 300 },
+    { type: 'text', name: 'Placar', text: '{home.score}  ×  {away.score}', x: 30, y: 30, w: 40, h: 30, size: 200, weight: 800, align: 'center', animIn: 'pop', delay: 500 },
+    { type: 'text', name: 'Mandante', text: '{home.name}', x: 6, y: 68, w: 28, h: 10, size: 46, weight: 700, align: 'center', transform: 'uppercase', animIn: 'slide-up', delay: 650 },
+    { type: 'text', name: 'Visitante', text: '{away.name}', x: 66, y: 68, w: 28, h: 10, size: 46, weight: 700, align: 'center', transform: 'uppercase', animIn: 'slide-up', delay: 650 },
+    { type: 'text', name: 'Período', text: '{period}', x: 30, y: 62, w: 40, h: 7, size: 40, weight: 600, align: 'center', color: '#b4b6c2', animIn: 'fade', delay: 800 },
+  ] },
+  { key: 'sponsor-tag', name: 'Selo de patrocínio', caption: '"Apresentado por" com logo', width: 700, height: 200, elements: [
+    { type: 'shape', name: 'Fundo', x: 0, y: 8, w: 100, h: 84, fill: '#ffffff', radius: 100, shadow: 'soft', animIn: 'slide-left' },
+    { type: 'text', name: 'Rótulo', text: 'APRESENTADO POR', x: 8, y: 22, w: 46, h: 24, size: 24, weight: 700, color: '#5b5f6e', spacing: 14, animIn: 'fade', delay: 300 },
+    { type: 'text', name: 'Marca', text: '{sponsor}', x: 8, y: 46, w: 46, h: 34, size: 46, weight: 800, color: '#10131a', transform: 'uppercase', animIn: 'fade', delay: 380 },
+    { type: 'image', name: 'Logo', src: 'token:sponsor', x: 58, y: 18, w: 34, h: 64, fit: 'contain', animIn: 'zoom', delay: 450 },
+  ] },
+  { key: 'ticker', name: 'Faixa rolante', caption: 'Texto corrido em loop', width: 1920, height: 100, elements: [
+    { type: 'shape', name: 'Faixa', x: 0, y: 0, w: 100, h: 100, fill: '#10131a', fillOpacity: 95, animIn: 'slide-up', duration: 500 },
+    { type: 'shape', name: 'Selo', x: 0, y: 0, w: 12, h: 100, fill: '#d8ad56', animIn: 'slide-right', delay: 200 },
+    { type: 'text', name: 'Selo', text: 'AVISO', x: 0, y: 0, w: 12, h: 100, size: 40, weight: 800, align: 'center', color: '#10131a', animIn: 'fade', delay: 300 },
+    { type: 'text', name: 'Texto rolante', text: 'Escreva aqui o aviso que vai rolar na tela  •  {competition}  •  {home.short} {home.score} × {away.score} {away.short}', x: 13, y: 0, w: 86, h: 100, size: 42, weight: 600, marquee: true, marqueeSpeed: 22, animIn: 'fade', delay: 400 },
+  ] },
+];
+
+const BUILDER_ADD_PRESETS = [
+  ['text', 'Texto', { type: 'text', text: 'Novo texto', w: 34, h: 12 }],
+  ['image', 'Imagem', { type: 'image', w: 24, h: 30, fit: 'contain' }],
+  ['video', 'Vídeo', { type: 'video', w: 30, h: 30 }],
+  ['rect', 'Retângulo', { type: 'shape', shape: 'rect', fill: '#2f7df6', w: 30, h: 16 }],
+  ['circle', 'Círculo', { type: 'shape', shape: 'circle', fill: '#d8ad56', w: 14, h: 25 }],
+  ['home-logo', 'Escudo casa', { type: 'image', name: 'Escudo mandante', src: 'token:home.logo', w: 14, h: 25, fit: 'contain' }],
+  ['away-logo', 'Escudo fora', { type: 'image', name: 'Escudo visitante', src: 'token:away.logo', w: 14, h: 25, fit: 'contain' }],
+  ['score', 'Placar', { type: 'text', name: 'Placar', text: '{home.score} × {away.score}', w: 30, h: 16, size: 72, align: 'center' }],
+  ['clock', 'Cronômetro', { type: 'text', name: 'Cronômetro', text: '{clock}', w: 20, h: 12, size: 56, align: 'center' }],
+];
+
+function overlayFromTemplate(template, existing = []) {
+  const taken = existing.map(entry => entry.id);
+  return {
+    id: newBuilderId('overlay', taken), name: template.key === 'blank' ? `Overlay ${existing.length + 1}` : template.name, width: template.width, height: template.height,
+    title: '', subtitle: '', media: '', mediaType: 'image', layout: 'media-text', animation: 'fade', background: '#10131a', accent: '#2f7df6', textColor: '#ffffff',
+    visible: false, transition: null, canvasBg: '', autoHide: 0, expiresAt: 0,
+    elements: template.elements.map((raw, index) => normalizedCustomElement({ ...raw, id: `el-${index + 1}` }, index)),
+  };
+}
+
+function commitOverlay(mutator, options = { immediate: true }) {
+  commit(draft => { const item = selectedCustomOverlay(draft); if (item) mutator(item, draft); }, options);
+}
+
+let platformOverlays = [];
+let platformOverlaysLoadedAt = 0;
+
+async function loadPlatformOverlays(force = false) {
+  if (!isAdminPanel || libraryMode || managementModule !== 'builder' || adminSession.status !== 'authenticated') return;
+  if (!force && Date.now() - platformOverlaysLoadedAt < 10000) return;
+  platformOverlaysLoadedAt = Date.now();
+  try {
+    const response = await fetch(`/api/state?room=${BUILDER_LIBRARY_ROOM}&ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const remote = await response.json();
+    const next = remote?.updatedAt ? normalizeState(remote).customOverlays : [];
+    if (JSON.stringify(next) !== JSON.stringify(platformOverlays)) { platformOverlays = next; render(); }
+  } catch {}
+}
+
+let builderSelectedEl = '';
+let builderTab = 'position';
+let builderPreviewAnim = '';
+let builderGrid = false;
+
+function selectedBuilderElement(item = selectedCustomOverlay()) {
+  return item?.elements?.find(el => el.id === builderSelectedEl) || null;
+}
+
+function builderFieldNumber(label, field, value, min, max, step = 1) {
+  return `<div class="field"><label>${label}</label><input type="number" data-el-field="${field}" min="${min}" max="${max}" step="${step}" value="${escapeHtml(String(value))}"></div>`;
+}
+
+function builderFieldSelect(label, field, value, options) {
+  return `<div class="field"><label>${label}</label><select data-el-field="${field}">${options.map(([key, text]) => `<option value="${escapeHtml(String(key))}" ${String(value) === String(key) ? 'selected' : ''}>${escapeHtml(text)}</option>`).join('')}</select></div>`;
+}
+
+function builderFieldColor(label, field, value, clearable = false) {
+  return `<div class="builder-color-field"><label><input type="color" data-el-field="${field}" value="${safeColor(value, '#000000')}"><span>${label}</span></label>${clearable ? `<button class="button subtle" data-action="builder-clear" data-value="${field}" ${value ? '' : 'disabled'}>Limpar</button>` : ''}</div>`;
+}
+
+function builderInspector(item, el) {
+  if (!el) return `<div class="builder-inspector-empty"><strong>Nenhum elemento selecionado</strong><p>Clique em um elemento do canvas ou da lista de camadas. Use os botões acima do canvas para adicionar texto, imagem, formas e dados da partida.</p><div class="builder-tokens-help"><small>Dados ao vivo que funcionam em qualquer texto:</small><div>${BUILDER_TOKENS.map(([token, label]) => `<code title="${escapeHtml(label)}">${escapeHtml(token)}</code>`).join('')}</div></div></div>`;
+  const tabs = [['position', 'Posição'], ['style', 'Estilo'], ['content', el.type === 'text' ? 'Texto' : el.type === 'shape' ? 'Forma' : 'Mídia'], ['animation', 'Animação']];
+  let body = '';
+  if (builderTab === 'position') {
+    body = `<div class="field-row">${builderFieldNumber('X (%)', 'x', el.x, -100, 200, 0.5)}${builderFieldNumber('Y (%)', 'y', el.y, -100, 200, 0.5)}</div><div class="field-row">${builderFieldNumber('Largura (%)', 'w', el.w, 0.5, 300, 0.5)}${builderFieldNumber('Altura (%)', 'h', el.h, 0.5, 300, 0.5)}</div><div class="field-row">${builderFieldNumber('Rotação (°)', 'rotation', el.rotation, -360, 360, 1)}${builderFieldNumber('Opacidade (%)', 'opacity', el.opacity, 0, 100, 1)}</div>
+      <div class="builder-align"><span>Alinhar no canvas</span><div>${[['left', '⟸ Esquerda'], ['hcenter', '↔ Centro'], ['right', 'Direita ⟹'], ['top', '⟰ Topo'], ['vmiddle', '↕ Meio'], ['bottom', 'Base ⟱']].map(([key, label]) => `<button class="button subtle" data-action="builder-align" data-value="${key}">${label}</button>`).join('')}</div></div><p class="help-text">Arraste no canvas para mover, use as alças para redimensionar e as setas do teclado para ajustar (Shift = passos maiores). Shift + alça de canto mantém a proporção.</p>`;
+  } else if (builderTab === 'style') {
+    const fonts = [['global', 'Fonte global do projeto'], ...Object.entries(TYPEFACES).map(([key, font]) => [key, font.label])];
+    const textStyle = el.type === 'text' ? `<div class="builder-group"><strong>Texto</strong>${builderFieldSelect('Fonte', 'font', el.font, fonts)}<div class="field-row">${builderFieldNumber('Tamanho (px)', 'size', el.size, 6, 800, 1)}${builderFieldSelect('Peso', 'weight', el.weight, [[400, 'Regular'], [500, 'Médio'], [600, 'Semibold'], [700, 'Negrito'], [800, 'Extra'], [900, 'Black']])}</div>${builderFieldColor('Cor do texto', 'color', el.color)}<div class="field-row">${builderFieldSelect('Horizontal', 'align', el.align, [['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita']])}${builderFieldSelect('Vertical', 'valign', el.valign, [['top', 'Topo'], ['middle', 'Meio'], ['bottom', 'Base']])}</div><div class="field-row">${builderFieldNumber('Espaçamento', 'spacing', el.spacing, -10, 40, 1)}${builderFieldNumber('Entrelinha (%)', 'lineHeight', el.lineHeight, 70, 220, 5)}</div>${builderFieldNumber('Recuo interno (px)', 'padding', el.padding, 0, 300, 1)}<label class="builder-check"><input type="checkbox" data-el-field="transform" ${el.transform === 'uppercase' ? 'checked' : ''}> Caixa alta</label><label class="builder-check"><input type="checkbox" data-el-field="italic" ${el.italic ? 'checked' : ''}> Itálico</label><label class="builder-check"><input type="checkbox" data-el-field="marquee" ${el.marquee ? 'checked' : ''}> Texto rolante (loop)</label>${el.marquee ? builderFieldNumber('Duração do loop (s)', 'marqueeSpeed', el.marqueeSpeed, 2, 90, 1) : ''}</div>` : '';
+    const mediaStyle = el.type === 'image' || el.type === 'video' ? `<div class="builder-group"><strong>Mídia</strong>${builderFieldSelect('Ajuste', 'fit', el.fit, [['cover', 'Preencher (corta)'], ['contain', 'Conter (inteira)']])}</div>` : '';
+    body = `${textStyle}${mediaStyle}<div class="builder-group"><strong>Caixa</strong>${builderFieldColor('Fundo', 'fill', el.fill || '#000000', true)}${el.fill ? `<div class="field-row">${builderFieldNumber('Opacidade do fundo (%)', 'fillOpacity', el.fillOpacity, 0, 100, 1)}${builderFieldNumber('Ângulo (°)', 'fillAngle', el.fillAngle, 0, 360, 5)}</div>${builderFieldColor('Segunda cor (degradê)', 'fill2', el.fill2 || '#000000', true)}` : ''}<div class="field-row">${builderFieldNumber('Cantos (px)', 'radius', el.radius, 0, 800, 1)}${builderFieldNumber('Borda (px)', 'borderWidth', el.borderWidth, 0, 80, 1)}</div>${el.borderWidth ? builderFieldColor('Cor da borda', 'borderColor', el.borderColor) : ''}${builderFieldSelect('Sombra', 'shadow', el.shadow, [['none', 'Sem sombra'], ['soft', 'Suave'], ['strong', 'Forte']])}</div>`;
+  } else if (builderTab === 'content') {
+    if (el.type === 'text') body = `<div class="field"><label>Texto</label><textarea data-el-field="text" maxlength="400" rows="4">${escapeHtml(el.text)}</textarea></div><div class="builder-tokens-help"><small>Clique para inserir um dado ao vivo:</small><div>${BUILDER_TOKENS.map(([token, label]) => `<button type="button" class="builder-token" data-action="builder-token" data-value="${escapeHtml(token)}" title="${escapeHtml(label)}">${escapeHtml(label)}</button>`).join('')}</div></div>`;
+    else if (el.type === 'shape') body = builderFieldSelect('Formato', 'shape', el.shape, [['rect', 'Retângulo'], ['circle', 'Círculo / elipse']]);
+    else {
+      const tokenValue = el.src.startsWith('token:') ? el.src : '';
+      body = `<div class="field"><label>Fonte da mídia</label><select data-el-field="src"><option value="" ${!el.src ? 'selected' : ''}>Nenhuma</option>${BUILDER_IMAGE_TOKENS.map(([token, label]) => `<option value="${token}" ${tokenValue === token ? 'selected' : ''}>${label} (dado ao vivo)</option>`).join('')}${el.src && !tokenValue ? `<option value="${escapeHtml(el.src)}" selected>Arquivo enviado</option>` : ''}</select></div><label class="sponsor-upload-button builder-media-upload">${el.src && !tokenValue ? 'Trocar arquivo' : 'Enviar imagem ou vídeo'}<input type="file" data-el-media="${escapeHtml(item.id)}|${escapeHtml(el.id)}" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,video/webm"></label><p class="help-text">Imagens e vídeos de até 25 MB. Vídeos tocam sem som e em loop.</p>`;
+    }
+  } else {
+    const outOptions = [['same', 'Igual à entrada (invertida)'], ...BUILDER_ANIMATIONS];
+    body = `${builderFieldSelect('Entrada', 'animIn', el.animIn, BUILDER_ANIMATIONS)}${builderFieldSelect('Saída', 'animOut', el.animOut, outOptions)}<div class="field-row">${builderFieldNumber('Atraso (ms)', 'delay', el.delay, 0, 10000, 50)}${builderFieldNumber('Duração (ms)', 'duration', el.duration, 100, 5000, 50)}</div><button class="button" data-action="builder-play" data-value="enter">▶ Reproduzir entrada</button><p class="help-text">Os atrasos permitem montar sequências: um elemento entra depois do outro. Use "Cascata" na barra do overlay para escalonar todos de uma vez.</p>`;
+  }
+  return `<div class="builder-tabs" role="tablist">${tabs.map(([key, label]) => `<button class="${builderTab === key ? 'active' : ''}" data-action="builder-tab" data-value="${key}">${label}</button>`).join('')}</div><div class="builder-props">${body}</div><div class="builder-el-actions"><button class="button subtle" data-action="builder-dup-el">Duplicar</button><button class="button subtle" data-action="builder-z" data-value="front">Trazer p/ frente</button><button class="button subtle" data-action="builder-z" data-value="back">Enviar p/ trás</button><button class="button subtle danger" data-action="builder-remove-el">Excluir elemento</button></div>`;
+}
+
+function builderLayers(item) {
+  const typeIcon = { text: 'T', image: '▣', video: '▶', shape: '◆' };
+  const rows = [...item.elements].map((el, index) => ({ el, index })).reverse().map(({ el, index }) => `<div class="builder-layer ${el.id === builderSelectedEl ? 'active' : ''} ${el.visible ? '' : 'is-hidden'}" data-action="builder-select" data-value="${escapeHtml(el.id)}"><span class="builder-layer-icon">${typeIcon[el.type]}</span><strong>${escapeHtml(el.name)}</strong><span class="builder-layer-actions"><button data-action="builder-toggle" data-value="${escapeHtml(el.id)}|visible" title="${el.visible ? 'Ocultar' : 'Mostrar'}" aria-label="${el.visible ? 'Ocultar' : 'Mostrar'}">${el.visible ? '◉' : '○'}</button><button data-action="builder-toggle" data-value="${escapeHtml(el.id)}|locked" title="${el.locked ? 'Destravar' : 'Travar'}" aria-label="${el.locked ? 'Destravar' : 'Travar'}">${el.locked ? '🔒' : '🔓'}</button><button data-action="builder-z" data-value="${escapeHtml(el.id)}|up" title="Subir camada" aria-label="Subir camada" ${index === item.elements.length - 1 ? 'disabled' : ''}>↑</button><button data-action="builder-z" data-value="${escapeHtml(el.id)}|down" title="Descer camada" aria-label="Descer camada" ${index === 0 ? 'disabled' : ''}>↓</button></span></div>`).join('');
+  return rows || '<div class="portal-empty">Sem elementos. Adicione texto, imagem ou uma forma.</div>';
+}
+
 function renderOverlayBuilder() {
   const item = selectedCustomOverlay();
-  if (!item) return `<section class="overlay-builder-empty"><div><span>BUILDER DE OVERLAYS</span><h2>Crie uma saída independente</h2><p>Monte um overlay com mídia, textos, cores, dimensões e animação próprias. Cada criação recebe uma URL exclusiva para o OBS.</p></div><button class="button primary" data-action="add-custom-overlay">Criar primeiro overlay</button></section>`;
-  return `<div class="overlay-builder">
-    <aside class="builder-list"><div class="section-header"><strong>Meus overlays</strong><button class="button subtle" data-action="add-custom-overlay">+ Novo</button></div>${state.customOverlays.map(overlay => `<button class="builder-list-item ${overlay.id === item.id ? 'active' : ''}" data-action="select-custom-overlay" data-value="${escapeHtml(overlay.id)}"><i class="${overlay.visible ? 'on' : ''}"></i><span><strong>${escapeHtml(overlay.name)}</strong><small>${overlay.width} × ${overlay.height}</small></span></button>`).join('')}</aside>
-    <section class="builder-editor"><div class="builder-toolbar"><div><span>EDIÇÃO VISUAL</span><h2>${escapeHtml(item.name)}</h2></div><div class="inline-actions"><button class="button ${item.visible ? '' : 'primary'}" data-action="toggle-custom-overlay" data-value="${escapeHtml(item.id)}">${item.visible ? 'Retirar do ar' : 'Colocar no ar'}</button><button class="button" data-action="copy-custom-url" data-value="${escapeHtml(item.id)}">${icons.copy} URL OBS</button><button class="button subtle" data-action="remove-custom-overlay" data-value="${escapeHtml(item.id)}">Excluir</button></div></div>
-      <div class="builder-workspace"><div class="builder-fields">
-        <div class="field"><label>Nome do overlay</label><input data-custom-field="name" value="${escapeHtml(item.name)}" maxlength="80"></div>
-        <div class="field-row"><div class="field"><label>Largura</label><input type="number" min="200" max="3840" data-custom-field="width" value="${item.width}"></div><div class="field"><label>Altura</label><input type="number" min="100" max="2160" data-custom-field="height" value="${item.height}"></div></div>
-        <div class="field"><label>Título</label><input data-custom-field="title" value="${escapeHtml(item.title)}" maxlength="120"></div>
-        <div class="field"><label>Texto complementar</label><textarea data-custom-field="subtitle" maxlength="240">${escapeHtml(item.subtitle)}</textarea></div>
-        <div class="field-row"><div class="field"><label>Composição</label><select data-custom-field="layout"><option value="media-text" ${item.layout === 'media-text' ? 'selected' : ''}>Mídia + texto</option><option value="media" ${item.layout === 'media' ? 'selected' : ''}>Somente mídia</option><option value="text" ${item.layout === 'text' ? 'selected' : ''}>Somente texto</option></select></div><div class="field"><label>Animação</label><select data-custom-field="animation"><option value="fade" ${item.animation === 'fade' ? 'selected' : ''}>Fade</option><option value="slide" ${item.animation === 'slide' ? 'selected' : ''}>Deslizamento</option><option value="zoom" ${item.animation === 'zoom' ? 'selected' : ''}>Zoom</option></select></div></div>
-        <div class="builder-colors"><label><input type="color" data-custom-field="background" value="${safeColor(item.background, '#10131a')}"><span>Fundo</span></label><label><input type="color" data-custom-field="accent" value="${safeColor(item.accent, '#2f7df6')}"><span>Destaque</span></label><label><input type="color" data-custom-field="textColor" value="${safeColor(item.textColor, '#ffffff')}"><span>Texto</span></label></div>
-        <label class="sponsor-upload-button builder-media-upload">${item.media ? 'Trocar mídia' : 'Enviar imagem ou vídeo'}<input type="file" data-custom-media="${escapeHtml(item.id)}" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,video/webm"></label>
-      </div><div class="builder-preview"><div class="builder-canvas" style="aspect-ratio:${item.width}/${item.height}">${customOverlayMarkup(item, true)}</div><div><span>Canvas ${item.width} × ${item.height}</span><small>Configure a fonte Navegador do OBS com estas mesmas dimensões.</small></div></div></div>
-    </section></div>`;
+  const templates = BUILDER_TEMPLATES.map(template => `<button class="builder-template" data-action="builder-template" data-value="${template.key}"><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.caption)} · ${template.width} × ${template.height}</small></button>`).join('');
+  const side = `<aside class="builder-side"><div class="section-header"><strong>Meus overlays</strong><button class="button subtle" data-action="add-custom-overlay">+ Novo</button></div>${(state.customOverlays || []).map(overlay => `<button class="builder-list-item ${item && overlay.id === item.id ? 'active' : ''}" data-action="select-custom-overlay" data-value="${escapeHtml(overlay.id)}"><i class="${overlay.visible ? 'on' : ''}"></i><span><strong>${escapeHtml(overlay.name)}</strong><small>${overlay.width} × ${overlay.height} · ${overlay.elements.length} elemento${overlay.elements.length === 1 ? '' : 's'}</small></span></button>`).join('') || '<p class="help-text">Nenhum overlay criado ainda.</p>'}<div class="section-header builder-side-title"><strong>Modelos</strong></div><div class="builder-templates">${templates}</div>${libraryMode ? '' : `<div class="section-header builder-side-title"><strong>Modelos da plataforma</strong></div>${platformOverlays.length ? platformOverlays.map(model => `<div class="builder-template"><strong>${escapeHtml(model.name)}</strong><small>${model.width} × ${model.height} · ${model.elements.length} elemento${model.elements.length === 1 ? '' : 's'}</small><button class="button subtle" data-action="builder-use-platform" data-value="${escapeHtml(model.id)}">Usar nesta partida</button></div>`).join('') : '<p class="help-text">Nenhum modelo salvo. Use "Salvar como modelo" em um overlay para reaproveitá-lo em todas as partidas.</p>'}<a class="button subtle" href="${escapeHtml(platformUrl('builder'))}">Gerenciar modelos</a>`}<label class="button subtle builder-import">Importar overlay (.json)<input type="file" data-builder-import accept="application/json,.json" hidden></label></aside>`;
+  if (!item) return `<div class="overlay-builder">${side}<section class="overlay-builder-empty"><div><span>BUILDER DE OVERLAYS</span><h2>Monte qualquer overlay, sem programar</h2><p>Combine textos, imagens, vídeos e formas em um canvas livre, com dados ao vivo da partida (placar, tempo, escudos), animações de entrada e saída e uma URL exclusiva para o OBS. Comece por um modelo ao lado ou por um canvas em branco.</p></div><button class="button primary" data-action="add-custom-overlay">Criar overlay em branco</button></section></div>`;
+  const el = selectedBuilderElement(item);
+  const sizeKey = `${item.width}x${item.height}`;
+  const sizeOptions = [...BUILDER_SIZES, ...(BUILDER_SIZES.some(([key]) => key === sizeKey) ? [] : [[sizeKey, `Personalizado ${item.width} × ${item.height}`]])];
+  const addBar = BUILDER_ADD_PRESETS.map(([key, label]) => `<button class="button" data-action="builder-add" data-value="${key}">+ ${label}</button>`).join('');
+  const selection = el && !builderPreviewAnim ? `<div class="builder-selection ${el.locked ? 'is-locked' : ''}" data-el-selection style="left:${el.x}%;top:${el.y}%;width:${el.w}%;height:${el.h}%;rotate:${el.rotation}deg">${el.locked ? '' : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'].map(handle => `<i data-el-handle="${handle}" class="h-${handle}"></i>`).join('')}</div>` : '';
+  return `<div class="overlay-builder">${side}
+    <section class="builder-main"><div class="builder-topbar"><div class="field builder-name"><label>Nome</label><input data-custom-field="name" value="${escapeHtml(item.name)}" maxlength="80"></div><div class="field"><label>Tamanho do canvas</label><select data-size-preset>${sizeOptions.map(([key, label]) => `<option value="${key}" ${key === sizeKey ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="field"><label>Fundo do canvas</label><div class="builder-color-field"><label><input type="color" data-custom-field="canvasBg" value="${safeColor(item.canvasBg, '#000000')}"><span>${item.canvasBg ? 'Cor' : 'Transparente'}</span></label><button class="button subtle" data-action="builder-clear" data-value="canvasBg" ${item.canvasBg ? '' : 'disabled'}>Limpar</button></div></div><div class="field"><label>Sumir sozinho (s)</label><input type="number" min="0" max="3600" step="1" data-custom-field="autoHide" value="${item.autoHide}" title="0 = manual"></div></div>
+      <div class="builder-actionbar"><button class="button ${item.visible ? '' : 'primary'}" data-action="toggle-custom-overlay" data-value="${escapeHtml(item.id)}">${item.visible ? 'Retirar do ar' : 'Colocar no ar'}</button><button class="button" data-action="builder-play" data-value="both">▶ Testar animação</button><button class="button subtle" data-action="builder-stagger">Cascata</button><button class="button" data-action="copy-custom-url" data-value="${escapeHtml(item.id)}">${icons.copy} URL OBS</button><button class="button subtle ${builderGrid ? 'active' : ''}" data-action="builder-grid">Grade</button><button class="button subtle" data-action="builder-duplicate-overlay">Duplicar</button>${libraryMode ? '' : '<button class="button subtle" data-action="builder-save-platform">Salvar como modelo</button>'}<button class="button subtle" data-action="builder-export">Exportar</button><button class="button subtle danger" data-action="remove-custom-overlay" data-value="${escapeHtml(item.id)}">Excluir</button></div>
+      <div class="builder-addbar"><span>Adicionar</span>${addBar}</div>
+      <div class="builder-stage"><div class="builder-canvas ${builderGrid ? 'has-grid' : ''}" data-builder-canvas style="aspect-ratio:${item.width}/${item.height}">${customOverlayMarkup(item, true, { editor: true, animate: builderPreviewAnim })}${selection}<i class="builder-guide-v" data-guide="v" hidden></i><i class="builder-guide-h" data-guide="h" hidden></i></div><div class="builder-stage-foot"><span>Canvas ${item.width} × ${item.height}</span><small>Na fonte Navegador do OBS, use exatamente estas dimensões e a URL do overlay.</small></div></div>
+    </section>
+    <aside class="builder-inspector"><div class="builder-panel-title">Camadas</div><div class="builder-layers">${builderLayers(item)}</div><div class="builder-panel-title">${el ? escapeHtml(el.name) : 'Propriedades'}</div>${builderInspector(item, el)}</aside></div>`;
 }
 
 function renderModuleControls(key) {
@@ -2756,7 +3051,7 @@ function renderModuleHub() {
 const PLATFORM_MENU_GROUPS = [
   ['operation', 'Operação', ['live', 'championships', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
-  ['content', 'Conteúdo', ['sponsors', 'sponsor-bar']],
+  ['content', 'Conteúdo', ['sponsors', 'sponsor-bar', 'builder']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
   ['administration', 'Administração', ['access', 'backup']],
 ];
@@ -3251,7 +3546,7 @@ function outputFingerprint(layer) {
   if (layer === 'sponsor-bar') return JSON.stringify({ ...common, appearance: { sponsorBarDuration: state.appearance?.sponsorBarDuration, sponsorBarAnimationSpeed: state.appearance?.sponsorBarAnimationSpeed, sponsorBarTransition: state.appearance?.sponsorBarTransition, sponsorBarFit: state.appearance?.sponsorBarFit, sponsorBarScale: state.appearance?.sponsorBarScale, sponsorBarX: state.appearance?.sponsorBarX, sponsorBarY: state.appearance?.sponsorBarY, sponsorBarOpacity: state.appearance?.sponsorBarOpacity, sponsorBarRadius: state.appearance?.sponsorBarRadius, sponsorBarBorder: state.appearance?.sponsorBarBorder, sponsorBarShadow: state.appearance?.sponsorBarShadow, sponsorBarBackground: state.appearance?.sponsorBarBackground }, visible: state.visible.sponsorBar, items: state.sponsorBarItems, activeSponsorIndex: state.sponsorBarActiveIndex, mode: state.sponsorBarMode, video: state.sponsorBarVideo });
   if (layer === 'stats') return JSON.stringify({ ...common, appearance: appearanceFor('stats'), visible: state.visible.stats, view: state.statsView, metrics: state.statsMetrics, stats: state.stats, player: state.statsPlayer, home: state.home, away: state.away, events: (state.events || []).slice(0, 40), selectedTeams: state.selectedTeams });
   if (layer === 'lineup') return JSON.stringify({ ...common, appearance: appearanceFor('lineup'), visible: state.visible.lineup, lineupTeam: state.lineupTeam, home: state.home, away: state.away });
-  if (layer === 'custom') { const item = selectedCustomOverlay(); return JSON.stringify(item ? { ...item, transition: undefined } : null); }
+  if (layer === 'custom') { const item = selectedCustomOverlay(); return JSON.stringify(item ? { ...item, transition: undefined, logos: [state.home.logo, state.away.logo, activeSponsor()?.logo, activeSponsor()?.banner], typeface: state.typeface } : null); }
   return JSON.stringify({ ...common, appearance: appearanceFor('photoLineup'), visible: state.visible.photoLineup, lineupTeam: state.lineupTeam, squad: state.squad, matchId: state.matchId, championshipId: state.championshipId, selectedTeams: state.selectedTeams, home: state.home, away: state.away, teamCatalog, stage: state.photoLineupStage, player: state.photoLineupPlayerIndex, showSponsors: state.photoLineupShowSponsors, sponsor: activeSponsor() });
 }
 
@@ -3294,7 +3589,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-field','data-custom-field','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-field','data-custom-field','data-el-field','data-size-preset','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -3615,23 +3910,182 @@ function handleAction(action, target) {
   if (action === 'read-all-notifications') { postOperation('mark-all-notifications-read'); return; }
   if (action === 'refresh-dashboard-stats') { loadDashboardStats(); return; }
   if (action === 'module-tab') { moduleTab = target.dataset.value; render(); return; }
-  if (action === 'add-custom-overlay') {
-    const id = `overlay-${Date.now().toString(36)}`;
-    commit(draft => { draft.customOverlays.push({ id, name: `Overlay ${draft.customOverlays.length + 1}`, width: 1920, height: 1080, title: 'NOVO OVERLAY', subtitle: '', media: '', mediaType: 'image', layout: 'media-text', animation: 'fade', background: '#10131a', accent: '#2f7df6', textColor: '#ffffff', visible: false, transition: null }); }, { immediate: true });
-    selectedCustomOverlayId = id;
+  if (action === 'add-custom-overlay' || action === 'builder-template') {
+    if ((state.customOverlays || []).length >= 30) { toast('Limite de 30 overlays por partida.'); return; }
+    const template = BUILDER_TEMPLATES.find(entry => entry.key === (action === 'builder-template' ? target.dataset.value : 'blank')) || BUILDER_TEMPLATES[0];
+    let created = null;
+    commit(draft => { created = overlayFromTemplate(template, draft.customOverlays); draft.customOverlays.push(created); }, { immediate: true });
+    selectedCustomOverlayId = created.id;
+    builderSelectedEl = created.elements[0]?.id || '';
+    builderTab = 'position';
     render();
     return;
   }
-  if (action === 'select-custom-overlay') { selectedCustomOverlayId = target.dataset.value; render(); return; }
+  if (action === 'select-custom-overlay') { selectedCustomOverlayId = target.dataset.value; builderSelectedEl = ''; render(); return; }
   if (action === 'copy-custom-url') { const item = state.customOverlays.find(entry => entry.id === target.dataset.value); if (item) copyText(customOverlayUrl(item)); return; }
   if (action === 'toggle-custom-overlay') {
-    commit(draft => { const item = draft.customOverlays.find(entry => entry.id === target.dataset.value); if (!item) return; const now = Date.now(); item.visible = !item.visible; item.transition = { type: item.visible ? 'enter' : 'exit', startedAt: now, expiresAt: now + 650 }; }, { immediate: true });
+    commit(draft => {
+      const item = draft.customOverlays.find(entry => entry.id === target.dataset.value);
+      if (!item) return;
+      const now = Date.now();
+      item.visible = !item.visible;
+      const duration = customTransitionDuration(item);
+      item.transition = { type: item.visible ? 'enter' : 'exit', startedAt: now, expiresAt: now + duration };
+      item.expiresAt = item.visible && item.autoHide ? now + duration + item.autoHide * 1000 : 0;
+    }, { immediate: true });
     return;
   }
   if (action === 'remove-custom-overlay') {
+    if (!confirm('Excluir este overlay?')) return;
     commit(draft => { draft.customOverlays = draft.customOverlays.filter(entry => entry.id !== target.dataset.value); }, { immediate: true });
     selectedCustomOverlayId = state.customOverlays[0]?.id || '';
+    builderSelectedEl = '';
     render();
+    return;
+  }
+  if (action === 'builder-select') { builderSelectedEl = target.dataset.value || ''; render(); return; }
+  if (action === 'builder-tab') { builderTab = ['position', 'style', 'content', 'animation'].includes(target.dataset.value) ? target.dataset.value : 'position'; render(); return; }
+  if (action === 'builder-grid') { builderGrid = !builderGrid; render(); return; }
+  if (action === 'builder-add') {
+    const preset = BUILDER_ADD_PRESETS.find(([key]) => key === target.dataset.value);
+    const item = selectedCustomOverlay();
+    if (!preset || !item) return;
+    if (item.elements.length >= 60) { toast('Limite de 60 elementos por overlay.'); return; }
+    let newId = '';
+    commitOverlay(overlay => {
+      newId = newBuilderId('el', overlay.elements.map(el => el.id));
+      overlay.elements.push(normalizedCustomElement({ x: 35, y: 35, animIn: 'fade', ...preset[2], id: newId, name: preset[2].name || `${preset[1]} ${overlay.elements.length + 1}` }, overlay.elements.length));
+    });
+    builderSelectedEl = newId;
+    builderTab = 'position';
+    render();
+    return;
+  }
+  if (action === 'builder-remove-el') { const id = builderSelectedEl; commitOverlay(overlay => { overlay.elements = overlay.elements.filter(el => el.id !== id); }); builderSelectedEl = ''; render(); return; }
+  if (action === 'builder-dup-el') {
+    let newId = '';
+    commitOverlay(overlay => {
+      const index = overlay.elements.findIndex(el => el.id === builderSelectedEl);
+      if (index < 0 || overlay.elements.length >= 60) return;
+      newId = newBuilderId('el', overlay.elements.map(el => el.id));
+      overlay.elements.splice(index + 1, 0, normalizedCustomElement({ ...overlay.elements[index], id: newId, name: `${overlay.elements[index].name} (cópia)`, x: overlay.elements[index].x + 2, y: overlay.elements[index].y + 2 }, index + 1));
+    });
+    if (newId) builderSelectedEl = newId;
+    render();
+    return;
+  }
+  if (action === 'builder-z') {
+    const [rawId, rawDirection] = String(target.dataset.value || '').split('|');
+    const id = rawDirection ? rawId : builderSelectedEl;
+    const direction = rawDirection || rawId;
+    commitOverlay(overlay => {
+      const index = overlay.elements.findIndex(el => el.id === id);
+      if (index < 0) return;
+      const [moved] = overlay.elements.splice(index, 1);
+      const to = direction === 'front' ? overlay.elements.length : direction === 'back' ? 0 : direction === 'up' ? Math.min(overlay.elements.length, index + 1) : Math.max(0, index - 1);
+      overlay.elements.splice(to, 0, moved);
+    });
+    render();
+    return;
+  }
+  if (action === 'builder-toggle') {
+    const [id, field] = String(target.dataset.value || '').split('|');
+    if (!['visible', 'locked'].includes(field)) return;
+    commitOverlay(overlay => { const el = overlay.elements.find(entry => entry.id === id); if (el) el[field] = !el[field]; });
+    render();
+    return;
+  }
+  if (action === 'builder-align') {
+    commitOverlay(overlay => {
+      const el = overlay.elements.find(entry => entry.id === builderSelectedEl);
+      if (!el) return;
+      const map = { left: () => { el.x = 0; }, hcenter: () => { el.x = Math.round((100 - el.w) / 2 * 10) / 10; }, right: () => { el.x = Math.round((100 - el.w) * 10) / 10; }, top: () => { el.y = 0; }, vmiddle: () => { el.y = Math.round((100 - el.h) / 2 * 10) / 10; }, bottom: () => { el.y = Math.round((100 - el.h) * 10) / 10; } };
+      map[target.dataset.value]?.();
+    });
+    render();
+    return;
+  }
+  if (action === 'builder-clear') {
+    const field = target.dataset.value;
+    commitOverlay(overlay => {
+      if (field === 'canvasBg') overlay.canvasBg = '';
+      else { const el = overlay.elements.find(entry => entry.id === builderSelectedEl); if (el && ['fill', 'fill2'].includes(field)) el[field] = ''; }
+    });
+    render();
+    return;
+  }
+  if (action === 'builder-token') {
+    commitOverlay(overlay => {
+      const el = overlay.elements.find(entry => entry.id === builderSelectedEl);
+      if (el && el.type === 'text') el.text = `${el.text}${el.text && !/\s$/.test(el.text) ? ' ' : ''}${target.dataset.value}`.slice(0, 400);
+    });
+    render();
+    return;
+  }
+  if (action === 'builder-stagger') {
+    commitOverlay(overlay => { overlay.elements.filter(el => el.visible).forEach((el, index) => { el.delay = Math.min(10000, index * 120); if (el.animIn === 'none') el.animIn = 'fade'; }); });
+    toast('Entrada em cascata aplicada: cada elemento entra 120 ms depois do anterior.');
+    render();
+    return;
+  }
+  if (action === 'builder-play') {
+    const item = selectedCustomOverlay();
+    if (!item) return;
+    const duration = customTransitionDuration(item);
+    builderPreviewAnim = target.dataset.value === 'exit' ? 'exit' : 'enter';
+    render();
+    setTimeout(() => {
+      if (target.dataset.value === 'both') { builderPreviewAnim = 'exit'; render(); setTimeout(() => { builderPreviewAnim = ''; render(); }, duration + 250); }
+      else { builderPreviewAnim = ''; render(); }
+    }, duration + 350);
+    return;
+  }
+  if (action === 'builder-duplicate-overlay') {
+    const item = selectedCustomOverlay();
+    if (!item || (state.customOverlays || []).length >= 30) { toast('Limite de 30 overlays por partida.'); return; }
+    let created = null;
+    commit(draft => { created = { ...JSON.parse(JSON.stringify(selectedCustomOverlay(draft))), id: newBuilderId('overlay', draft.customOverlays.map(entry => entry.id)), visible: false, transition: null, expiresAt: 0 }; created.name = `${created.name} (cópia)`.slice(0, 80); draft.customOverlays.push(created); }, { immediate: true });
+    selectedCustomOverlayId = created.id;
+    render();
+    return;
+  }
+  if (action === 'builder-use-platform') {
+    const model = platformOverlays.find(entry => entry.id === target.dataset.value);
+    if (!model || (state.customOverlays || []).length >= 30) { toast(model ? 'Limite de 30 overlays por partida.' : 'Modelo não encontrado.'); return; }
+    let created = null;
+    commit(draft => {
+      created = { ...JSON.parse(JSON.stringify(model)), id: newBuilderId('overlay', draft.customOverlays.map(entry => entry.id)), visible: false, transition: null, expiresAt: 0 };
+      draft.customOverlays.push(created);
+    }, { immediate: true });
+    selectedCustomOverlayId = created.id;
+    builderSelectedEl = '';
+    toast('Modelo copiado para esta partida. Mídias enviadas continuam apontando para o arquivo original.');
+    render();
+    return;
+  }
+  if (action === 'builder-save-platform') {
+    const item = selectedCustomOverlay();
+    if (!item) return;
+    fetch(`/api/state?room=${BUILDER_LIBRARY_ROOM}&ts=${Date.now()}`, { cache: 'no-store' })
+      .then(response => response.json())
+      .then(remote => {
+        const library = remote?.updatedAt ? normalizeState(remote) : createDefaultState();
+        if (library.customOverlays.length >= 30) throw new Error('limite');
+        const copy = { ...JSON.parse(JSON.stringify(item)), id: newBuilderId('overlay', library.customOverlays.map(entry => entry.id)), visible: false, transition: null, expiresAt: 0 };
+        library.customOverlays.push(copy);
+        library.updatedAt = Date.now();
+        return fetch(`/api/state?room=${BUILDER_LIBRARY_ROOM}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(library) });
+      })
+      .then(response => { if (!response.ok) throw new Error('falha'); toast('Modelo salvo na plataforma. Ele aparece em todas as partidas.'); loadPlatformOverlays(true); })
+      .catch(error => toast(error.message === 'limite' ? 'A biblioteca já tem 30 modelos.' : 'Não foi possível salvar o modelo.'));
+    return;
+  }
+  if (action === 'builder-export') {
+    const item = selectedCustomOverlay();
+    if (!item) return;
+    const { name, width, height, canvasBg, autoHide, elements } = item;
+    downloadTextFile(`overlay-${teamId(name, 'overlay')}.json`, 'application/json', JSON.stringify({ format: 'juventude-overlay', version: 1, overlay: { name, width, height, canvasBg, autoHide, elements } }, null, 2));
+    toast('Overlay exportado. Mídias enviadas continuam apontando para esta partida; prefira escudos e patrocinador como dados ao vivo para reaproveitar em outras salas.');
     return;
   }
   if (action === 'hide-all') {
@@ -3644,7 +4098,7 @@ function handleAction(action, target) {
       if (draft.visible.stats) draft.statsTransition = { type: 'exit', startedAt: now, expiresAt: now + statsMotionDuration() };
       if (draft.visible.lineup) draft.lineupTransition = { type: 'exit', startedAt: now, expiresAt: now + 600 };
       if (draft.visible.photoLineup) draft.photoLineupTransition = { type: 'exit', startedAt: now, expiresAt: now + 900 };
-      for (const item of draft.customOverlays || []) { if (item.visible) { item.visible = false; item.transition = { type: 'exit', startedAt: now, expiresAt: now + 650 }; } }
+      for (const item of draft.customOverlays || []) { if (item.visible) { item.visible = false; item.transition = { type: 'exit', startedAt: now, expiresAt: now + customTransitionDuration(item) }; item.expiresAt = 0; } }
       draft.visible = { ...draft.visible, scoreboard: false, sponsor: false, sponsorBar: false, lineup: false, photoLineup: false, stats: false };
       draft.photoLineupAuto = { running: false, nextAt: 0 };
       draft.sponsorLoop = false; draft.sponsorExpiresAt = 0; draft.sponsorNextIndex = null;
@@ -4451,6 +4905,133 @@ const finishTacticalDrag = () => {
 app.addEventListener('pointerup', finishTacticalDrag);
 app.addEventListener('pointercancel', finishTacticalDrag);
 
+// ===== Builder: arrastar, redimensionar (com encaixe nas guias) e atalhos de teclado =====
+let builderDrag = null;
+
+function builderSnapPoints(item, skipId) {
+  const xs = [0, 50, 100];
+  const ys = [0, 50, 100];
+  for (const other of item.elements) {
+    if (other.id === skipId || !other.visible) continue;
+    xs.push(other.x, other.x + other.w / 2, other.x + other.w);
+    ys.push(other.y, other.y + other.h / 2, other.y + other.h);
+  }
+  return { xs, ys };
+}
+
+// Devolve o menor deslocamento que encosta algum dos pontos numa guia (até 0,8% do canvas).
+function builderSnapDelta(points, candidates) {
+  let best = null;
+  for (const point of points) for (const candidate of candidates) {
+    const delta = candidate - point;
+    if (Math.abs(delta) <= 0.8 && (best === null || Math.abs(delta) < Math.abs(best.delta))) best = { delta, guide: candidate };
+  }
+  return best;
+}
+
+app.addEventListener('pointerdown', event => {
+  if (!isAdminPanel || event.button > 0) return;
+  let canvas = event.target.closest?.('[data-builder-canvas]');
+  if (!canvas) return;
+  const item = selectedCustomOverlay();
+  if (!item) return;
+  const handle = event.target.closest('[data-el-handle]');
+  const node = event.target.closest('[data-el-id]');
+  const shift = event.shiftKey;
+  const start = { x: event.clientX, y: event.clientY };
+  if (!handle && !node) { if (builderSelectedEl) { builderSelectedEl = ''; render(); } return; }
+  event.preventDefault();
+  const id = handle ? builderSelectedEl : node.dataset.elId;
+  if (id !== builderSelectedEl) { builderSelectedEl = id; render(); canvas = document.querySelector('[data-builder-canvas]'); }
+  const el = selectedBuilderElement(item);
+  if (!el || el.locked || !canvas) return;
+  builderDrag = { mode: handle ? 'resize' : 'move', handle: handle?.dataset.elHandle || '', id, box: canvas.getBoundingClientRect(), start, orig: { x: el.x, y: el.y, w: el.w, h: el.h }, next: null, shift, snaps: builderSnapPoints(item, id) };
+});
+
+app.addEventListener('pointermove', event => {
+  if (!builderDrag) return;
+  const drag = builderDrag;
+  const dx = (event.clientX - drag.start.x) / drag.box.width * 100;
+  const dy = (event.clientY - drag.start.y) / drag.box.height * 100;
+  let { x, y, w, h } = drag.orig;
+  let guideX = null;
+  let guideY = null;
+  if (drag.mode === 'move') {
+    x += dx; y += dy;
+    if (!event.altKey) {
+      const snapX = builderSnapDelta([x, x + w / 2, x + w], drag.snaps.xs);
+      const snapY = builderSnapDelta([y, y + h / 2, y + h], drag.snaps.ys);
+      if (snapX) { x += snapX.delta; guideX = snapX.guide; }
+      if (snapY) { y += snapY.delta; guideY = snapY.guide; }
+    }
+  } else {
+    const handle = drag.handle;
+    if (handle.includes('e')) w = drag.orig.w + dx;
+    if (handle.includes('s')) h = drag.orig.h + dy;
+    if (handle.includes('w')) { x = drag.orig.x + dx; w = drag.orig.w - dx; }
+    if (handle.includes('n')) { y = drag.orig.y + dy; h = drag.orig.h - dy; }
+    if ((event.shiftKey || drag.shift) && handle.length === 2) {
+      const ratio = drag.orig.w / drag.orig.h;
+      const scale = Math.max(w / drag.orig.w, h / drag.orig.h);
+      w = drag.orig.w * scale; h = w / ratio;
+      if (handle.includes('w')) x = drag.orig.x + drag.orig.w - w;
+      if (handle.includes('n')) y = drag.orig.y + drag.orig.h - h;
+    }
+    if (!event.altKey) {
+      const moving = handle.includes('e') ? [x + w] : handle.includes('w') ? [x] : [];
+      const movingY = handle.includes('s') ? [y + h] : handle.includes('n') ? [y] : [];
+      const snapX = moving.length ? builderSnapDelta(moving, drag.snaps.xs) : null;
+      const snapY = movingY.length ? builderSnapDelta(movingY, drag.snaps.ys) : null;
+      if (snapX) { if (handle.includes('e')) w += snapX.delta; else { x += snapX.delta; w -= snapX.delta; } guideX = snapX.guide; }
+      if (snapY) { if (handle.includes('s')) h += snapY.delta; else { y += snapY.delta; h -= snapY.delta; } guideY = snapY.guide; }
+    }
+    w = Math.max(1, w); h = Math.max(1, h);
+  }
+  drag.next = { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, w: Math.round(w * 10) / 10, h: Math.round(h * 10) / 10 };
+  for (const node of document.querySelectorAll(`[data-el-id="${drag.id}"], [data-el-selection]`)) {
+    node.style.left = `${drag.next.x}%`; node.style.top = `${drag.next.y}%`; node.style.width = `${drag.next.w}%`; node.style.height = `${drag.next.h}%`;
+  }
+  const guideV = document.querySelector('[data-guide="v"]');
+  const guideH = document.querySelector('[data-guide="h"]');
+  if (guideV) { guideV.hidden = guideX === null; if (guideX !== null) guideV.style.left = `${guideX}%`; }
+  if (guideH) { guideH.hidden = guideY === null; if (guideY !== null) guideH.style.top = `${guideY}%`; }
+});
+
+const finishBuilderDrag = () => {
+  const drag = builderDrag;
+  builderDrag = null;
+  document.querySelectorAll('[data-guide]').forEach(guide => { guide.hidden = true; });
+  if (!drag?.next) return;
+  commitOverlay(item => { const el = item.elements.find(entry => entry.id === drag.id); if (el) Object.assign(el, drag.next); }, { immediate: true });
+};
+app.addEventListener('pointerup', finishBuilderDrag);
+app.addEventListener('pointercancel', finishBuilderDrag);
+
+document.addEventListener('keydown', event => {
+  if (!isAdminPanel || managementModule !== 'builder' || event.ctrlKey && event.key !== 'd' || event.metaKey && event.key !== 'd') return;
+  const tag = event.target?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable) return;
+  const item = selectedCustomOverlay();
+  const el = selectedBuilderElement(item);
+  if (!el) return;
+  const step = event.shiftKey ? 2 : 0.5;
+  const arrows = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+  if (arrows[event.key] && !el.locked) {
+    event.preventDefault();
+    const [dx, dy] = arrows[event.key];
+    commitOverlay(overlay => { const target = overlay.elements.find(entry => entry.id === el.id); if (target) { target.x = Math.round((target.x + dx) * 10) / 10; target.y = Math.round((target.y + dy) * 10) / 10; } }, { backup: false });
+  } else if (event.key === 'Delete' || event.key === 'Backspace') {
+    event.preventDefault();
+    handleAction('builder-remove-el', { dataset: {} });
+  } else if ((event.ctrlKey || event.metaKey) && event.key === 'd') {
+    event.preventDefault();
+    handleAction('builder-dup-el', { dataset: {} });
+  } else if (event.key === 'Escape') {
+    builderSelectedEl = '';
+    render();
+  }
+});
+
 app.addEventListener('click', event => {
   if (event.target.matches('[data-backdrop]')) { drawer = null; render(); return; }
   const actionable = event.target.closest('[data-action]');
@@ -4495,15 +5076,22 @@ app.addEventListener('input', event => {
   if (target.matches('[data-portal-team-field], [data-portal-athlete-field], [data-portal-staff-name], [data-portal-staff-role], [data-portal-coach-name]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
   if (target.matches('[data-custom-field]')) {
     const field = target.dataset.customField;
-    commit(draft => {
-      const item = draft.customOverlays.find(entry => entry.id === selectedCustomOverlayId);
-      if (!item) return;
+    commitOverlay(item => {
       if (field === 'width') item.width = clampNumber(target.value, 200, 3840, item.width);
       else if (field === 'height') item.height = clampNumber(target.value, 100, 2160, item.height);
-      else if (['background','accent','textColor'].includes(field)) item[field] = safeColor(target.value, item[field]);
-      else if (field === 'layout') item.layout = ['media','text','media-text'].includes(target.value) ? target.value : 'media-text';
-      else if (field === 'animation') item.animation = ['fade','slide','zoom'].includes(target.value) ? target.value : 'fade';
-      else item[field] = target.value.slice(0, field === 'subtitle' ? 240 : field === 'title' ? 120 : 80);
+      else if (field === 'canvasBg') item.canvasBg = safeColor(target.value, '');
+      else if (field === 'autoHide') item.autoHide = clampNumber(target.value, 0, 3600, 0);
+      else if (field === 'name') item.name = target.value.slice(0, 80);
+    }, { backup: false });
+    return;
+  }
+  if (target.matches('[data-el-field]')) {
+    const field = target.dataset.elField;
+    const value = target.type === 'checkbox' ? (field === 'transform' ? (target.checked ? 'uppercase' : 'none') : target.checked) : target.value;
+    commitOverlay(item => {
+      const el = item.elements.find(entry => entry.id === builderSelectedEl);
+      if (!el) return;
+      Object.assign(el, normalizedCustomElement({ ...el, [field]: value }, 0), { id: el.id });
     }, { backup: false });
     return;
   }
@@ -4695,6 +5283,11 @@ app.addEventListener('input', event => {
 
 app.addEventListener('change', event => {
   const target = event.target;
+  if (target.matches('[data-size-preset]')) {
+    const [width, height] = String(target.value).split('x').map(Number);
+    if (width && height) commitOverlay(item => { item.width = clampNumber(width, 200, 3840, item.width); item.height = clampNumber(height, 100, 2160, item.height); });
+    return;
+  }
   if (target.matches('#standings-championship')) { standingsChampionshipId = target.value; standingsSummaryId = ''; standingsLoadedAt = 0; render(); return; }
   if (target.matches('[data-admin-role]')) {
     const id = target.dataset.adminRole;
@@ -4717,14 +5310,43 @@ app.addEventListener('change', event => {
     return;
   }
   if (target.matches('[data-portal-team-logo], [data-portal-athlete-photo], [data-portal-staff-photo], [data-portal-coach-photo], [data-portal-formation]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
-  if (target.matches('[data-custom-media]') && target.files?.[0]) {
+  if (target.matches('[data-builder-import]') && target.files?.[0]) {
     const file = target.files[0];
-    const overlayId = target.dataset.customMedia;
+    if (file.size > 1_000_000) { toast('Arquivo grande demais para um overlay exportado.'); return; }
+    file.text().then(text => {
+      const data = JSON.parse(text);
+      if (data?.format !== 'juventude-overlay' || !data.overlay || typeof data.overlay !== 'object') throw new Error('formato');
+      const source = data.overlay;
+      if ((state.customOverlays || []).length >= 30) { toast('Limite de 30 overlays por partida.'); return; }
+      let created = null;
+      commit(draft => {
+        created = { ...overlayFromTemplate({ key: 'import', name: 'Importado', width: clampNumber(source.width, 200, 3840, 1920), height: clampNumber(source.height, 100, 2160, 1080), elements: [] }, draft.customOverlays), name: String(source.name || 'Overlay importado').slice(0, 80), canvasBg: source.canvasBg ? safeColor(source.canvasBg, '') : '', autoHide: clampNumber(source.autoHide, 0, 3600, 0) };
+        created.elements = normalizedCustomElements({ elements: Array.isArray(source.elements) ? source.elements : [] });
+        draft.customOverlays.push(created);
+      }, { immediate: true });
+      selectedCustomOverlayId = created.id;
+      builderSelectedEl = '';
+      toast('Overlay importado.');
+      render();
+    }).catch(() => toast('Arquivo inválido: use um overlay exportado por este Builder.'));
+    target.value = '';
+    return;
+  }
+  if (target.matches('[data-el-media]') && target.files?.[0]) {
+    const file = target.files[0];
+    const [overlayId, elementId] = target.dataset.elMedia.split('|');
     const isVideo = file.type.startsWith('video/');
-    if ((!isVideo && !file.type.startsWith('image/')) || file.size > 50_000_000) { toast('Escolha uma imagem ou vídeo de até 50 MB.'); return; }
-    fetch(`/api/assets/${encodeURIComponent(ROOM_ID)}/custom-${encodeURIComponent(overlayId)}`, { method: 'PUT', headers: { 'content-type': file.type || (isVideo ? 'video/mp4' : 'image/png') }, body: file })
+    if ((!isVideo && !file.type.startsWith('image/')) || file.size > 25_000_000) { toast('Escolha uma imagem ou vídeo de até 25 MB.'); return; }
+    fetch(`/api/assets/${encodeURIComponent(ROOM_ID)}/custom-${encodeURIComponent(overlayId)}-${encodeURIComponent(elementId)}`, { method: 'PUT', headers: { 'content-type': file.type || (isVideo ? 'video/mp4' : 'image/png') }, body: file })
       .then(response => { if (!response.ok) throw new Error(); return response.json(); })
-      .then(result => { commit(draft => { const item = draft.customOverlays.find(entry => entry.id === overlayId); if (item) { item.media = `${result.url}?v=${Date.now()}`; item.mediaType = isVideo ? 'video' : 'image'; } }, { immediate: true }); toast('Mídia adicionada ao overlay.'); })
+      .then(result => {
+        commit(draft => {
+          const item = draft.customOverlays.find(entry => entry.id === overlayId);
+          const el = item?.elements.find(entry => entry.id === elementId);
+          if (el) { el.src = `${result.url}?v=${Date.now()}`; el.type = isVideo ? 'video' : 'image'; }
+        }, { immediate: true });
+        toast('Mídia adicionada ao elemento.');
+      })
       .catch(() => toast('Não foi possível enviar a mídia.'));
     return;
   }
@@ -5037,6 +5659,7 @@ else {
   if (isAdminPanel) setInterval(loadOperationsData, 5000);
   if (isAdminPanel) setInterval(loadLiveRooms, 3000);
   if (isAdminPanel) setInterval(() => loadStandingsRooms(), 15000);
+  if (isAdminPanel) { loadPlatformOverlays(); setInterval(() => loadPlatformOverlays(), 10000); }
 }
 setInterval(() => {
   if (isTeamPortal) return;
@@ -5180,6 +5803,21 @@ setInterval(() => {
     if (isOutput || isPreview) render();
     else commit(() => {}, { backup: false });
   }
+  if ((state.customOverlays || []).length) {
+    const values = builderTokenValues();
+    document.querySelectorAll('[data-cel-text]').forEach(node => {
+      const next = resolveBuilderText(node.dataset.celText, values);
+      if (node.textContent !== next) node.textContent = next;
+    });
+    const expired = state.customOverlays.find(item => item.visible && item.expiresAt && item.expiresAt <= Date.now());
+    if (expired) {
+      const now = Date.now();
+      expired.visible = false;
+      expired.expiresAt = 0;
+      expired.transition = { type: 'exit', startedAt: now, expiresAt: now + customTransitionDuration(expired) };
+      if (isOutput || isPreview) render(); else commit(() => {}, { backup: false });
+    }
+  }
   const finishedCustomTransition = (state.customOverlays || []).find(item => item.transition && item.transition.expiresAt <= Date.now());
   if (finishedCustomTransition) {
     finishedCustomTransition.transition = null;
@@ -5198,6 +5836,7 @@ setInterval(() => {
 window.__overlayStudio = {
   getState: () => structuredClone(state), outputLayer, isOutput, isPreview,
   setAdminSession(status, username) { adminSession = { status, username: username || null, error: '' }; render(); },
+  refreshPlatformOverlays: () => loadPlatformOverlays(true),
   setTeamSession(status, teamId, teamName) { teamSession = { status, teamId: teamId || null, teamName: teamName || null, error: '' }; render(); },
 };
 

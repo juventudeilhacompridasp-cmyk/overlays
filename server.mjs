@@ -719,7 +719,7 @@ const server = http.createServer(async (request, response) => {
       } else if (!(await requireAdmin(request, response))) return;
       const chunks = [];
       let size = 0;
-      const maxSize = safeName === 'sponsors-wide-video' ? 50_000_000 : safeName.endsWith('-lineup-media') ? 25_000_000 : safeName.endsWith('-wide') ? 8_000_000 : 5_000_000;
+      const maxSize = safeName === 'sponsors-wide-video' ? 50_000_000 : safeName.startsWith('custom-') || safeName.endsWith('-lineup-media') ? 25_000_000 : safeName.endsWith('-wide') ? 8_000_000 : 5_000_000;
       for await (const chunk of request) {
         size += chunk.length;
         if (size > maxSize) { response.writeHead(413).end('Asset too large'); return; }
