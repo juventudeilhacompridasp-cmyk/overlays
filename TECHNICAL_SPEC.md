@@ -102,7 +102,7 @@ Todas as telas que participam da mesma transmissão devem usar o mesmo valor de 
 | `PUT /api/team-portal?token=...` | Atualiza somente a equipe autorizada |
 | `GET/PUT /api/team-athlete-photo` | Lê ou envia foto de atleta/comissão |
 | `GET/PUT /api/assets/...` | Lê ou envia escudos e mídias de overlays |
-| `GET/POST /api/operations` | Lista e altera campeonatos, partidas, avisos e logs; exige administrador |
+| `GET/POST /api/operations` | Lista e altera campeonatos, partidas, avisos, comunicados (`upsert-announcement`, `delete-announcement`) e logs; exige administrador |
 | `POST /api/team-delegation/complete` | Conclui a delegação autenticada, avisa o Super Admin e registra auditoria |
 
 ### Campeonatos, partidas e salas

@@ -172,6 +172,10 @@ try {
   const adminSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sala-admin', password: 'senha-teste-123', setupToken }) });
   adminCookie = (adminSetup.headers.get('set-cookie') || '').split(';')[0];
   verify('The local server creates the first administrator and starts a session', adminSetup.status === 200 && adminCookie.startsWith('joa_admin='));
+  const nodeOpsBefore = await (await fetch(`${baseURL}/api/operations`, { headers: { cookie: adminCookie } })).json();
+  const nodeAnnouncement = await fetch(`${baseURL}/api/operations`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: adminCookie }, body: JSON.stringify({ action: 'upsert-announcement', baseUpdatedAt: nodeOpsBefore.updatedAt || 0, item: { title: 'Aviso geral', body: 'Reunião técnica às 19h.', teamIds: [], pinned: false } }) });
+  const nodeAnnouncementData = await nodeAnnouncement.json();
+  verify('Announcements are stored by the local Node server and audited', nodeAnnouncement.status === 200 && nodeAnnouncementData.operations.announcements[0].title === 'Aviso geral' && nodeAnnouncementData.operations.logs.some(item => item.action === 'announcement.created'));
   const repeatSetup = await fetch(`${baseURL}/api/auth/admin/setup`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'outro-admin', password: 'senha-teste-123' }) });
   verify('A second setup call is rejected once an administrator exists', repeatSetup.status === 409);
   const wrongLogin = await fetch(`${baseURL}/api/auth/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'sala-admin', password: 'senha-errada' }) });
@@ -199,7 +203,7 @@ try {
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
   verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Organização', 'Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));
-  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 17);
+  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 18);
   const lineupModule = makeRuntime('/manage/lineup?room=module-lineup', { broadcast: false });
   verify('Dedicated routes share the same navigation and mark the selected overlay', lineupModule.app.innerHTML.includes('aria-label="Navegação dos overlays"') && /class="active" href="[^"]*\/manage\/lineup/.test(lineupModule.app.innerHTML));
   verify('Lineup module combines dedicated controls, isolated preview, and OBS URL access', lineupModule.app.innerHTML.includes('Direção da apresentação') && lineupModule.app.innerHTML.includes('Prévia isolada') && lineupModule.app.innerHTML.includes('data-value="photo-lineup"'));
@@ -658,6 +662,13 @@ try {
   const matchCreate = await worker.fetch(new Request('https://example.test/api/operations', { method: 'POST', body: JSON.stringify({ action: 'upsert-match', baseUpdatedAt: championshipData.operations.updatedAt, item: { championshipId, homeTeamId: 'team-test', awayTeamId: 'team-rival', room: 'copa-teste-final', kickoffAt: '2026-09-20T18:00', status: 'scheduled' } }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
   const matchData = await matchCreate.json();
   verify('An administrator can organize championships and match-specific overlay rooms', championshipCreate.status === 200 && matchCreate.status === 200 && matchData.operations.matches[0].room === 'copa-teste-final');
+  const announcementPublish = await worker.fetch(new Request('https://example.test/api/operations', { method: 'POST', body: JSON.stringify({ action: 'upsert-announcement', baseUpdatedAt: matchData.operations.updatedAt, item: { title: 'Prazo prorrogado', body: 'Novo prazo no dia 10.', teamIds: ['team-test'], pinned: true } }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  const announcementData = await announcementPublish.json();
+  const portalWithAnnouncement = await (await worker.fetch(new Request('https://example.test/api/team-portal?team=team-test'), {})).json();
+  const portalOtherTeam = await (await worker.fetch(new Request('https://example.test/api/team-portal?team=team-rival'), {})).json().catch(() => ({}));
+  verify('Announcements are published by administrators and reach only the targeted team portal (Worker)', announcementPublish.status === 200 && announcementData.operations.announcements[0].title === 'Prazo prorrogado' && (portalWithAnnouncement.context?.announcements || []).some(item => item.title === 'Prazo prorrogado') && !(portalOtherTeam.context?.announcements || []).some(item => item.title === 'Prazo prorrogado'));
+  const announcementInvalid = await worker.fetch(new Request('https://example.test/api/operations', { method: 'POST', body: JSON.stringify({ action: 'upsert-announcement', baseUpdatedAt: announcementData.operations.updatedAt, item: { title: '', body: '' } }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
+  verify('Announcements require a title and message', announcementInvalid.status === 400);
   const staleOperationWrite = await worker.fetch(new Request('https://example.test/api/operations', { method: 'POST', body: JSON.stringify({ action: 'mark-all-notifications-read', baseUpdatedAt: championshipData.operations.updatedAt }), headers: { 'content-type': 'application/json', cookie: workerAdminCookie } }), {});
   verify('Concurrent Super Admin updates reject stale operational data', staleOperationWrite.status === 409);
   const delegationComplete = await worker.fetch(new Request('https://example.test/api/team-delegation/complete', { method: 'POST', body: JSON.stringify({ teamId: 'team-test' }), headers: { 'content-type': 'application/json', cookie: teamCookie } }), {});

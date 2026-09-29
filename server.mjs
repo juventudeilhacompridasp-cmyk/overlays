@@ -58,6 +58,7 @@ function operationsStore() {
   store.logs = Array.isArray(store.logs) ? store.logs : [];
   store.delegationStatus = store.delegationStatus && typeof store.delegationStatus === 'object' ? store.delegationStatus : {};
   store.teamHistory = store.teamHistory && typeof store.teamHistory === 'object' ? store.teamHistory : {};
+  store.announcements = Array.isArray(store.announcements) ? store.announcements : [];
   return store;
 }
 
@@ -127,6 +128,7 @@ function teamContext(operations, catalog, teamId) {
   const nameOf = id => (teams.find(item => item.id === id) || {}).name || id;
   return {
     championships: operations.championships.map(item => ({ id: item.id, name: item.name, season: item.season, status: item.status, startDate: item.startDate, endDate: item.endDate })),
+    announcements: (operations.announcements || []).filter(item => !item.teamIds || !item.teamIds.length || item.teamIds.includes(teamId)).slice(0, 30).map(item => ({ id: item.id, title: item.title, body: item.body, pinned: Boolean(item.pinned), createdAt: item.createdAt })),
     matches: operations.matches.filter(match => match.homeTeamId === teamId || match.awayTeamId === teamId).map(match => ({ id: match.id, championshipId: match.championshipId, homeTeamId: match.homeTeamId, awayTeamId: match.awayTeamId, homeName: nameOf(match.homeTeamId), awayName: nameOf(match.awayTeamId), kickoffAt: match.kickoffAt, venue: match.venue, round: match.round, status: match.status, registrationDeadline: match.registrationDeadline || '' })),
   };
 }
@@ -473,6 +475,21 @@ const server = http.createServer(async (request, response) => {
         const existing = store.matches.find(entry => entry.id === id);
         store.matches = store.matches.filter(entry => entry.id !== id);
         if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
+      } else if (action === 'upsert-announcement') {
+        const item = candidate.item || {};
+        const title = String(item.title || '').trim().slice(0, 120);
+        const text = String(item.body || '').trim().slice(0, 2000);
+        if (!title || !text) { sendJson(response, 400, { ok: false, error: 'Informe título e mensagem.' }); return; }
+        const id = safeId(item.id, 'aviso-' + Date.now().toString(36));
+        const previous = store.announcements.find(entry => entry.id === id);
+        const entry = { id, title, body: text, teamIds: (Array.isArray(item.teamIds) ? item.teamIds : []).map(safeId).filter(Boolean).slice(0, 100), pinned: Boolean(item.pinned), createdAt: previous ? previous.createdAt : Date.now(), updatedAt: Date.now(), author: admin.username };
+        store.announcements = [entry, ...store.announcements.filter(existing => existing.id !== id)].slice(0, 100);
+        addAudit(store, previous ? 'announcement.updated' : 'announcement.created', admin.username, title, entry.teamIds.length ? entry.teamIds.length + ' equipe(s)' : 'Todas as equipes');
+      } else if (action === 'delete-announcement') {
+        const id = safeId(candidate.id);
+        const existing = store.announcements.find(entry => entry.id === id);
+        store.announcements = store.announcements.filter(entry => entry.id !== id);
+        if (existing) addAudit(store, 'announcement.deleted', admin.username, existing.title);
       } else if (action === 'review-delegation') {
         const teamId = safeId(candidate.teamId);
         const reviewedTeam = (sharedStates.__team_catalog__ || { teams: [] }).teams.find(entry => entry.id === teamId);
