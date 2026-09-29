@@ -26,6 +26,31 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+### Adicionado
+- Apresentação da equipe (`photo-lineup`): três novos estilos em `appearance.photoLineupStyle`, inspirados em
+  transmissões profissionais — `premier` (blocos de cor da equipe, cortes diagonais e placa branca de nome),
+  `champions` (azul profundo, filete dourado e número em círculo) e `diagonal` (cards em paralelogramo).
+  Os valores antigos (`editorial`, `cards`, `glass`) continuam válidos; estados sem valor usam `editorial`.
+- Novo campo `appearance.photoLineupAnimation` (`slide` padrão, `wipe`, `rise`, `zoom`, `split`, `cascade`),
+  aplicado à entrada/saída e à troca de painel (titulares, individual, esquema, reservas). O overlay recebe a
+  classe `photo-lineup-anim-<valor>`; valores desconhecidos caem em `slide`. No modo OBS as variantes usam apenas
+  transform/opacidade (sem clip-path animado), então o desempenho do Browser Source não muda. O esquema tático e
+  os reservas ganharam entrada em cascata (bolinhas com `scale`, sem alterar o posicionamento).
+- Campo tático: marcação da pequena área e da marca do pênalti, e goleiro destacado em amarelo.
+- Barra de patrocinadores (horizontal): `appearance.sponsorBarBorder` (`none`, `thin` padrão, `accent`) e
+  `appearance.sponsorBarShadow` (`none` padrão, `soft`, `strong`), refletidos na saída 1500 × 200 e no programa.
+  Estados antigos recebem os padrões por mesclagem com `defaultAppearance()`.
+- Nova ação `appearance-option` (`data-value="campo|valor"`), validada contra `OVERLAY_STYLE_OPTIONS`, usada pelos
+  seletores visuais; e `sponsor-bar-preset` (Limpa, Destaque, Discreta) que grava um conjunto coerente de valores.
+
+### Alterado
+- Tela de aparência da barra de patrocinadores reorganizada: prévia ao vivo da barra (1500 × 200) com estado
+  NO AR/FORA DO AR, predefinições, seções Transição, Arte e acabamento e Exibição, e botões visuais no lugar dos
+  selects de transição e ajuste da mídia. Os sliders de escala, opacidade, arredondamento e cor de fundo mantêm
+  `data-appearance`.
+- Estilo e animação da apresentação passaram a ser escolhidos por grades visuais (aba Aparência e módulo
+  Escalações) em vez do select "Estilo da apresentação com fotos"; o formato dos dados gravados não mudou.
+
 ## [30] - 2026-09-29
 
 ### Adicionado
