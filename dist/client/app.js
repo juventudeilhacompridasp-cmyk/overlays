@@ -58,11 +58,12 @@ const MANAGEMENT_MODULES = [
   { key: 'lineup', label: 'Escalações', caption: 'Titulares, reservas, treinador e tática', layer: 'photo-lineup', icon: icons.users },
   { key: 'sponsors', label: 'Patrocinadores', caption: 'Marcas, formatos e looping', layer: 'sponsor', icon: icons.layers },
   { key: 'sponsor-bar', label: 'Barra de Patrocinadores', caption: 'Saída independente 1500 × 200', layer: 'sponsor-bar', icon: icons.layers },
+  { key: 'stats', label: 'Estatísticas', caption: 'Comparativo, gols e cartões, destaque do atleta', layer: 'stats', icon: icons.list },
   { key: 'builder', label: 'Builder de Overlays', caption: 'Crie saídas independentes sem desenvolvimento', layer: 'custom', icon: icons.layers },
   { key: 'pregame', label: 'Resumo pré-jogo', caption: 'Consulta rápida para narração', layer: 'all', icon: icons.list },
   { key: 'report', label: 'Relatório', caption: 'Histórico completo da partida', layer: 'all', icon: icons.text },
-  { key: 'delegations', label: 'Delegações', caption: 'Pendências, revisão, prazos e histórico das equipes', layer: 'all', icon: icons.users },
   { key: 'teams', label: 'Times', caption: 'Elencos e escudos', layer: 'all', icon: icons.list },
+  { key: 'delegations', label: 'Delegações', caption: 'Pendências, revisão, prazos e histórico das equipes', layer: 'all', icon: icons.users },
   { key: 'appearance', label: 'Aparência', caption: 'Estilos, posições e animações', layer: 'all', icon: icons.eye },
   { key: 'audit', label: 'Avisos e logs', caption: 'Delegações concluídas e histórico de ações', layer: 'all', icon: icons.list },
   { key: 'access', label: 'Usuários/Acessos', caption: 'Administradores do painel e usuários dos times', layer: 'all', icon: icons.lock },
@@ -254,6 +255,20 @@ const FORMATIONS = {
   '3-5-2': [[8,50],[27,25],[27,50],[27,75],[50,8],[46,50],[54,30],[54,70],[50,92],[80,35],[80,65]],
 };
 
+const STATS_METRICS = [
+  { key: 'possession', label: 'Posse de bola', suffix: '%', manual: true },
+  { key: 'shots', label: 'Finalizações', manual: true },
+  { key: 'shotsOnTarget', label: 'Chutes no gol', manual: true },
+  { key: 'corners', label: 'Escanteios', manual: true },
+  { key: 'fouls', label: 'Faltas', manual: true },
+  { key: 'offsides', label: 'Impedimentos', manual: true },
+  { key: 'saves', label: 'Defesas', manual: true },
+  { key: 'goals', label: 'Gols', derived: true },
+  { key: 'yellow', label: 'Cartões amarelos', derived: true },
+  { key: 'red', label: 'Cartões vermelhos', derived: true },
+  { key: 'subs', label: 'Substituições', derived: true },
+];
+
 const TYPEFACES = {
   rajdhani: { label: 'Condensada', stack: "'Arial Narrow', 'Roboto Condensed', sans-serif" },
   oswald: { label: 'Impacto', stack: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif" },
@@ -279,6 +294,7 @@ function defaultAppearance() {
     lineupScale: 100, lineupFont: 100, lineupTypeface: 'rajdhani', lineupX: 7, lineupY: 18, lineupStyle: 'panel',
     photoLineupScale: 100, photoLineupFont: 100, photoLineupTypeface: 'rajdhani', photoLineupX: 7, photoLineupY: 12, photoLineupSurface: 96, photoLineupRadius: 2, photoLineupSponsorCount: 6, photoLineupSponsorBarSize: 100, photoLineupIndividualDuration: 3, photoLineupPanelDuration: 5, photoLineupStyle: 'editorial', photoLineupAnimation: 'slide',
     sponsorScale: 100, sponsorFont: 100, sponsorTypeface: 'rajdhani', sponsorX: 78, sponsorY: 7, sponsorFormat: 'banner-name', sponsorAnimation: 'fade', sponsorAnimationSpeed: 100, sponsorDuration: 10, sponsorStyle: 'boxed',
+    statsScale: 100, statsFont: 100, statsTypeface: 'rajdhani', statsX: 30, statsY: 56, statsStyle: 'broadcast', statsAnimation: 'rise', statsDuration: 12,
     sponsorBarDuration: 10, sponsorBarAnimationSpeed: 100, sponsorBarTransition: 'fade', sponsorBarFit: 'cover', sponsorBarBorder: 'thin', sponsorBarShadow: 'none', sponsorBarScale: 100, sponsorBarX: 50, sponsorBarY: 91, sponsorBarOpacity: 100, sponsorBarRadius: 0, sponsorBarBackground: '#08090d',
     periodScale: 100, periodFont: 100, periodSurface: 100, extraTimeScale: 100,
     goalText: 'GOOOL', goalWordDuration: 2, goalTeamDuration: 2, goalAnimation: 'typewriter', cardDisplayMode: 'lower-third',
@@ -313,7 +329,7 @@ function createDefaultState() {
     typeface: 'rajdhani',
     appearance: defaultAppearance(),
     sportData: freshSportData(),
-    visible: { scoreboard: true, sponsor: false, sponsorBar: false, lineup: false, photoLineup: false },
+    visible: { scoreboard: true, sponsor: false, sponsorBar: false, lineup: false, photoLineup: false, stats: false },
     sponsor: 'PATROCINADOR',
     sponsorBanner: '',
     sponsors: [{ id: 'sponsor-1', name: 'PATROCINADOR', banner: '', logo: '', wideAsset: '', lineupMedia: '', lineupMediaType: 'image' }],
@@ -334,6 +350,12 @@ function createDefaultState() {
     lineupTeam: 'home',
     photoLineupShowSponsors: true,
     squad: {},
+    stats: defaultStats(),
+    statsView: 'compare',
+    statsMetrics: ['possession', 'shots', 'shotsOnTarget', 'corners', 'fouls'],
+    statsPlayer: { team: 'home', name: '', note: '' },
+    statsTransition: null,
+    statsExpiresAt: 0,
     photoLineupStage: 'starters',
     photoLineupPlayerIndex: 0,
     photoLineupAuto: { running: false, nextAt: 0 },
@@ -414,6 +436,10 @@ function normalizeState(saved) {
     visible: { ...defaults.visible, ...saved.visible },
     selectedTeams: { ...defaults.selectedTeams, ...(saved.selectedTeams || {}) },
     squad: normalizedSquad(saved.squad),
+    stats: normalizedStats(saved.stats),
+    statsView: ['compare', 'timeline', 'player'].includes(saved.statsView) ? saved.statsView : 'compare',
+    statsMetrics: normalizedStatsMetrics(saved.statsMetrics),
+    statsPlayer: { team: saved.statsPlayer?.team === 'away' ? 'away' : 'home', name: String(saved.statsPlayer?.name || '').slice(0, 80), note: String(saved.statsPlayer?.note || '').slice(0, 120) },
     appearance: { ...defaults.appearance, ...(saved.appearance || {}), sponsorFormat: ['text','logo-name','banner','banner-name'].includes(saved.appearance?.sponsorFormat) ? saved.appearance.sponsorFormat : defaults.appearance.sponsorFormat },
     sponsors: migratedSponsors,
     activeSponsorIndex: clampNumber(saved.activeSponsorIndex, 0, migratedSponsors.length - 1, 0),
@@ -856,6 +882,8 @@ function overlayMarkup(layer = 'all') {
   const showSponsor = (layer === 'all' || layer === 'sponsor') && (state.visible.sponsor || (sponsorTransitionActive && state.sponsorTransition.type === 'exit'));
   const sponsorBarTransitionActive = state.sponsorBarTransition && Number(state.sponsorBarTransition.expiresAt || 0) > Date.now();
   const showSponsorBar = (layer === 'all' || layer === 'sponsor-bar') && (state.visible.sponsorBar || (sponsorBarTransitionActive && state.sponsorBarTransition.type === 'exit'));
+  const statsTransitionActive = state.statsTransition && Number(state.statsTransition.expiresAt || 0) > Date.now();
+  const showStats = (layer === 'all' || layer === 'stats') && (state.visible.stats || (statsTransitionActive && state.statsTransition.type === 'exit'));
   const lineupTransitionActive = state.lineupTransition && Number(state.lineupTransition.expiresAt || 0) > Date.now();
   const showLineup = (layer === 'all' || layer === 'lineup') && (state.visible.lineup || (lineupTransitionActive && state.lineupTransition.type === 'exit'));
   const photoLineupTransitionActive = state.photoLineupTransition && Number(state.photoLineupTransition.expiresAt || 0) > Date.now();
@@ -879,11 +907,12 @@ function overlayMarkup(layer = 'all') {
     ${showSponsorBar ? renderSponsorBarOverlay() : ''}
     ${showLineup ? renderLineupOverlay() : ''}
     ${showPhotoLineup ? renderPhotoLineupOverlay() : ''}
+    ${showStats ? renderStatsOverlay() : ''}
   </div>`;
 }
 
 function previewCompositeMarkup() {
-  return ['scoreboard','event','sponsor','sponsor-bar','lineup','photo-lineup'].map(layer => overlayMarkup(layer)).join('');
+  return ['scoreboard','event','sponsor','sponsor-bar','lineup','photo-lineup','stats'].map(layer => overlayMarkup(layer)).join('');
 }
 
 const SCOREBOARD_LAYOUTS = [
@@ -998,6 +1027,105 @@ function renderSponsorOverlay() {
     return `<div class="sponsor-banner sponsor-banner-graphic sponsor-style-${escapeHtml(appearance.sponsorStyle || 'boxed')}${appearance.sponsorFormat === 'banner-name' ? ' sponsor-banner-with-name' : ''}${transitionClass}" style="${motionStyle}" data-overlay="sponsor" data-format="${escapeHtml(appearance.sponsorFormat)}">${content}${name}</div>`;
   }
   return `<div class="sponsor-banner sponsor-banner-text sponsor-style-${escapeHtml(appearance.sponsorStyle || 'boxed')}${transitionClass}" style="${motionStyle}" data-overlay="sponsor" data-format="text"><small>OFERECIMENTO</small><strong>${escapeHtml(sponsor.name)}</strong></div>`;
+}
+
+function defaultStats() {
+  const side = () => ({ shots: 0, shotsOnTarget: 0, corners: 0, fouls: 0, offsides: 0, saves: 0, possession: 50 });
+  return { home: side(), away: side() };
+}
+
+function normalizedStats(value) {
+  const base = defaultStats();
+  for (const side of ['home', 'away']) {
+    for (const key of Object.keys(base[side])) base[side][key] = clampNumber(value?.[side]?.[key], 0, key === 'possession' ? 100 : 999, base[side][key]);
+  }
+  base.away.possession = 100 - base.home.possession;
+  return base;
+}
+
+function normalizedStatsMetrics(value) {
+  const valid = STATS_METRICS.map(item => item.key);
+  const list = (Array.isArray(value) ? value : []).filter((key, index, all) => valid.includes(key) && all.indexOf(key) === index).slice(0, 6);
+  return list.length ? list : ['possession', 'shots', 'shotsOnTarget', 'corners', 'fouls'];
+}
+
+function statsMotionDuration() {
+  return 650;
+}
+
+function derivedStats() {
+  const totals = { home: { goals: Number(state.home.score || 0), yellow: 0, red: 0, subs: 0 }, away: { goals: Number(state.away.score || 0), yellow: 0, red: 0, subs: 0 } };
+  const timeline = [];
+  for (const event of [...(state.events || [])].reverse()) {
+    const side = event.team === state.home.short ? 'home' : event.team === state.away.short ? 'away' : '';
+    const title = String(event.title || '').toLocaleLowerCase('pt-BR');
+    const kind = /go+l|cesta|ponto/.test(title) ? 'goal' : /amarelo/.test(title) ? 'yellow' : /vermelho/.test(title) ? 'red' : /substitui/.test(title) ? 'sub' : '';
+    if (!side || !kind) continue;
+    if (kind === 'yellow') totals[side].yellow += 1;
+    else if (kind === 'red') totals[side].red += 1;
+    else if (kind === 'sub') totals[side].subs += 1;
+    timeline.push({ side, kind, minute: String(event.minute || ''), name: String(event.name || ''), note: String(event.note || '') });
+  }
+  return { totals, timeline };
+}
+
+function statsValue(side, key, derived) {
+  if (key === 'possession') return side === 'home' ? state.stats.home.possession : 100 - state.stats.home.possession;
+  const metric = STATS_METRICS.find(item => item.key === key);
+  return metric?.derived ? Number(derived.totals[side][key] || 0) : Number(state.stats[side][key] || 0);
+}
+
+function putStatsOnAir(draft) {
+  const now = Date.now();
+  const duration = clampNumber(draft.appearance?.statsDuration, 0, 60, 12);
+  draft.visible.stats = true;
+  draft.statsExpiresAt = duration ? now + duration * 1000 : 0;
+  draft.statsTransition = { type: 'enter', startedAt: now, expiresAt: now + statsMotionDuration() };
+}
+
+function statsIcon(kind) {
+  return kind === 'goal' ? '<i class="stats-icon stats-icon-goal"></i>' : kind === 'yellow' ? '<i class="stats-icon stats-icon-yellow"></i>' : kind === 'red' ? '<i class="stats-icon stats-icon-red"></i>' : '<i class="stats-icon stats-icon-sub">⇄</i>';
+}
+
+function renderStatsOverlay() {
+  const appearance = state.appearance || defaultAppearance();
+  const view = ['compare', 'timeline', 'player'].includes(state.statsView) ? state.statsView : 'compare';
+  const derived = derivedStats();
+  const transition = state.statsTransition && Number(state.statsTransition.expiresAt || 0) > Date.now() ? state.statsTransition.type : '';
+  const animation = OVERLAY_STYLE_OPTIONS.statsAnimation.some(([value]) => value === appearance.statsAnimation) ? appearance.statsAnimation : 'rise';
+  const style = OVERLAY_STYLE_OPTIONS.statsStyle.some(([value]) => value === appearance.statsStyle) ? appearance.statsStyle : 'broadcast';
+  const offset = motionOffset(state.statsTransition?.startedAt || (Number(state.statsTransition?.expiresAt || 0) - statsMotionDuration()), statsMotionDuration());
+  const vars = `--stats-x:${clampNumber(appearance.statsX, 0, 100, 30)}%;--stats-y:${clampNumber(appearance.statsY, 0, 100, 56)}%;--stats-scale:${clampNumber(appearance.statsScale, 60, 180, 100) / 100};--stats-font-scale:${clampNumber(appearance.statsFont, 60, 180, 100) / 100};--stats-font:${escapeHtml(appearanceFont('statsTypeface').stack)};--stats-motion-offset:${offset}ms;--stats-home:${safeColor(state.home.color)};--stats-away:${safeColor(state.away.color)}`;
+  const head = `<header class="stats-head"><div class="stats-team">${badge(state.home)}<strong>${escapeHtml(state.home.short)}</strong></div><b class="stats-score">${state.home.score} × ${state.away.score}</b><div class="stats-team stats-team-away"><strong>${escapeHtml(state.away.short)}</strong>${badge(state.away)}</div></header>`;
+  let title = 'ESTATÍSTICAS DA PARTIDA';
+  let body = '';
+  if (view === 'compare') {
+    body = `<div class="stats-rows">${normalizedStatsMetrics(state.statsMetrics).map((key, index) => {
+      const metric = STATS_METRICS.find(item => item.key === key);
+      const home = statsValue('home', key, derived);
+      const away = statsValue('away', key, derived);
+      const total = home + away;
+      const homeShare = total ? Math.round((home / total) * 100) : 50;
+      return `<div class="stats-row" style="--row:${index}"><b>${home}${metric.suffix || ''}</b><span>${escapeHtml(metric.label)}</span><b>${away}${metric.suffix || ''}</b><div class="stats-bar"><i class="stats-bar-home" style="width:${homeShare}%"></i><i class="stats-bar-away" style="width:${100 - homeShare}%"></i></div></div>`;
+    }).join('')}</div>`;
+  } else if (view === 'timeline') {
+    title = 'GOLS E CARTÕES';
+    const column = side => {
+      const items = derived.timeline.filter(item => item.side === side && item.kind !== 'sub').slice(-6);
+      return `<div class="stats-column stats-column-${side}">${items.length ? items.map((item, index) => `<div class="stats-event" style="--row:${index}">${statsIcon(item.kind)}<span>${escapeHtml(item.minute)}</span><strong>${escapeHtml(item.name || '—')}</strong></div>`).join('') : '<div class="stats-empty">Sem registros</div>'}</div>`;
+    };
+    body = `<div class="stats-columns">${column('home')}${column('away')}</div>`;
+  } else {
+    title = 'DESTAQUE DO ATLETA';
+    const side = state.statsPlayer?.team === 'away' ? 'away' : 'home';
+    const name = String(state.statsPlayer?.name || '').trim();
+    const catalogTeam = teamCatalog.find(item => item.id === state.selectedTeams?.[side]);
+    const athlete = (catalogTeam?.athletes || []).find(item => String(item.name).toLowerCase() === name.toLowerCase()) || rosterPlayers(state[side].roster).find(item => String(item.name).toLowerCase() === name.toLowerCase()) || {};
+    const mine = derived.timeline.filter(item => item.side === side && String(item.name).toLowerCase() === name.toLowerCase());
+    const count = kind => mine.filter(item => item.kind === kind).length;
+    body = `<div class="stats-player" style="--stats-side:var(--stats-${side})"><div class="stats-player-photo">${athlete.photo ? `<img src="${escapeHtml(athlete.photo)}" alt="Foto de ${escapeHtml(name)}">` : `<span>${escapeHtml(athlete.number || '—')}</span>`}</div><div class="stats-player-copy"><small>${escapeHtml(state[side].name)}${athlete.position ? ` · ${escapeHtml(athlete.position)}` : ''}</small><h3>${escapeHtml(name || 'Selecione um atleta')}</h3><div class="stats-chips"><span>${count('goal')}<small>Gols</small></span><span>${count('yellow')}<small>Amarelos</small></span><span>${count('red')}<small>Vermelhos</small></span></div>${state.statsPlayer?.note ? `<p>${escapeHtml(state.statsPlayer.note)}</p>` : ''}</div></div>`;
+  }
+  return `<section class="stats-overlay stats-view-${view} stats-style-${style} stats-anim-${animation}${transition ? ` is-${transition === 'enter' ? 'entering' : 'exiting'}` : ''}" style="${vars}" data-overlay="stats"><div class="stats-title">${title}</div>${view === 'player' ? '' : head}${body}</section>`;
 }
 
 function renderSponsorBarOverlay() {
@@ -1917,6 +2045,8 @@ const OVERLAY_STYLE_OPTIONS = {
   ],
   sponsorBarTransition: [['fade','Fade suave','Dissolve a arte'],['slide','Deslizamento','Entra e sai pelos lados'],['zoom','Zoom elegante','Aproxima levemente'],['flip','Virada 3D','Gira no eixo horizontal'],['elastic','Elástico','Entrada com ressalto']],
   sponsorBarFit: [['cover','Preencher','Corta o excesso da arte'],['contain','Conter','Mostra a arte inteira']],
+  statsStyle: [['broadcast','Painel TV','Fundo escuro com barras nas cores das equipes'],['glass','Vidro','Painel translúcido'],['minimal','Minimal','Sem painel, só texto e barras']],
+  statsAnimation: [['rise','Subida','Sobe do rodapé'],['slide','Deslize','Entra pela lateral'],['zoom','Zoom','Aproxima do centro'],['wipe','Cortina','Revela da esquerda'],['fade','Fade','Aparece suavemente']],
   sponsorBarBorder: [['none','Sem moldura'],['thin','Fina'],['accent','Destaque']],
   sponsorBarShadow: [['none','Sem sombra'],['soft','Suave'],['strong','Forte']],
   sponsorStyle: [['boxed','Box'],['clean','Limpo'],['ribbon','Faixa']],
@@ -2012,6 +2142,7 @@ function renderMonitor() {
       ${renderOverlayCard('photo-lineup','Apresentação da equipe', 'Jogadores + reservas + técnico', icons.users, state.visible.photoLineup)}
       ${renderOverlayCard('sponsor','Patrocínio', `${state.appearance?.sponsorFormat === 'banner' ? 'Banner 16:9' : 'Tarja'} · ${clampNumber(state.appearance?.sponsorDuration, 3, 60, 10)}s`, icons.layers, state.visible.sponsor)}
       ${renderOverlayCard('sponsor-bar','Barra de Patrocinadores', `1500 × 200 · ${clampNumber(state.appearance?.sponsorBarDuration, 3, 60, 10)}s`, icons.layers, state.visible.sponsorBar)}
+      ${renderOverlayCard('stats','Estatísticas', 'Comparativo · gols e cartões · atleta', icons.list, state.visible.stats)}
       ${renderOverlayCard('event','GC / evento', 'Nome + detalhes', icons.text, eventIsVisible())}
     </div></div></section>`;
 }
@@ -2265,10 +2396,11 @@ function renderModuleControls(key) {
   if (key === 'report') return renderReportModule();
   if (key === 'access') return renderAccessModule();
   let content = '';
-  if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
-  else if (moduleTab === 'settings') content = key === 'sponsor-bar' ? renderSponsorBarSettings() : `<div class="module-section">${key === 'scoreboard' ? overlayStyleControl('scoreboardStyle','Estilo do placar') + renderAppearanceComponent('Placar','Tamanho, fonte e posição','scoreboard') + renderPeriodStyleControls() + renderChampionshipTheme() : key === 'lineup' ? appearanceChoices('photoLineupStyle', 'Estilo da apresentação', 'Baseados em transmissões esportivas profissionais.', true) + appearanceChoices('photoLineupAnimation', 'Animação de entrada e troca de painel', 'Vale para entrada, saída e mudança entre titulares, esquema e reservas.') + renderAppearanceComponent('Escalação','Tamanho, fonte e posição','photoLineup') : key === 'sponsors' ? overlayStyleControl('sponsorStyle','Estilo dos patrocinadores') + renderAppearanceComponent('Patrocinador','Logo, banner ou nome','sponsor') : overlayStyleControl('eventStyle','Estilo dos eventos') + renderAppearanceComponent('Eventos','Cartões, substituições e lower thirds','event')}</div>`;
+  if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : key === 'stats' ? 'overlay-stats' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
+  else if (moduleTab === 'settings') content = renderModuleSettings(key);
   else if (moduleTab === 'media') content = key === 'sponsors' ? renderSponsorModuleControls() : key === 'sponsor-bar' ? renderSponsorWideControls() : key === 'lineup' ? `<div class="module-section">${renderRosterTab()}</div>` : key === 'scoreboard' ? `<div class="module-section">${renderTeamsTab()}</div>` : '<div class="empty-events">Este overlay não precisa de mídias próprias.</div>';
   else if (key === 'scoreboard') content = `${renderScoreboardModuleControls()}${renderPeriodExtraControls()}`;
+  else if (key === 'stats') content = renderStatsModuleControls();
   if (key === 'events' && !content) content = `<div class="module-section">${renderSportActions()}</div>${renderEvents()}`;
   if (key === 'lineup' && !content) content = `<div class="module-section">${renderRosterTab()}</div>`;
   if (key === 'sponsors' && !content) content = renderSponsorModuleControls();
@@ -2284,13 +2416,73 @@ function moduleOnAir(layer) {
   if (layer === 'photo-lineup') return state.visible.photoLineup;
   if (layer === 'sponsor') return state.visible.sponsor;
   if (layer === 'sponsor-bar') return state.visible.sponsorBar;
+  if (layer === 'stats') return state.visible.stats;
   return true;
 }
 
 function renderModuleMonitor(module) {
   const active = moduleOnAir(module.layer);
-  const action = { scoreboard: 'overlay-scoreboard', event: 'overlay-event', 'photo-lineup': 'overlay-photo-lineup', sponsor: 'overlay-sponsor', 'sponsor-bar': 'overlay-sponsor-bar' }[module.layer];
+  const action = { scoreboard: 'overlay-scoreboard', event: 'overlay-event', 'photo-lineup': 'overlay-photo-lineup', sponsor: 'overlay-sponsor', 'sponsor-bar': 'overlay-sponsor-bar', stats: 'overlay-stats' }[module.layer];
   return `<section class="panel module-monitor"><div class="section-header"><div><h3 class="section-title">Prévia isolada</h3><span class="module-air-state ${active ? 'on' : ''}">${active ? 'NO AR' : 'FORA DO AR'}</span></div><div class="inline-actions">${action ? `<button class="button ${active ? '' : 'primary'}" data-action="${action}">${active ? 'Retirar' : 'Exibir'}</button>` : ''}<button class="button subtle" data-action="copy-url" data-value="${escapeHtml(module.layer)}">${icons.copy} URL OBS</button></div></div><div class="monitor-screen module-monitor-screen">${renderPreviewBackground()}<div id="preview-overlay">${overlayMarkup(module.layer)}</div>${active ? '' : '<div class="module-empty-preview">Overlay fora do ar</div>'}<div class="monitor-label">${escapeHtml(module.label.toUpperCase())} · 1920 × 1080</div></div></section>`;
+}
+
+let settingsOpen = {};
+
+const MODULE_APPEARANCE_PREFIXES = { scoreboard: ['scoreboard', 'period', 'extraTime', 'goal'], events: ['event'], lineup: ['photoLineup'], sponsors: ['sponsor'], 'sponsor-bar': ['sponsorBar'], stats: ['stats'] };
+
+function settingsFooter(key) {
+  return `<div class="settings-footer"><div><strong>Restaurar padrões</strong><small>Volta somente as configurações visuais deste módulo. Dados da partida não são alterados.</small></div><button class="button subtle" data-action="reset-module-appearance" data-value="${key}">Restaurar padrões do módulo</button></div>`;
+}
+
+function renderModuleSettings(key) {
+  if (key === 'sponsor-bar') return `${renderSponsorBarSettings()}${settingsFooter(key)}`;
+  const appearance = state.appearance || defaultAppearance();
+  const sections = key === 'scoreboard' ? [
+    ['style', 'Estilo e layout', 'Aparência geral do placar', overlayStyleControl('scoreboardStyle', 'Estilo do placar')],
+    ['size', 'Tamanho, fonte e posição', 'Ajuste fino na área 1920 × 1080', renderAppearanceComponent('Placar', 'Tamanho, fonte e posição', 'scoreboard')],
+    ['period', 'Período e tempo extra', 'Indicador de período do jogo', renderPeriodStyleControls()],
+    ['theme', 'Tema do campeonato', 'Cores compartilhadas por todos os overlays', renderChampionshipTheme()],
+  ] : key === 'lineup' ? [
+    ['style', 'Estilo e animação', 'Baseados em transmissões profissionais', `${appearanceChoices('photoLineupStyle', 'Estilo da apresentação', '', true)}${appearanceChoices('photoLineupAnimation', 'Animação de entrada e troca de painel', 'Vale para entrada, saída e troca entre titulares, esquema e reservas.')}`],
+    ['size', 'Tamanho, fonte e posição', 'Ajuste fino na área 1920 × 1080', renderAppearanceComponent('Escalação', 'Tamanho, fonte e posição', 'photoLineup')],
+  ] : key === 'sponsors' ? [
+    ['style', 'Estilo', 'Aparência do patrocínio', overlayStyleControl('sponsorStyle', 'Estilo dos patrocinadores')],
+    ['size', 'Tamanho, fonte e posição', 'Ajuste fino na área 1920 × 1080', renderAppearanceComponent('Patrocinador', 'Logo, banner ou nome', 'sponsor')],
+  ] : key === 'stats' ? [
+    ['style', 'Estilo e animação', 'Como o painel aparece e sai', `${appearanceChoices('statsStyle', 'Estilo do painel', '')}${appearanceChoices('statsAnimation', 'Animação de entrada e saída', '')}`],
+    ['size', 'Tamanho, fonte e posição', 'Ajuste fino na área 1920 × 1080', renderAppearanceComponent('Estatísticas', 'Tamanho, fonte e posição', 'stats')],
+    ['timing', 'Exibição', 'Tempo em tela', `${appearanceRange('statsDuration', 'Ocultar automaticamente após', appearance.statsDuration, 0, 60, 's')}<p class="help-text">Use 0 para manter no ar até você ocultar manualmente.</p>`],
+  ] : [
+    ['style', 'Estilo', 'Aparência dos eventos e GC', overlayStyleControl('eventStyle', 'Estilo dos eventos')],
+    ['size', 'Tamanho, fonte e posição', 'Ajuste fino na área 1920 × 1080', renderAppearanceComponent('Eventos', 'Cartões, substituições e lower thirds', 'event')],
+  ];
+  return `<div class="module-section settings-stack">${sections.map(([id, title, caption, body], index) => {
+    const sectionKey = `${key}:${id}`;
+    const open = settingsOpen[sectionKey] ?? index === 0;
+    return `<details class="settings-section" data-settings-section="${escapeHtml(sectionKey)}" ${open ? 'open' : ''}><summary><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(caption)}</small></span></summary><div class="settings-section-body">${body}</div></details>`;
+  }).join('')}${settingsFooter(key)}</div>`;
+}
+
+function renderStatsModuleControls() {
+  const derived = derivedStats();
+  const views = [['compare', 'Comparativo', 'Barras lado a lado'], ['timeline', 'Gols e cartões', 'Registros por equipe'], ['player', 'Destaque do atleta', 'Cartão de um jogador']];
+  const viewButtons = views.map(([value, label, hint]) => `<button type="button" class="appearance-choice ${state.statsView === value ? 'active' : ''}" data-action="stats-view" data-value="${value}" aria-pressed="${state.statsView === value}"><span><strong>${label}</strong><small>${hint}</small></span></button>`).join('');
+  const stepper = (side, metric) => `<div class="stats-stepper"><button type="button" class="button square subtle" data-action="stats-adjust" data-value="${side}|${metric.key}|-1" aria-label="Diminuir">−</button><b>${state.stats[side][metric.key]}</b><button type="button" class="button square subtle" data-action="stats-adjust" data-value="${side}|${metric.key}|1" aria-label="Aumentar">+</button></div>`;
+  const manualRows = STATS_METRICS.filter(metric => metric.manual && metric.key !== 'possession').map(metric => `<div class="stats-input-row"><span>${escapeHtml(metric.label)}</span>${stepper('home', metric)}${stepper('away', metric)}</div>`).join('');
+  const derivedRows = STATS_METRICS.filter(metric => metric.derived).map(metric => `<div class="stats-input-row is-derived"><span>${escapeHtml(metric.label)}</span><b>${derived.totals.home[metric.key]}</b><b>${derived.totals.away[metric.key]}</b></div>`).join('');
+  const selected = normalizedStatsMetrics(state.statsMetrics);
+  const chips = STATS_METRICS.map(metric => `<button type="button" class="access-chip ${selected.includes(metric.key) ? 'active' : ''}" data-action="stats-toggle-metric" data-value="${metric.key}" aria-pressed="${selected.includes(metric.key)}">${escapeHtml(metric.label)}</button>`).join('');
+  const side = state.statsPlayer?.team === 'away' ? 'away' : 'home';
+  const players = rosterPlayers(state[side].roster);
+  return `<div class="module-section stats-module">
+    <section class="stats-block"><div class="section-header"><div><h3 class="section-title">Visualização no ar</h3><p class="help-text">Escolha o que o overlay de estatísticas mostra. Gols, cartões e substituições vêm dos eventos registrados na partida.</p></div></div><div class="appearance-choice-grid">${viewButtons}</div></section>
+    <section class="stats-block"><div class="section-header"><div><h3 class="section-title">Indicadores do comparativo</h3><p class="help-text">Até 6 indicadores, na ordem em que forem marcados.</p></div></div><div class="access-chips" role="group" aria-label="Indicadores">${chips}</div></section>
+    <section class="stats-block"><div class="section-header"><div><h3 class="section-title">Dados da partida</h3><p class="help-text">Lance os números durante o jogo. As colunas são ${escapeHtml(state.home.short)} (esquerda) e ${escapeHtml(state.away.short)} (direita).</p></div><button class="button subtle" data-action="stats-reset">Zerar</button></div>
+      <label class="parameter-control"><span>Posse de bola <strong>${state.stats.home.possession}% × ${100 - state.stats.home.possession}%</strong></span><input type="range" min="0" max="100" step="1" value="${state.stats.home.possession}" data-stats-possession></label>
+      <div class="stats-input-head"><span></span><b>${escapeHtml(state.home.short)}</b><b>${escapeHtml(state.away.short)}</b></div>${manualRows}<div class="stats-input-head"><span>Automático (eventos)</span><b></b><b></b></div>${derivedRows}</section>
+    <section class="stats-block"><div class="section-header"><div><h3 class="section-title">Destaque do atleta</h3><p class="help-text">Usado na visualização "Destaque do atleta". Gols e cartões do atleta são contados pelos eventos com o mesmo nome.</p></div></div>
+      <div class="field-row"><div class="field"><label>Equipe</label><select data-stats-player="team"><option value="home" ${side === 'home' ? 'selected' : ''}>${escapeHtml(state.home.name)}</option><option value="away" ${side === 'away' ? 'selected' : ''}>${escapeHtml(state.away.name)}</option></select></div><div class="field"><label>Atleta</label><input data-stats-player="name" list="stats-player-options" maxlength="80" value="${escapeHtml(state.statsPlayer?.name || '')}" placeholder="Digite ou escolha"><datalist id="stats-player-options">${players.map(player => `<option value="${escapeHtml(player.name)}">${escapeHtml(player.number ? `Camisa ${player.number}` : '')}</option>`).join('')}</datalist></div></div>
+      <div class="field"><label>Observação (opcional)</label><input data-stats-player="note" maxlength="120" value="${escapeHtml(state.statsPlayer?.note || '')}" placeholder="Ex.: Artilheiro do campeonato"></div></section></div>`;
 }
 
 function renderModuleHub() {
@@ -2320,7 +2512,7 @@ function renderModuleApp() {
 }
 
 function renderMatchDashboard() {
-  const overlayLayers = ['scoreboard', 'event', 'sponsor', 'sponsor-bar', 'photo-lineup'];
+  const overlayLayers = ['scoreboard', 'event', 'sponsor', 'sponsor-bar', 'photo-lineup', 'stats'];
   const overlaysOnAir = overlayLayers.filter(layer => moduleOnAir(layer)).length;
   const summary = reportSummaryEntries({ events: state.events || [] });
   const status = state.matchEndedAt ? 'Finalizada' : state.clock.running ? 'Ao vivo' : 'Em preparação';
@@ -2613,7 +2805,7 @@ function overlayUrl(layer) {
 }
 
 function renderObsDrawer() {
-  const links = [['all','Programa completo'],['scoreboard','Placar (inclui animação de gol)'],['event','GC, cartões e identificações'],['lineup','Escalação simples'],['photo-lineup','Apresentação completa da equipe'],['sponsor','Patrocinador'],['sponsor-bar','Barra de Patrocinadores · 1500 × 200']];
+  const links = [['all','Programa completo'],['scoreboard','Placar (inclui animação de gol)'],['event','GC, cartões e identificações'],['lineup','Escalação simples'],['photo-lineup','Apresentação completa da equipe'],['sponsor','Patrocinador'],['sponsor-bar','Barra de Patrocinadores · 1500 × 200'],['stats','Estatísticas da partida']];
   const customLinks = (state.customOverlays || []).map(item => `<label class="tiny-label">${escapeHtml(item.name)} · ${item.width} × ${item.height}</label><div class="copy-row"><input readonly value="${escapeHtml(customOverlayUrl(item))}" aria-label="URL ${escapeHtml(item.name)}"><button class="button square" data-action="copy-custom-url" data-value="${escapeHtml(item.id)}" aria-label="Copiar ${escapeHtml(item.name)}">${icons.copy}</button></div>`).join('');
   return `<div class="drawer-backdrop" data-backdrop><aside class="drawer"><div class="drawer-head"><h2>Saídas individuais para o OBS</h2><button class="button square" data-action="close-drawer">${icons.close}</button></div><div class="instruction"><strong>Sala protegida: ${escapeHtml(ROOM_ID)}</strong><br>Cada item abaixo tem uma URL transparente independente. Adicione uma fonte Navegador por item no OBS e configure todas em <strong>1920 × 1080</strong>, exceto as saídas que indicam dimensões próprias.</div><div class="drawer-section"><h3>Uma URL para cada overlay</h3>${links.map(([layer,label]) => `<label class="tiny-label">${label}</label><div class="copy-row"><input readonly value="${escapeHtml(overlayUrl(layer))}" aria-label="URL ${label}"><button class="button square" data-action="copy-url" data-value="${layer}" aria-label="Copiar ${label}">${icons.copy}</button></div>`).join('')}${customLinks ? `<h3>Overlays criados no builder</h3>${customLinks}` : ''}</div><div class="drawer-section"><button class="button primary" data-action="open-output" style="width:100%">${icons.external} Abrir programa em outra aba</button><button class="button" data-action="open-preview" style="width:100%;margin-top:8px">${icons.monitor} Abrir visualização completa</button></div><div class="drawer-section"><h3>Atalhos de teclado</h3><div class="shortcut-list"><div><span>Ponto / gol mandante</span><kbd>1</kbd></div><div><span>Ponto / gol visitante</span><kbd>2</kbd></div><div><span>Iniciar / pausar cronômetro</span><kbd>Espaço</kbd></div><div><span>Mostrar / ocultar escalação simples</span><kbd>L</kbd></div><div><span>Mostrar / ocultar escalação com fotos</span><kbd>Shift L</kbd></div><div><span>Desfazer última alteração</span><kbd>Ctrl Z</kbd></div><div><span>Limpar GC / fechar janela</span><kbd>Esc</kbd></div></div></div></aside></div>`;
 }
@@ -2652,6 +2844,7 @@ function outputFingerprint(layer) {
   if (layer === 'event') return JSON.stringify({ ...common, appearance: appearanceFor('event'), activeEvent: state.activeEvent });
   if (layer === 'sponsor') return JSON.stringify({ ...common, appearance: appearanceFor('sponsor'), visible: state.visible.sponsor, sponsors: state.sponsors.map(sponsor => ({ id: sponsor.id, name: sponsor.name, banner: sponsor.banner, logo: sponsor.logo })), activeSponsorIndex: state.activeSponsorIndex });
   if (layer === 'sponsor-bar') return JSON.stringify({ ...common, appearance: { sponsorBarDuration: state.appearance?.sponsorBarDuration, sponsorBarAnimationSpeed: state.appearance?.sponsorBarAnimationSpeed, sponsorBarTransition: state.appearance?.sponsorBarTransition, sponsorBarFit: state.appearance?.sponsorBarFit, sponsorBarScale: state.appearance?.sponsorBarScale, sponsorBarX: state.appearance?.sponsorBarX, sponsorBarY: state.appearance?.sponsorBarY, sponsorBarOpacity: state.appearance?.sponsorBarOpacity, sponsorBarRadius: state.appearance?.sponsorBarRadius, sponsorBarBorder: state.appearance?.sponsorBarBorder, sponsorBarShadow: state.appearance?.sponsorBarShadow, sponsorBarBackground: state.appearance?.sponsorBarBackground }, visible: state.visible.sponsorBar, items: state.sponsorBarItems, activeSponsorIndex: state.sponsorBarActiveIndex, mode: state.sponsorBarMode, video: state.sponsorBarVideo });
+  if (layer === 'stats') return JSON.stringify({ ...common, appearance: appearanceFor('stats'), visible: state.visible.stats, view: state.statsView, metrics: state.statsMetrics, stats: state.stats, player: state.statsPlayer, home: state.home, away: state.away, events: (state.events || []).slice(0, 40), selectedTeams: state.selectedTeams });
   if (layer === 'lineup') return JSON.stringify({ ...common, appearance: appearanceFor('lineup'), visible: state.visible.lineup, lineupTeam: state.lineupTeam, home: state.home, away: state.away });
   if (layer === 'custom') { const item = selectedCustomOverlay(); return JSON.stringify(item ? { ...item, transition: undefined } : null); }
   return JSON.stringify({ ...common, appearance: appearanceFor('photoLineup'), visible: state.visible.photoLineup, lineupTeam: state.lineupTeam, squad: state.squad, matchId: state.matchId, championshipId: state.championshipId, selectedTeams: state.selectedTeams, home: state.home, away: state.away, teamCatalog, stage: state.photoLineupStage, player: state.photoLineupPlayerIndex, showSponsors: state.photoLineupShowSponsors, sponsor: activeSponsor() });
@@ -2667,6 +2860,7 @@ function outputAnimationFingerprint(layer) {
   if (layer === 'event') return ['entering','exiting'].includes(eventPhase()) ? eventPhase() : '';
   if (layer === 'sponsor') return JSON.stringify(active(state.sponsorTransition));
   if (layer === 'sponsor-bar') return JSON.stringify(active(state.sponsorBarTransition));
+  if (layer === 'stats') return JSON.stringify(active(state.statsTransition));
   if (layer === 'lineup') return JSON.stringify(active(state.lineupTransition));
   if (layer === 'photo-lineup') return JSON.stringify({ transition: active(state.photoLineupTransition), stage: active(state.photoLineupStageTransition) });
   if (layer === 'custom') return JSON.stringify(active(selectedCustomOverlay()?.transition));
@@ -2675,7 +2869,7 @@ function outputAnimationFingerprint(layer) {
 
 function renderIsolatedOutput() {
   if (typeof app.querySelector !== 'function') { app.innerHTML = overlayMarkup(outputLayer); return; }
-  const layers = outputLayer === 'all' ? ['scoreboard','event','sponsor','sponsor-bar','lineup','photo-lineup'] : [outputLayer];
+  const layers = outputLayer === 'all' ? ['scoreboard','event','sponsor','sponsor-bar','lineup','photo-lineup','stats'] : [outputLayer];
   if (!app.querySelector?.('[data-isolated-output]')) {
     app.innerHTML = `<div data-isolated-output>${layers.map(layer => `<div class="isolated-layer-slot" data-layer-slot="${layer}"></div>`).join('')}</div>`;
     outputFingerprints = {};
@@ -2695,7 +2889,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-field','data-custom-field','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search'];
+  const attributes = ['data-field','data-custom-field','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -2993,10 +3187,11 @@ function handleAction(action, target) {
       if (draft.visible.scoreboard) draft.scoreboardTransition = { type: 'exit', startedAt: now, expiresAt: now + scoreboardTransitionDuration() };
       if (draft.visible.sponsor) draft.sponsorTransition = { type: 'exit', startedAt: now, expiresAt: now + sponsorMotionDuration(draft.appearance) };
       if (draft.visible.sponsorBar) draft.sponsorBarTransition = { type: 'exit', startedAt: now, expiresAt: now + sponsorBarMotionDuration(draft.appearance) };
+      if (draft.visible.stats) draft.statsTransition = { type: 'exit', startedAt: now, expiresAt: now + statsMotionDuration() };
       if (draft.visible.lineup) draft.lineupTransition = { type: 'exit', startedAt: now, expiresAt: now + 600 };
       if (draft.visible.photoLineup) draft.photoLineupTransition = { type: 'exit', startedAt: now, expiresAt: now + 900 };
       for (const item of draft.customOverlays || []) { if (item.visible) { item.visible = false; item.transition = { type: 'exit', startedAt: now, expiresAt: now + 650 }; } }
-      draft.visible = { ...draft.visible, scoreboard: false, sponsor: false, sponsorBar: false, lineup: false, photoLineup: false };
+      draft.visible = { ...draft.visible, scoreboard: false, sponsor: false, sponsorBar: false, lineup: false, photoLineup: false, stats: false };
       draft.photoLineupAuto = { running: false, nextAt: 0 };
       draft.sponsorLoop = false; draft.sponsorExpiresAt = 0; draft.sponsorNextIndex = null;
       draft.sponsorBarLoop = false; draft.sponsorBarExpiresAt = 0; draft.sponsorBarNextIndex = null;
@@ -3578,6 +3773,52 @@ function handleAction(action, target) {
     else { drawer = { type: 'sponsor' }; render(); }
     return;
   }
+  if (action === 'overlay-stats') {
+    commit(draft => {
+      if (draft.visible.stats) {
+        const now = Date.now();
+        draft.visible.stats = false;
+        draft.statsExpiresAt = 0;
+        draft.statsTransition = { type: 'exit', startedAt: now, expiresAt: now + statsMotionDuration() };
+      } else putStatsOnAir(draft);
+    }, { immediate: true });
+    return;
+  }
+  if (action === 'stats-view') { commit(draft => { draft.statsView = ['compare', 'timeline', 'player'].includes(target.dataset.value) ? target.dataset.value : 'compare'; }, { immediate: true }); return; }
+  if (action === 'stats-adjust') {
+    const [side, metric, delta] = String(target.dataset.value || '').split('|');
+    if (!['home', 'away'].includes(side) || !(metric in state.stats.home) || metric === 'possession') return;
+    commit(draft => { draft.stats[side][metric] = clampNumber(Number(draft.stats[side][metric]) + Number(delta), 0, 999, 0); }, { immediate: true });
+    return;
+  }
+  if (action === 'stats-toggle-metric') {
+    const metric = target.dataset.value;
+    if (!STATS_METRICS.some(item => item.key === metric)) return;
+    const current = normalizedStatsMetrics(state.statsMetrics);
+    if (!current.includes(metric) && current.length >= 6) { toast('Máximo de 6 indicadores. Desmarque algum antes.'); return; }
+    if (current.includes(metric) && current.length === 1) { toast('Mantenha ao menos um indicador.'); return; }
+    commit(draft => { draft.statsMetrics = current.includes(metric) ? current.filter(item => item !== metric) : [...current, metric]; }, { immediate: true });
+    return;
+  }
+  if (action === 'stats-reset') {
+    if (!confirm('Zerar todas as estatísticas lançadas manualmente nesta partida?')) return;
+    commit(draft => { draft.stats = defaultStats(); }, { immediate: true });
+    return;
+  }
+  if (action === 'reset-module-appearance') {
+    const moduleKey = target.dataset.value;
+    const prefixes = MODULE_APPEARANCE_PREFIXES[moduleKey];
+    if (!prefixes) return;
+    if (!confirm('Restaurar os padrões visuais deste módulo? As configurações atuais serão substituídas.')) return;
+    const defaults = defaultAppearance();
+    commit(draft => {
+      for (const key of Object.keys(defaults)) {
+        if (prefixes.some(prefix => key.startsWith(prefix)) && !(moduleKey === 'sponsors' && key.startsWith('sponsorBar'))) draft.appearance[key] = defaults[key];
+      }
+    }, { immediate: true });
+    toast('Padrões do módulo restaurados.');
+    return;
+  }
   if (action === 'overlay-sponsor-bar') {
     commit(draft => {
       if (draft.visible.sponsorBar) {
@@ -3700,6 +3941,11 @@ function handleAction(action, target) {
   if (action === 'open-preview') { window.open(`${location.origin}/preview?room=${encodeURIComponent(ROOM_ID)}`, '_blank', 'noopener,noreferrer'); }
 }
 
+app.addEventListener('toggle', event => {
+  const section = event.target.closest?.('[data-settings-section]');
+  if (section) settingsOpen[section.dataset.settingsSection] = section.open;
+}, true);
+
 let tacticalDrag = null;
 app.addEventListener('pointerdown', event => {
   const dot = isAdminPanel ? event.target.closest?.('.tactical-player[data-player-id]') : null;
@@ -3737,6 +3983,19 @@ app.addEventListener('click', event => {
 app.addEventListener('input', event => {
   const target = event.target;
   if (target.matches('[data-access-search]')) { accessSearch = target.value; render(); return; }
+  if (target.matches('[data-stats-possession]')) {
+    const value = clampNumber(target.value, 0, 100, 50);
+    commit(draft => { draft.stats.home.possession = value; draft.stats.away.possession = 100 - value; }, { backup: false });
+    return;
+  }
+  if (target.matches('[data-stats-player]')) {
+    const field = target.dataset.statsPlayer;
+    commit(draft => {
+      draft.statsPlayer ||= { team: 'home', name: '', note: '' };
+      draft.statsPlayer[field] = field === 'team' ? (target.value === 'away' ? 'away' : 'home') : target.value.slice(0, field === 'name' ? 80 : 120);
+    }, { backup: false });
+    return;
+  }
   if (target.matches('[data-pw-meter]')) {
     const meter = target.closest('.field')?.querySelector('.pw-meter');
     const level = passwordStrength(target.value);
@@ -3891,12 +4150,12 @@ app.addEventListener('input', event => {
   if (target.matches('[data-appearance]')) {
     const key = target.dataset.appearance;
     commit(draft => {
-      const numericFields = ['scoreboardScale','scoreboardFont','scoreboardX','scoreboardY','scoreboardRadius','scoreboardSurface','scoreboardAccent','scoreboardAnimationSpeed','periodScale','periodFont','periodSurface','extraTimeScale','eventScale','eventFont','eventX','eventY','lineupScale','lineupFont','lineupX','lineupY','photoLineupScale','photoLineupFont','photoLineupX','photoLineupY','photoLineupSurface','photoLineupRadius','photoLineupSponsorCount','photoLineupSponsorBarSize','photoLineupIndividualDuration','photoLineupPanelDuration','sponsorScale','sponsorFont','sponsorX','sponsorY','sponsorDuration','sponsorAnimationSpeed','sponsorBarDuration','sponsorBarAnimationSpeed','sponsorBarScale','sponsorBarX','sponsorBarY','sponsorBarOpacity','sponsorBarRadius','goalWordDuration','goalTeamDuration'];
+      const numericFields = ['scoreboardScale','scoreboardFont','scoreboardX','scoreboardY','scoreboardRadius','scoreboardSurface','scoreboardAccent','scoreboardAnimationSpeed','periodScale','periodFont','periodSurface','extraTimeScale','eventScale','eventFont','eventX','eventY','lineupScale','lineupFont','lineupX','lineupY','photoLineupScale','photoLineupFont','photoLineupX','photoLineupY','photoLineupSurface','photoLineupRadius','photoLineupSponsorCount','photoLineupSponsorBarSize','photoLineupIndividualDuration','photoLineupPanelDuration','sponsorScale','sponsorFont','sponsorX','sponsorY','sponsorDuration','sponsorAnimationSpeed','sponsorBarDuration','sponsorBarAnimationSpeed','statsScale','statsFont','statsX','statsY','statsDuration','sponsorBarScale','sponsorBarX','sponsorBarY','sponsorBarOpacity','sponsorBarRadius','goalWordDuration','goalTeamDuration'];
       if (numericFields.includes(key)) {
         const isPosition = key.endsWith('X') || key.endsWith('Y');
         const bounds = {
           goalWordDuration: [1, 6], goalTeamDuration: [1, 6], sponsorDuration: [3, 60], sponsorBarDuration: [3, 60], scoreboardAnimationSpeed: [50, 160], sponsorAnimationSpeed: [50, 160], sponsorBarAnimationSpeed: [50, 160],
-          scoreboardRadius: [0, 20], scoreboardSurface: [55, 100], scoreboardAccent: [0, 8], periodScale: [60,160], periodFont: [60,160], periodSurface: [55,100], extraTimeScale: [60,160], sponsorBarScale: [60, 180], sponsorBarOpacity: [20, 100], sponsorBarRadius: [0, 24],
+          scoreboardRadius: [0, 20], scoreboardSurface: [55, 100], scoreboardAccent: [0, 8], periodScale: [60,160], periodFont: [60,160], periodSurface: [55,100], extraTimeScale: [60,160], sponsorBarScale: [60, 180], statsDuration: [0, 60], sponsorBarOpacity: [20, 100], sponsorBarRadius: [0, 24],
           photoLineupSurface: [55, 100], photoLineupRadius: [0, 20], photoLineupSponsorCount: [1, 8], photoLineupSponsorBarSize: [60, 180], photoLineupIndividualDuration: [2, 10], photoLineupPanelDuration: [3, 15],
         };
         const [minimum, maximum] = isPosition ? [0, 100] : bounds[key] || [60, 180];
@@ -4341,6 +4600,13 @@ setInterval(() => {
     }
     if (isOutput || isPreview) render();
     else commit(() => {}, { backup: false });
+  }
+  if (state.visible.stats && state.statsExpiresAt && state.statsExpiresAt <= Date.now()) {
+    const now = Date.now();
+    state.visible.stats = false;
+    state.statsExpiresAt = 0;
+    state.statsTransition = { type: 'exit', startedAt: now, expiresAt: now + statsMotionDuration() };
+    if (isOutput || isPreview) render(); else commit(() => {}, { backup: false, immediate: true });
   }
   if (state.visible.sponsorBar && state.sponsorBarMode === 'images' && state.sponsorBarExpiresAt && state.sponsorBarExpiresAt <= Date.now()) {
     const now = Date.now();

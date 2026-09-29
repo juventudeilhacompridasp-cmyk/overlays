@@ -27,6 +27,19 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 ## [Não publicado]
 
 ### Adicionado
+- Novo overlay **Estatísticas** (`/overlay?layer=stats`, módulo `/manage/stats`), com três visualizações escolhidas no
+  painel: comparativo (barras lado a lado com até 6 indicadores), gols e cartões (registros por equipe) e destaque do
+  atleta (foto, camisa, gols e cartões contados pelos eventos com o mesmo nome). Dados na sala: `state.stats`
+  (`shots`, `shotsOnTarget`, `corners`, `fouls`, `offsides`, `saves` por equipe e `possession` do mandante, com o
+  visitante sendo 100 menos a posse), `statsView`, `statsMetrics` e `statsPlayer`. Gols, cartões e substituições
+  são derivados dos eventos da linha do tempo (a equipe do evento é a sigla, como já era gravado). Aparência em
+  `appearance.stats*` (escala, fonte, posição, estilo `broadcast|glass|minimal`, animação
+  `rise|slide|zoom|wipe|fade`, `statsDuration` em segundos com 0 = manter no ar). Camada própria de visibilidade
+  (`visible.stats`, `statsTransition`, `statsExpiresAt`), URL do OBS, sincronização, "Desativar todos" e variante
+  leve (só transform/opacidade) no modo OBS. Estados antigos recebem os padrões.
+- Configurações dos módulos organizadas em seções recolhíveis (Estilo e animação, Tamanho/fonte/posição, período,
+  tema, exibição), com o estado aberto/fechado lembrado durante o uso, e botão "Restaurar padrões do módulo" que
+  volta só as chaves `appearance` daquele módulo (placar, eventos, escalação, patrocinadores, barra e estatísticas).
 - Portal da equipe (`/team`): nova aba "Campeonatos e partidas". A equipe escolhe o campeonato, inscreve os atletas que
   disputarão aquele campeonato (com número de camisa próprio opcional e esquema tático padrão do campeonato), vê as
   partidas da equipe no campeonato e define, para cada partida, titulares (até 11, com ordem que define a posição no
