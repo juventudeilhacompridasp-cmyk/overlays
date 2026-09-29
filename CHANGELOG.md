@@ -26,6 +26,18 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+### Alterado
+- Tela Usuários/Acessos (`/manage/access`) reconstruída: indicadores (administradores, times com acesso, usuários de
+  times, pedidos de senha), alerta de pedidos de redefinição (`password-reset`) com "Gerar nova senha", busca por equipe
+  ou usuário, filtro Todos/Com acesso/Sem acesso, cartões de administradores (selo "você", criação, último acesso,
+  redefinição de senha; a própria conta e o último administrador não podem ser removidos) e cartões por equipe com todos
+  os usuários, último acesso, redefinir/remover usuário, criação do primeiro acesso e medidor de força da senha.
+  A senha gerada (12 caracteres) é exibida uma única vez e copiada junto com o link e as instruções de acesso.
+  Continuam valendo os textos "Administradores do painel" e "Usuários dos times" e os ids dos campos de cadastro.
+- Backend (Node e Worker): as listas de administradores devolvem `createdAt` e `lastLoginAt`; o login de administrador
+  e de equipe grava `lastLoginAt` (também exposto em `GET /api/auth/team/credentials`); novo `PUT /api/auth/admin/accounts`
+  (`id`, `password`) redefine a senha de um administrador. Não altera sessões nem o formato das senhas.
+
 ## [32] - 2026-09-29
 
 ### Adicionado

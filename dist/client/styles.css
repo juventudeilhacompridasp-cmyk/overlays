@@ -1480,3 +1480,42 @@ body.preview-output { min-width: 0; min-height: 100vh; display: grid; place-item
 .tactical-board aside em { margin-top: .5cqw; color: rgba(255,255,255,.5); font-size: .6cqw; font-style: normal; letter-spacing: .08em; }
 .photo-lineup-style-editorial::before, .photo-lineup-style-cards::before, .photo-lineup-style-glass::before { background: var(--photo-team-color2, var(--overlay-accent)); }
 .photo-lineup-head > span { border-left-color: var(--photo-team-color2, var(--overlay-accent)); }
+
+/* Tela de usuários e acessos */
+.access-screen { display: grid; gap: 16px; }
+.access-alerts { padding: 12px 14px; display: grid; gap: 8px; border: 1px solid rgba(241,191,82,.4); border-left: 4px solid var(--yellow); border-radius: 8px; background: rgba(241,191,82,.06); }
+.access-alert-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.access-alert-row > div { display: flex; gap: 6px; }
+.access-toolbar { position: sticky; top: 0; z-index: 3; padding: 10px 0; display: flex; align-items: center; flex-wrap: wrap; gap: 10px; background: var(--bg); }
+.access-toolbar input[type="search"] { flex: 1; min-width: 220px; height: 38px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); }
+.access-chips { display: flex; gap: 6px; }
+.access-chip { height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); color: var(--muted-soft); font-size: 11px; font-weight: 700; cursor: pointer; }
+.access-chip.active { border-color: rgba(216,173,86,.62); background: rgba(216,173,86,.1); color: var(--gold); }
+.access-section { display: grid; gap: 10px; }
+.access-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; align-items: start; }
+.access-card { padding: 14px; display: grid; gap: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.access-card.is-empty { border-style: dashed; }
+.access-card-head { display: flex; align-items: center; gap: 10px; }
+.access-card-head strong { font-size: 14px; }
+.access-card-head small { display: block; color: var(--muted); font-size: 11px; }
+.access-avatar { width: 38px; height: 38px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; background: var(--avatar, var(--purple)); color: #fff; font-size: 12px; font-weight: 800; }
+.access-you { padding: 1px 6px; border-radius: 999px; background: rgba(56,217,150,.15); color: var(--green); font-size: 9px; font-style: normal; font-weight: 800; text-transform: uppercase; }
+.access-meta { margin: 0; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.access-meta dt { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.access-meta dd { margin: 2px 0 0; font-size: 12px; }
+.access-card-actions, .access-user-actions { display: flex; gap: 6px; }
+.access-user { padding: 8px 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.access-user small { display: block; color: var(--muted); font-size: 10px; }
+.access-reveal { padding: 8px 10px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(56,217,150,.4); border-radius: 6px; background: rgba(56,217,150,.07); }
+.access-reveal > div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.access-reveal small { color: var(--muted-soft); font-size: 10px; }
+.access-reveal code { font-size: 14px; letter-spacing: .06em; user-select: all; }
+.access-add summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--gold); }
+.access-add[open] summary { margin-bottom: 8px; }
+.pw-meter { margin-top: 6px; display: grid; grid-template-columns: repeat(4, 1fr) auto; align-items: center; gap: 4px; }
+.pw-meter i { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.pw-meter span { padding-left: 6px; color: var(--muted); font-size: 10px; }
+.pw-meter[data-level="1"] i:nth-child(-n+1) { background: var(--red); }
+.pw-meter[data-level="2"] i:nth-child(-n+2) { background: var(--yellow); }
+.pw-meter[data-level="3"] i:nth-child(-n+3) { background: #8fd66b; }
+.pw-meter[data-level="4"] i { background: var(--green); }

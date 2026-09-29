@@ -83,6 +83,10 @@ function teamDeadline(store, teamId) {
   return dates[0] || '';
 }
 
+function publicAdmin(item) {
+  return { id: item.id, username: item.username, createdAt: Number(item.createdAt || 0), lastLoginAt: Number(item.lastLoginAt || 0) };
+}
+
 function addAudit(store, action, actor, target = '', details = '') {
   store.logs.unshift({ id: crypto.randomUUID(), action, actor: String(actor || 'sistema').slice(0, 80), target: String(target || '').slice(0, 120), details: String(details || '').slice(0, 300), createdAt: Date.now() });
   store.logs = store.logs.slice(0, 500);
@@ -210,6 +214,8 @@ const server = http.createServer(async (request, response) => {
       const username = normalizeUsername(candidate.username);
       const account = sharedStates.__admins__.accounts.find(item => item.username === username);
       if (!account || !(await auth.verifyPassword(candidate.password, account.passwordHash))) { sendJson(response, 401, { ok: false, error: 'Usuário ou senha incorretos' }); return; }
+      account.lastLoginAt = Date.now();
+      await persist();
       await setSessionCookie(response, request, 'joa_admin', { kind: 'admin', username, accountId: account.id });
       sendJson(response, 200, { ok: true, username });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
@@ -232,7 +238,7 @@ const server = http.createServer(async (request, response) => {
   if (url.pathname === '/api/auth/admin/accounts') {
     if (!(await requireAdmin(request, response))) return;
     if (request.method === 'GET') {
-      sendJson(response, 200, { accounts: sharedStates.__admins__.accounts.map(item => ({ id: item.id, username: item.username })) });
+      sendJson(response, 200, { accounts: sharedStates.__admins__.accounts.map(publicAdmin) });
       return;
     }
     if (request.method === 'DELETE') {
@@ -243,7 +249,21 @@ const server = http.createServer(async (request, response) => {
       sharedStates.__admins__.accounts = remaining;
       sharedStates.__admins__.updatedAt = Date.now();
       await persist();
-      sendJson(response, 200, { ok: true, accounts: sharedStates.__admins__.accounts.map(item => ({ id: item.id, username: item.username })) });
+      sendJson(response, 200, { ok: true, accounts: sharedStates.__admins__.accounts.map(publicAdmin) });
+      return;
+    }
+    if (request.method === 'PUT') {
+      try {
+        const candidate = JSON.parse(await readBody(request));
+        const account = sharedStates.__admins__.accounts.find(item => item.id === String(candidate.id || ''));
+        if (!account) { sendJson(response, 404, { ok: false, error: 'Administrador não encontrado.' }); return; }
+        if (!validPassword(candidate.password)) { sendJson(response, 400, { ok: false, error: 'Senha inválida' }); return; }
+        account.passwordHash = await auth.hashPassword(candidate.password);
+        account.passwordChangedAt = Date.now();
+        sharedStates.__admins__.updatedAt = Date.now();
+        await persist();
+        sendJson(response, 200, { ok: true, accounts: sharedStates.__admins__.accounts.map(publicAdmin) });
+      } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
       return;
     }
     if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
@@ -256,7 +276,7 @@ const server = http.createServer(async (request, response) => {
       sharedStates.__admins__.accounts.push(account);
       sharedStates.__admins__.updatedAt = Date.now();
       await persist();
-      sendJson(response, 200, { ok: true, accounts: sharedStates.__admins__.accounts.map(item => ({ id: item.id, username: item.username })) });
+      sendJson(response, 200, { ok: true, accounts: sharedStates.__admins__.accounts.map(publicAdmin) });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
   }
@@ -270,6 +290,8 @@ const server = http.createServer(async (request, response) => {
       const entry = sharedStates.__team_credentials__.entries.find(item => item.teamId === teamId && item.username === username);
       if (!entry || !(await auth.verifyPassword(candidate.password, entry.passwordHash))) { sendJson(response, 401, { ok: false, error: 'Usuário ou senha incorretos' }); return; }
       const team = sharedStates.__team_catalog__?.teams?.find(item => item.id === teamId);
+      entry.lastLoginAt = Date.now();
+      await persist();
       await setSessionCookie(response, request, 'joa_team', { kind: 'team', teamId, username, credentialVersion: entry.updatedAt });
       sendJson(response, 200, { ok: true, teamId, teamName: team?.name || '' });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
@@ -346,7 +368,7 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, { teamId, username: entry?.username || null, hasPassword: Boolean(entry) });
       return;
     }
-    sendJson(response, 200, { entries: sharedStates.__team_credentials__.entries.map(item => ({ teamId: item.teamId, username: item.username, updatedAt: item.updatedAt })) });
+    sendJson(response, 200, { entries: sharedStates.__team_credentials__.entries.map(item => ({ teamId: item.teamId, username: item.username, updatedAt: item.updatedAt, lastLoginAt: Number(item.lastLoginAt || 0) })) });
     return;
   }
 

@@ -450,6 +450,9 @@ let teamLoginTeams = [];
 let accessAdmins = [];
 let accessTeamCredentials = [];
 let accessStatus = 'idle';
+let accessSearch = '';
+let accessTeamFilter = 'all';
+let accessRevealed = {};
 let dashboardStats = { status: 'idle', byRoom: {} };
 let operationsData = { championships: [], matches: [], notifications: [], logs: [], delegationStatus: {}, teamHistory: {}, updatedAt: 0 };
 let operationsStatus = 'idle';
@@ -1635,27 +1638,87 @@ function renderTeamsTab() {
     </div><p class="help-text">As alterações do time entram na partida atual e ficam disponíveis para as próximas transmissões.</p>`;
 }
 
+function relativeTime(value) {
+  if (!value) return 'Nunca acessou';
+  const minutes = Math.floor((Date.now() - Number(value)) / 60000);
+  if (minutes < 1) return 'Agora há pouco';
+  if (minutes < 60) return `há ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `há ${hours} h`;
+  const days = Math.floor(hours / 24);
+  return days < 30 ? `há ${days} dia${days === 1 ? '' : 's'}` : new Date(Number(value)).toLocaleDateString('pt-BR');
+}
+
+const PASSWORD_LEVELS = ['Muito fraca', 'Fraca', 'Razoável', 'Boa', 'Forte'];
+
+function passwordStrength(value) {
+  const text = String(value || '');
+  let score = 0;
+  if (text.length >= 8) score += 1;
+  if (text.length >= 12) score += 1;
+  if (/[a-z]/.test(text) && /[A-Z]/.test(text)) score += 1;
+  if (/\d/.test(text) && (/[^A-Za-z0-9]/.test(text) || text.length >= 10)) score += 1;
+  return text ? Math.min(4, score) : 0;
+}
+
+function passwordMeter(value = '') {
+  const level = passwordStrength(value);
+  return `<div class="pw-meter" data-level="${level}"><i></i><i></i><i></i><i></i><span>${value ? PASSWORD_LEVELS[level] : 'Mínimo de 8 caracteres'}</span></div>`;
+}
+
+function accessInstructions(kind, name, username, password) {
+  return kind === 'admin'
+    ? `Acesso ao painel da ${BRAND_NAME}\nLink: ${location.origin}/\nUsuário: ${username}\nSenha: ${password}`
+    : `Acesso ao portal da equipe ${name}\nLink: ${location.origin}/team\nUsuário: ${username}\nSenha: ${password}`;
+}
+
+function avatarBadge(label, color = '') {
+  return `<span class="access-avatar" ${color ? `style="--avatar:${safeColor(color)}"` : ''}>${escapeHtml(String(label || '?').trim().slice(0, 2).toUpperCase())}</span>`;
+}
+
+function revealBox(key) {
+  const password = accessRevealed[key];
+  if (!password) return '';
+  return `<div class="access-reveal"><div><small>Nova senha (exibida só agora)</small><code>${escapeHtml(password)}</code></div><button class="button subtle" data-action="copy-access-instructions" data-value="${escapeHtml(key)}">Copiar instruções</button><button class="button square subtle" data-action="dismiss-access-reveal" data-value="${escapeHtml(key)}" aria-label="Ocultar senha">${icons.close}</button></div>`;
+}
+
 function renderAccessModule() {
   if (accessStatus === 'loading' || accessStatus === 'idle') return '<div class="module-section"><div class="portal-empty">Carregando acessos…</div></div>';
   if (accessStatus === 'error') return '<div class="module-section"><div class="portal-empty">Não foi possível carregar os acessos. Recarregue a página.</div></div>';
-  const adminRows = accessAdmins.map(account => `<article class="access-row access-row-compact"><div><strong>${escapeHtml(account.username)}</strong><small>Acesso completo ao painel</small></div><button class="button square subtle" data-action="remove-admin-account" data-value="${escapeHtml(account.id)}" ${accessAdmins.length <= 1 ? 'disabled' : ''} aria-label="Remover ${escapeHtml(account.username)}">${icons.close}</button></article>`).join('') || '<div class="portal-empty">Nenhum administrador cadastrado.</div>';
-  const credentialByTeam = new Map(accessTeamCredentials.map(entry => [entry.teamId, entry]));
-  const teamRows = teamCatalog.map(team => {
-    const entries = accessTeamCredentials.filter(item => item.teamId === team.id);
-    const entry = entries[0];
+  const term = accessSearch.trim().toLowerCase();
+  const pendingResets = operationsData.notifications.filter(item => item.type === 'password-reset' && !item.read);
+  const usersByTeam = new Map();
+  for (const entry of accessTeamCredentials) usersByTeam.set(entry.teamId, [...(usersByTeam.get(entry.teamId) || []), entry]);
+  const withAccess = teamCatalog.filter(team => usersByTeam.has(team.id)).length;
+  const tiles = [[accessAdmins.length, 'Administradores'], [`${withAccess}/${teamCatalog.length}`, 'Times com acesso'], [accessTeamCredentials.length, 'Usuários de times'], [pendingResets.length, 'Pedidos de senha']];
+  const alerts = pendingResets.length ? `<section class="access-alerts"><strong>Pedidos de redefinição de senha</strong>${pendingResets.map(item => {
+    const username = String(item.message || '').match(/Usuário: (\S+?)\.(?:\s|$)/)?.[1] || '';
+    return `<div class="access-alert-row"><span>${escapeHtml(item.title)}${username ? ` · <b>${escapeHtml(username)}</b>` : ''}</span><div><button class="button primary" data-action="access-handle-reset" data-value="${escapeHtml(item.id)}|${escapeHtml(item.teamId)}|${escapeHtml(username)}" ${username ? '' : 'disabled'}>Gerar nova senha</button><button class="button subtle" data-action="read-notification" data-value="${escapeHtml(item.id)}">Dispensar</button></div></div>`;
+  }).join('')}</section>` : '';
+  const matches = (...values) => !term || values.some(value => String(value || '').toLowerCase().includes(term));
+  const adminCards = accessAdmins.filter(account => matches(account.username)).map(account => {
+    const isSelf = account.username === adminSession.username;
+    return `<article class="access-card"><div class="access-card-head">${avatarBadge(account.username)}<div><strong>${escapeHtml(account.username)}${isSelf ? ' <em class="access-you">você</em>' : ''}</strong><small>Acesso completo ao painel</small></div></div><dl class="access-meta"><div><dt>Último acesso</dt><dd>${escapeHtml(relativeTime(account.lastLoginAt))}</dd></div><div><dt>Criado em</dt><dd>${account.createdAt ? new Date(account.createdAt).toLocaleDateString('pt-BR') : '—'}</dd></div></dl>${revealBox(`admin:${account.id}`)}<div class="access-card-actions"><button class="button subtle" data-action="admin-reset-password" data-value="${escapeHtml(account.id)}">Redefinir senha</button><button class="button subtle" data-action="remove-admin-account" data-value="${escapeHtml(account.id)}" ${accessAdmins.length <= 1 || isSelf ? 'disabled' : ''} title="${isSelf ? 'Você não pode remover a própria conta' : 'Remover administrador'}">Remover</button></div></article>`;
+  }).join('') || '<div class="portal-empty">Nenhum administrador encontrado.</div>';
+  const teamCards = teamCatalog.filter(team => {
+    const users = usersByTeam.get(team.id) || [];
+    if (accessTeamFilter === 'with' && !users.length) return false;
+    if (accessTeamFilter === 'without' && users.length) return false;
+    return matches(team.name, team.short, ...users.map(user => user.username));
+  }).map(team => {
+    const users = usersByTeam.get(team.id) || [];
     const id = escapeHtml(team.id);
-    return `<article class="access-row"><div class="access-row-head"><div><strong>${escapeHtml(team.name)}</strong><small class="${entry ? 'access-linked' : ''}">${entries.length ? `${entries.length} usuário(s): ${entries.map(item => escapeHtml(item.username)).join(', ')}` : 'Nenhum usuário vinculado'}</small></div></div>${entries.map(item => `<div class="access-user-row"><span>${escapeHtml(item.username)}</span><button class="button square subtle" data-action="remove-team-credentials" data-value="${id}|${escapeHtml(item.username)}" aria-label="Remover ${escapeHtml(item.username)}">${icons.close}</button></div>`).join('')}
-      <div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="ex: gestor.time"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><div class="password-field"><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"><button type="button" class="button square subtle" data-action="generate-team-password" data-value="${id}" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-team-credentials" data-value="${id}" title="Copiar usuário e senha">${icons.copy}</button></div></div></div>
-      <button class="button subtle access-row-save" data-action="set-team-credentials" data-value="${id}">${entries.length ? 'Adicionar ou atualizar usuário' : 'Vincular acesso'}</button></article>`;
-  }).join('') || '<div class="portal-empty">Nenhum time cadastrado.</div>';
-  return `<div class="module-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas com acesso completo ao painel e a todos os times cadastrados.</p></div></div>
-    <div class="team-catalog"><div class="team-catalog-head"><div><strong>${accessAdmins.length} administrador${accessAdmins.length === 1 ? '' : 'es'}</strong><small>É necessário manter pelo menos um administrador ativo.</small></div></div>
-      <div class="access-list">${adminRows}</div>
-      <div class="field-row"><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><div class="password-field"><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"><button type="button" class="button square subtle" data-action="generate-admin-password" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-admin-credentials" title="Copiar usuário e senha">${icons.copy}</button></div></div></div>
-      <button class="button primary access-row-save" data-action="add-admin-account">+ Adicionar administrador</button></div></div>
-    <div class="module-section"><div class="section-header"><div><h3 class="section-title">Usuários dos times</h3><p class="help-text">Cada time acessa <strong>/team</strong> com o usuário e a senha vinculados aqui para cadastrar atletas, fotos e comissão técnica.</p></div></div>
-      <div class="team-catalog"><div class="team-catalog-head"><div><strong>${teamCatalog.length} time${teamCatalog.length === 1 ? '' : 's'} cadastrado${teamCatalog.length === 1 ? '' : 's'}</strong><small>Salvar novamente substitui o usuário e a senha anteriores do time.</small></div></div>
-        <div class="access-list">${teamRows}</div></div></div>`;
+    const status = operationsData.delegationStatus[team.id]?.status || 'draft';
+    const userRows = users.map(user => `<div class="access-user"><div><strong>${escapeHtml(user.username)}</strong><small>Último acesso: ${escapeHtml(relativeTime(user.lastLoginAt))}</small></div><div class="access-user-actions"><button class="button subtle" data-action="team-user-reset" data-value="${id}|${escapeHtml(user.username)}">Redefinir senha</button><button class="button square subtle" data-action="remove-team-credentials" data-value="${id}|${escapeHtml(user.username)}" aria-label="Remover ${escapeHtml(user.username)}">${icons.close}</button></div></div>${revealBox(`team:${team.id}|${user.username}`)}`).join('');
+    return `<article class="access-card access-team-card ${users.length ? '' : 'is-empty'}"><div class="access-card-head">${avatarBadge(team.short || team.name, team.color)}<div><strong>${escapeHtml(team.name)}</strong><small>${users.length ? `${users.length} usuário${users.length === 1 ? '' : 's'}` : 'Sem acesso ao portal'} · ${escapeHtml(DELEGATION_LABELS[status] || status)}</small></div></div>${userRows}
+      <details class="access-add" ${users.length ? '' : 'open'}><summary>${users.length ? '+ Adicionar ou atualizar usuário' : 'Criar primeiro acesso'}</summary><div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="ex: gestor.time"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><div class="password-field"><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres" data-pw-meter><button type="button" class="button square subtle" data-action="generate-team-password" data-value="${id}" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-team-credentials" data-value="${id}" title="Copiar usuário e senha">${icons.copy}</button></div>${passwordMeter()}</div></div><button class="button primary access-row-save" data-action="set-team-credentials" data-value="${id}">${users.length ? 'Salvar usuário' : 'Vincular acesso'}</button></details></article>`;
+  }).join('') || '<div class="portal-empty">Nenhuma equipe corresponde ao filtro.</div>';
+  const filterChips = [['all', 'Todos'], ['with', 'Com acesso'], ['without', 'Sem acesso']].map(([value, label]) => `<button class="access-chip ${accessTeamFilter === value ? 'active' : ''}" data-action="access-team-filter" data-value="${value}" aria-pressed="${accessTeamFilter === value}">${label}</button>`).join('');
+  return `<div class="module-section access-screen"><div class="dashboard-stats">${tiles.map(([value, label]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div>${alerts}
+    <div class="access-toolbar"><input type="search" data-access-search value="${escapeHtml(accessSearch)}" maxlength="60" placeholder="Buscar por equipe ou usuário" aria-label="Buscar acessos"><div class="access-chips" role="group" aria-label="Filtrar equipes">${filterChips}</div></div>
+    <section class="access-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas com acesso completo ao painel e a todos os times. Mantenha ao menos um administrador ativo.</p></div></div>
+      <div class="access-grid">${adminCards}<article class="access-card access-new"><div class="access-card-head">${avatarBadge('+')}<div><strong>Novo administrador</strong><small>Acesso completo ao painel</small></div></div><div class="field"><label for="access-admin-username">Novo usuário</label><input id="access-admin-username" name="acesso-admin-usuario" maxlength="40" autocomplete="off" placeholder="ex: leonardo.adm"></div><div class="field"><label for="access-admin-password">Senha · visível para conferência</label><div class="password-field"><input id="access-admin-password" name="chave-admin" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres" data-pw-meter><button type="button" class="button square subtle" data-action="generate-admin-password" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-admin-credentials" title="Copiar usuário e senha">${icons.copy}</button></div>${passwordMeter()}</div><button class="button primary access-row-save" data-action="add-admin-account">+ Adicionar administrador</button></article></div></section>
+    <section class="access-section"><div class="section-header"><div><h3 class="section-title">Usuários dos times</h3><p class="help-text">Cada time acessa <strong>/team</strong> com o usuário e a senha definidos aqui para cadastrar atletas, fotos e comissão técnica. Uma equipe pode ter vários usuários.</p></div></div><div class="access-grid">${teamCards}</div></section></div>`;
 }
 
 function operationTeamName(id) {
@@ -2493,7 +2556,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-field','data-custom-field','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override'];
+  const attributes = ['data-field','data-custom-field','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -2916,6 +2979,54 @@ function handleAction(action, target) {
       selectedCatalogTeamId = catalog[0]?.id;
     }, { immediate: true });
     toast('Time removido do cadastro.');
+    return;
+  }
+  if (action === 'access-team-filter') { accessTeamFilter = ['with', 'without'].includes(target.dataset.value) ? target.dataset.value : 'all'; render(); return; }
+  if (action === 'dismiss-access-reveal') { delete accessRevealed[target.dataset.value]; render(); return; }
+  if (action === 'copy-access-instructions') {
+    const key = String(target.dataset.value || '');
+    const password = accessRevealed[key];
+    if (!password) return;
+    if (key.startsWith('admin:')) {
+      const account = accessAdmins.find(item => item.id === key.slice(6));
+      if (account) copyText(accessInstructions('admin', '', account.username, password), 'Instruções de acesso copiadas.', 'Copie a senha exibida.');
+    } else {
+      const [teamKey, userKey] = key.slice(5).split('|');
+      copyText(accessInstructions('team', operationTeamName(teamKey), userKey, password), 'Instruções de acesso copiadas.', 'Copie a senha exibida.');
+    }
+    return;
+  }
+  if (action === 'team-user-reset' || action === 'access-handle-reset') {
+    const parts = String(target.dataset.value || '').split('|');
+    const [teamKey, userKey] = action === 'team-user-reset' ? parts : [parts[1], parts[2]];
+    if (!teamKey || !userKey) return;
+    const password = generatePassword(12);
+    fetch('/api/auth/team/credentials', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: teamKey, username: userKey, password }) })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (!ok) { toast(data.error || 'Falha ao redefinir a senha.'); return; }
+        accessRevealed[`team:${teamKey}|${userKey}`] = password;
+        copyText(accessInstructions('team', operationTeamName(teamKey), userKey, password), `Nova senha de "${userKey}" gerada e copiada.`, 'Nova senha gerada; copie a senha exibida.');
+        if (action === 'access-handle-reset') postOperation('mark-notification-read', { id: parts[0] });
+        render();
+      })
+      .catch(() => toast('Falha ao redefinir a senha.'));
+    return;
+  }
+  if (action === 'admin-reset-password') {
+    const id = target.dataset.value;
+    const password = generatePassword(12);
+    fetch('/api/auth/admin/accounts', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, password }) })
+      .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
+      .then(({ ok, data }) => {
+        if (!ok) { toast(data.error || 'Falha ao redefinir a senha.'); return; }
+        accessAdmins = data.accounts;
+        accessRevealed[`admin:${id}`] = password;
+        const account = accessAdmins.find(item => item.id === id);
+        copyText(accessInstructions('admin', '', account?.username || '', password), 'Nova senha gerada e copiada.', 'Nova senha gerada; copie a senha exibida.');
+        render();
+      })
+      .catch(() => toast('Falha ao redefinir a senha.'));
     return;
   }
   if (action === 'generate-team-password') {
@@ -3442,6 +3553,13 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-access-search]')) { accessSearch = target.value; render(); return; }
+  if (target.matches('[data-pw-meter]')) {
+    const meter = target.closest('.field')?.querySelector('.pw-meter');
+    const level = passwordStrength(target.value);
+    if (meter) { meter.dataset.level = String(level); meter.querySelector('span').textContent = target.value ? PASSWORD_LEVELS[level] : 'Mínimo de 8 caracteres'; }
+    return;
+  }
   const championshipFields = { 'championship-name': 'name', 'championship-season': 'season', 'championship-start': 'startDate', 'championship-end': 'endDate', 'championship-status': 'status' };
   if (championshipFields[target.id]) {
     championshipDraft ||= structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || { name: '', season: '', startDate: '', endDate: '', status: 'planned' });

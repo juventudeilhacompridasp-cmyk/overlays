@@ -155,6 +155,10 @@ async function getOperations(env) {
   return normalizeOperations(await readState(env, '__operations__'));
 }
 
+function publicAdmin(item) {
+  return { id: item.id, username: item.username, createdAt: Number(item.createdAt || 0), lastLoginAt: Number(item.lastLoginAt || 0) };
+}
+
 function addAudit(store, action, actor, target = '', details = '') {
   store.logs.unshift({ id: crypto.randomUUID(), action, actor: String(actor || 'sistema').slice(0, 80), target: String(target || '').slice(0, 120), details: String(details || '').slice(0, 300), createdAt: Date.now() });
   store.logs = store.logs.slice(0, 500);
@@ -281,6 +285,8 @@ export default {
         const username = normalizeUsername(candidate.username);
         const account = admins?.accounts?.find(item => item.username === username);
         if (!account || !(await verifyPassword(candidate.password, account.passwordHash))) return Response.json({ ok: false, error: 'Usuário ou senha incorretos' }, { status: 401 });
+        account.lastLoginAt = Date.now();
+        await persistState(env, '__admins__', admins);
         const cookie = await sessionCookieHeader(request, url, 'joa_admin', { kind: 'admin', username, accountId: account.id }, secret);
         return Response.json({ ok: true, username }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
@@ -299,7 +305,7 @@ export default {
       if (!(await getAdminSession(request, secret, env))) return unauthorized();
       const admins = (await readState(env, '__admins__')) || { accounts: [], updatedAt: 0 };
       if (request.method === 'GET') {
-        return Response.json({ accounts: (admins.accounts || []).map(item => ({ id: item.id, username: item.username })) }, { headers: { 'cache-control': 'no-store' } });
+        return Response.json({ accounts: (admins.accounts || []).map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
       }
       if (request.method === 'DELETE') {
         const id = String(url.searchParams.get('id') || '');
@@ -309,7 +315,20 @@ export default {
         admins.accounts = remaining;
         admins.updatedAt = Date.now();
         await persistState(env, '__admins__', admins);
-        return Response.json({ ok: true, accounts: admins.accounts.map(item => ({ id: item.id, username: item.username })) }, { headers: { 'cache-control': 'no-store' } });
+        return Response.json({ ok: true, accounts: admins.accounts.map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
+      }
+      if (request.method === 'PUT') {
+        try {
+          const candidate = await request.json();
+          const account = (admins.accounts || []).find(item => item.id === String(candidate.id || ''));
+          if (!account) return Response.json({ ok: false, error: 'Administrador não encontrado.' }, { status: 404 });
+          if (!validPassword(candidate.password)) return Response.json({ ok: false, error: 'Senha inválida' }, { status: 400 });
+          account.passwordHash = await hashPassword(candidate.password);
+          account.passwordChangedAt = Date.now();
+          admins.updatedAt = Date.now();
+          await persistState(env, '__admins__', admins);
+          return Response.json({ ok: true, accounts: admins.accounts.map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
+        } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
       }
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
       try {
@@ -320,7 +339,7 @@ export default {
         admins.accounts = [...(admins.accounts || []), { id: crypto.randomUUID(), username, passwordHash: await hashPassword(candidate.password), createdAt: Date.now() }];
         admins.updatedAt = Date.now();
         await persistState(env, '__admins__', admins);
-        return Response.json({ ok: true, accounts: admins.accounts.map(item => ({ id: item.id, username: item.username })) }, { headers: { 'cache-control': 'no-store' } });
+        return Response.json({ ok: true, accounts: admins.accounts.map(publicAdmin) }, { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
     if (url.pathname === '/api/auth/team/login') {
@@ -335,6 +354,8 @@ export default {
         if (!entry || !(await verifyPassword(candidate.password, entry.passwordHash))) return Response.json({ ok: false, error: 'Usuário ou senha incorretos' }, { status: 401 });
         const catalog = await readState(env, 'team-catalog');
         const team = catalog?.teams?.find(item => item.id === teamId);
+        entry.lastLoginAt = Date.now();
+        await persistState(env, '__team_credentials__', credentials);
         const cookie = await sessionCookieHeader(request, url, 'joa_team', { kind: 'team', teamId, username, credentialVersion: entry.updatedAt }, secret);
         return Response.json({ ok: true, teamId, teamName: team?.name || '' }, { headers: { 'set-cookie': cookie, 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
@@ -408,7 +429,7 @@ export default {
         const entry = credentials?.entries?.find(item => item.teamId === teamId);
         return Response.json({ teamId, username: entry?.username || null, hasPassword: Boolean(entry) }, { headers: { 'cache-control': 'no-store' } });
       }
-      return Response.json({ entries: (credentials?.entries || []).map(item => ({ teamId: item.teamId, username: item.username, updatedAt: item.updatedAt })) }, { headers: { 'cache-control': 'no-store' } });
+      return Response.json({ entries: (credentials?.entries || []).map(item => ({ teamId: item.teamId, username: item.username, updatedAt: item.updatedAt, lastLoginAt: Number(item.lastLoginAt || 0) })) }, { headers: { 'cache-control': 'no-store' } });
     }
 
     if (url.pathname === '/api/operations') {
