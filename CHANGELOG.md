@@ -26,6 +26,21 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+### Adicionado
+- Aba Aparência: novo cartão "Barra de patrocinadores" com tamanho (`appearance.sponsorBarScale`, 60–180%)
+  e posição horizontal/vertical (`appearance.sponsorBarX`/`sponsorBarY`, 0–100%, padrão 50/91, centro da
+  barra) no programa completo. Estados antigos recebem os padrões por mesclagem com `defaultAppearance()`.
+  A saída independente `layer=sponsor-bar` (1500 × 200) continua ocupando todo o quadro e ignora X/Y.
+  No CSS a barra agora é centralizada com `translate(-50%,-50%)` (keyframes ajustados) e usa `--sponsor-bar-x/y`.
+
+### Corrigido
+- Esquema tático: `FORMATIONS` agora guarda posições `[x, y]` já em meio campo (goleiro à esquerda, ataque à
+  direita, valores por formação), e o campo passou a ser desenhado como meio campo (área e arco central) em vez
+  de campo inteiro com linha do meio. Formações e contratos de dados não mudaram.
+- Overlay de patrocínio no painel: o drawer "Patrocinador" pedia texto livre ("Marca exibida") e só renomeava o
+  patrocinador ativo, mantendo o banner antigo. Agora lista os patrocinadores cadastrados; ao confirmar, define
+  `activeSponsorIndex` e coloca no ar o nome e o banner do escolhido (`sponsor`/`sponsorBanner`).
+
 ## [29] - 2026-09-18
 
 ### Segurança

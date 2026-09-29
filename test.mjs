@@ -357,10 +357,13 @@ try {
   verify('Photo lineup sponsor footer can be hidden independently', !dashboard.getState().photoLineupShowSponsors && !dashboard.app.innerHTML.includes('class="photo-lineup-sponsors"'));
   dashboard.click('toggle-photo-lineup-sponsors');
 
+  const registeredSponsorName = dashboard.getState().sponsors[dashboard.getState().sponsors.length - 1].name;
   dashboard.click('overlay-sponsor');
-  dashboard.form.set('event-name', { value: 'Patrocínio Local' });
+  verify('Sponsor drawer lists registered sponsors instead of asking for free text', dashboard.app.innerHTML.includes('id="event-sponsor"') && !dashboard.app.innerHTML.includes('id="event-name"'));
+  dashboard.form.set('event-sponsor', { value: String(dashboard.getState().sponsors.length - 1) });
   dashboard.click('confirm-event');
-  verify('Sponsor graphics support a custom advertiser name', dashboard.getState().visible.sponsor && dashboard.app.innerHTML.includes('Patrocínio Local'));
+  verify('Starting a sponsor overlay activates the chosen registered sponsor and its banner', dashboard.getState().visible.sponsor && dashboard.getState().activeSponsorIndex === dashboard.getState().sponsors.length - 1 && dashboard.getState().sponsor === registeredSponsorName && dashboard.getState().sponsorBanner === dashboard.getState().sponsors[dashboard.getState().sponsors.length - 1].banner);
+  verify('Appearance tab exposes sponsor bar size and position', dashboard.getState().appearance.sponsorBarX === 50 && dashboard.getState().appearance.sponsorBarY === 91);
 
   dashboard.click('open-obs');
   verify('OBS drawer supplies seven separate overlay URLs', (dashboard.app.innerHTML.match(/class="copy-row"/g) || []).length === 7);
@@ -391,7 +394,7 @@ try {
   verify('Scoreboard typography can be changed independently', dashboard.getState().typeface === 'oswald' && dashboard.app.innerHTML.includes('Impacto'));
 
   dashboard.click('tab', 'appearance');
-  verify('Advanced appearance panel exposes per-overlay controls', dashboard.app.innerHTML.includes('Personalização por elemento') && (dashboard.app.innerHTML.match(/class="parameter-card"/g) || []).length === 5);
+  verify('Advanced appearance panel exposes per-overlay controls', dashboard.app.innerHTML.includes('Personalização por elemento') && (dashboard.app.innerHTML.match(/class="parameter-card"/g) || []).length === 6 && ['sponsorBarScale','sponsorBarX','sponsorBarY'].every(field => dashboard.app.innerHTML.includes(`data-appearance="${field}"`)));
   verify('Every overlay type exposes selectable visual variations', ['scoreboardStyle','eventStyle','lineupStyle','photoLineupStyle','sponsorStyle'].every(field => dashboard.app.innerHTML.includes(`data-appearance="${field}"`)));
   dashboard.input({ appearance: 'eventStyle' }, 'block');
   dashboard.input({ appearance: 'photoLineupStyle' }, 'glass');
