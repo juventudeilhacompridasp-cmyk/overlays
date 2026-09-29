@@ -26,6 +26,8 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+## [31] - 2026-09-29
+
 ### Adicionado
 - Apresentação da equipe (`photo-lineup`): três novos estilos em `appearance.photoLineupStyle`, inspirados em
   transmissões profissionais — `premier` (blocos de cor da equipe, cortes diagonais e placa branca de nome),
