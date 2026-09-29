@@ -57,7 +57,30 @@ function operationsStore() {
   store.notifications = Array.isArray(store.notifications) ? store.notifications : [];
   store.logs = Array.isArray(store.logs) ? store.logs : [];
   store.delegationStatus = store.delegationStatus && typeof store.delegationStatus === 'object' ? store.delegationStatus : {};
+  store.teamHistory = store.teamHistory && typeof store.teamHistory === 'object' ? store.teamHistory : {};
   return store;
+}
+
+const TEAM_SNAPSHOT_FIELDS = ['name', 'short', 'color', 'color2', 'logo', 'athletes', 'staff', 'coach', 'formation', 'roster', 'sponsors'];
+
+function snapshotTeam(store, team, actor) {
+  const data = {};
+  for (const key of TEAM_SNAPSHOT_FIELDS) if (team[key] !== undefined) data[key] = structuredClone(team[key]);
+  const history = Array.isArray(store.teamHistory[team.id]) ? store.teamHistory[team.id] : [];
+  if (history[0] && JSON.stringify(history[0].team) === JSON.stringify(data)) return;
+  history.unshift({ id: crypto.randomUUID(), at: Date.now(), actor: String(actor || 'sistema').slice(0, 80), summary: (data.athletes ? data.athletes.length : 0) + ' atletas; ' + (data.staff ? data.staff.length : 0) + ' na comissão', team: data });
+  store.teamHistory[team.id] = history.slice(0, 15);
+}
+
+function publicOperations(store) {
+  const teamHistory = {};
+  for (const [teamId, list] of Object.entries(store.teamHistory || {})) teamHistory[teamId] = list.map(({ team, ...meta }) => meta);
+  return { ...store, teamHistory };
+}
+
+function teamDeadline(store, teamId) {
+  const dates = store.matches.filter(match => (match.homeTeamId === teamId || match.awayTeamId === teamId) && match.registrationDeadline && !['finished', 'cancelled'].includes(match.status)).map(match => match.registrationDeadline).sort();
+  return dates[0] || '';
 }
 
 function addAudit(store, action, actor, target = '', details = '') {
@@ -80,7 +103,7 @@ function delegationCheck(team) {
 
 function markDelegationChanged(store, team, actor) {
   const current = store.delegationStatus[team.id];
-  if (current?.status !== 'completed') return;
+  if (!['completed', 'approved'].includes(current?.status)) return;
   store.delegationStatus[team.id] = { ...current, status: 'needs-review', changedAt: Date.now() };
   store.notifications.unshift({ id: crypto.randomUUID(), type: 'delegation-changed', teamId: team.id, title: `${team.name} alterou a delegação`, message: 'O cadastro foi modificado depois de ter sido concluído.', read: false, createdAt: Date.now() });
   store.notifications = store.notifications.slice(0, 200);
@@ -253,6 +276,27 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (url.pathname === '/api/auth/team/reset-request') {
+    if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
+    try {
+      const candidate = JSON.parse(await readBody(request));
+      const teamId = String(candidate.teamId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
+      const username = normalizeUsername(candidate.username);
+      const team = sharedStates.__team_catalog__?.teams?.find(item => item.id === teamId);
+      const known = sharedStates.__team_credentials__.entries.some(item => item.teamId === teamId && item.username === username);
+      const store = operationsStore();
+      const recent = store.notifications.some(item => item.type === 'password-reset' && item.teamId === teamId && !item.read && Date.now() - item.createdAt < 600000);
+      if (team && known && !recent) {
+        store.notifications.unshift({ id: crypto.randomUUID(), type: 'password-reset', teamId, title: team.name + ' pediu redefinição de senha', message: 'Usuário: ' + username + '. Gere uma nova senha em Usuários/Acessos.', read: false, createdAt: Date.now() });
+        store.notifications = store.notifications.slice(0, 200);
+        store.updatedAt = Math.max(Date.now(), Number(store.updatedAt || 0) + 1);
+        await persist();
+      }
+      sendJson(response, 200, { ok: true });
+    } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
+    return;
+  }
+
   if (url.pathname === '/api/auth/team/logout') {
     if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
     clearSessionCookie(response, request, 'joa_team');
@@ -276,7 +320,7 @@ const server = http.createServer(async (request, response) => {
         const bodyTeamId = String(candidate.teamId || teamId || '').replace(/[^a-z0-9-]/gi, '').slice(0, 64);
         const username = normalizeUsername(candidate.username);
         if (!bodyTeamId || username.length < 3 || !validPassword(candidate.password)) { sendJson(response, 400, { ok: false, error: 'Dados inválidos' }); return; }
-        const entries = sharedStates.__team_credentials__.entries.filter(item => item.teamId !== bodyTeamId);
+        const entries = sharedStates.__team_credentials__.entries.filter(item => !(item.teamId === bodyTeamId && item.username === username));
         entries.push({ teamId: bodyTeamId, username, passwordHash: await auth.hashPassword(candidate.password), updatedAt: Date.now() });
         sharedStates.__team_credentials__.entries = entries;
         sharedStates.__team_credentials__.updatedAt = Date.now();
@@ -288,7 +332,8 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'DELETE') {
       if (!(await requireAdmin(request, response))) return;
       const before = sharedStates.__team_credentials__.entries.length;
-      sharedStates.__team_credentials__.entries = sharedStates.__team_credentials__.entries.filter(item => item.teamId !== teamId);
+      const removeUser = normalizeUsername(url.searchParams.get('username') || '');
+      sharedStates.__team_credentials__.entries = sharedStates.__team_credentials__.entries.filter(item => item.teamId !== teamId || (removeUser && item.username !== removeUser));
       if (sharedStates.__team_credentials__.entries.length === before) { sendJson(response, 404, { ok: false, error: 'Acesso não encontrado.' }); return; }
       sharedStates.__team_credentials__.updatedAt = Date.now();
       await persist();
@@ -310,7 +355,7 @@ const server = http.createServer(async (request, response) => {
     if (!admin) return;
     let store = operationsStore();
     if (request.method === 'GET') {
-      sendJson(response, 200, store);
+      sendJson(response, 200, publicOperations(store));
       return;
     }
     if (request.method !== 'POST') { response.writeHead(405).end('Method not allowed'); return; }
@@ -318,7 +363,7 @@ const server = http.createServer(async (request, response) => {
       const candidate = JSON.parse(await readBody(request));
       const current = operationsStore();
       if (Number(candidate.baseUpdatedAt || 0) !== Number(current.updatedAt || 0)) {
-        sendJson(response, 409, { ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: current });
+        sendJson(response, 409, { ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: publicOperations(current) });
         return;
       }
       store = structuredClone(current);
@@ -343,7 +388,7 @@ const server = http.createServer(async (request, response) => {
         const previous = store.matches.find(entry => entry.id === id);
         const room = safeId(previous?.room || item.room || id, id).slice(0, 48);
         if (store.matches.some(entry => entry.room === room && entry.id !== id)) { sendJson(response, 409, { ok: false, error: 'Já existe uma partida usando esta sala.' }); return; }
-        const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room, updatedAt: Date.now() };
+        const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room, updatedAt: Date.now() };
         if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) { sendJson(response, 400, { ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }); return; }
         const index = store.matches.findIndex(entry => entry.id === id);
         if (index >= 0) store.matches[index] = match; else store.matches.unshift(match);
@@ -353,6 +398,25 @@ const server = http.createServer(async (request, response) => {
         const existing = store.matches.find(entry => entry.id === id);
         store.matches = store.matches.filter(entry => entry.id !== id);
         if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
+      } else if (action === 'review-delegation') {
+        const teamId = safeId(candidate.teamId);
+        const reviewedTeam = (sharedStates.__team_catalog__ || { teams: [] }).teams.find(entry => entry.id === teamId);
+        if (!reviewedTeam) { sendJson(response, 404, { ok: false, error: 'Equipe não encontrada.' }); return; }
+        const decision = candidate.decision === 'approved' ? 'approved' : 'returned';
+        const comment = String(candidate.comment || '').trim().slice(0, 300);
+        if (decision === 'returned' && !comment) { sendJson(response, 400, { ok: false, error: 'Informe o motivo da devolução.' }); return; }
+        store.delegationStatus[teamId] = { ...(store.delegationStatus[teamId] || {}), status: decision === 'approved' ? 'approved' : 'needs-review', reviewComment: comment, reviewedAt: Date.now(), reviewedBy: admin.username };
+        addAudit(store, decision === 'approved' ? 'delegation.approved' : 'delegation.returned', admin.username, reviewedTeam.name, comment);
+      } else if (action === 'restore-team-version') {
+        const teamId = safeId(candidate.teamId);
+        const versionId = String(candidate.versionId || '').replace(/[^a-z0-9-]/gi, '');
+        const restoredTeam = (sharedStates.__team_catalog__ || { teams: [] }).teams.find(entry => entry.id === teamId);
+        const version = (store.teamHistory[teamId] || []).find(entry => entry.id === versionId);
+        if (!restoredTeam || !version) { sendJson(response, 404, { ok: false, error: 'Versão não encontrada.' }); return; }
+        snapshotTeam(store, restoredTeam, admin.username);
+        Object.assign(restoredTeam, structuredClone(version.team));
+        (sharedStates.__team_catalog__ || { teams: [] }).updatedAt = Date.now();
+        addAudit(store, 'team.restored', admin.username, restoredTeam.name, 'Versão de ' + new Date(version.at).toISOString().slice(0, 16).replace('T', ' '));
       } else if (action === 'mark-notification-read') {
         const notification = store.notifications.find(entry => entry.id === candidate.id);
         if (notification) notification.read = true;
@@ -365,7 +429,7 @@ const server = http.createServer(async (request, response) => {
       store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
       sharedStates.__operations__ = store;
       await persist();
-      sendJson(response, 200, { ok: true, operations: store });
+      sendJson(response, 200, { ok: true, operations: publicOperations(store) });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
     return;
   }
@@ -432,6 +496,8 @@ const server = http.createServer(async (request, response) => {
         team.short = String(candidate.short || team.short || 'TIM').toUpperCase().slice(0, 3);
         team.color = /^#[0-9a-f]{6}$/i.test(String(candidate.color || '')) ? candidate.color : team.color;
         team.logo = String(candidate.logo || team.logo || '').slice(0, 500);
+        team.color2 = /^#[0-9a-f]{6}$/i.test(String(candidate.color2 || '')) ? candidate.color2 : team.color2 || '';
+        team.sponsors = Array.isArray(candidate.sponsors) ? candidate.sponsors.slice(0, 6).map((sponsor, index) => ({ id: String(sponsor?.id || 'patrocinio-' + (index + 1)).replace(/[^a-z0-9-]/gi, '').slice(0, 40), name: String(sponsor?.name || '').slice(0, 60), logo: String(sponsor?.logo || '').slice(0, 500) })) : team.sponsors || [];
         team.athletes = Array.isArray(candidate.athletes) ? candidate.athletes.slice(0, 100).map((athlete, index) => ({
           id: String(athlete?.id || `atleta-${index + 1}`).replace(/[^a-z0-9-]/gi, '').slice(0, 56),
           name: String(athlete?.name || '').slice(0, 100), number: String(athlete?.number || '').slice(0, 6),
@@ -452,6 +518,7 @@ const server = http.createServer(async (request, response) => {
         const operations = operationsStore();
         const actor = (await getAdminSession(request))?.username || (await getTeamSession(request))?.username || team.name;
         markDelegationChanged(operations, team, actor);
+        snapshotTeam(operations, team, actor);
         addAudit(operations, 'delegation.saved', actor, team.name, `${team.athletes.length} atletas; ${team.staff.length} membros da comissão.`);
         operations.updatedAt = Math.max(Date.now(), Number(operations.updatedAt || 0) + 1);
         sharedStates.__team_catalog__.updatedAt = operations.updatedAt;
@@ -462,7 +529,7 @@ const server = http.createServer(async (request, response) => {
       return;
     }
     response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
-    response.end(JSON.stringify({ team, delegation: operationsStore().delegationStatus[team.id] || { status: 'draft' }, completion: delegationCheck(team) }));
+    response.end(JSON.stringify({ team, delegation: operationsStore().delegationStatus[team.id] || { status: 'draft' }, completion: delegationCheck(team), deadline: teamDeadline(operationsStore(), team.id) }));
     return;
   }
 

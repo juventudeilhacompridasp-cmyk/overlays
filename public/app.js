@@ -16,7 +16,7 @@ const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'audit', 'access'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -61,6 +61,7 @@ const MANAGEMENT_MODULES = [
   { key: 'builder', label: 'Builder de Overlays', caption: 'Crie saídas independentes sem desenvolvimento', layer: 'custom', icon: icons.layers },
   { key: 'pregame', label: 'Resumo pré-jogo', caption: 'Consulta rápida para narração', layer: 'all', icon: icons.list },
   { key: 'report', label: 'Relatório', caption: 'Histórico completo da partida', layer: 'all', icon: icons.text },
+  { key: 'delegations', label: 'Delegações', caption: 'Pendências, revisão, prazos e histórico das equipes', layer: 'all', icon: icons.users },
   { key: 'teams', label: 'Times', caption: 'Elencos e escudos', layer: 'all', icon: icons.list },
   { key: 'appearance', label: 'Aparência', caption: 'Estilos, posições e animações', layer: 'all', icon: icons.eye },
   { key: 'audit', label: 'Avisos e logs', caption: 'Delegações concluídas e histórico de ações', layer: 'all', icon: icons.list },
@@ -160,6 +161,8 @@ function normalizeTeamCatalog(value) {
       short: String(team?.short || 'TIM').toUpperCase().slice(0, 3),
       color: safeColor(team?.color, '#8253cd'),
       logo: String(team?.logo || '').slice(0, 500),
+      color2: /^#[0-9a-f]{6}$/i.test(String(team?.color2 || '')) ? team.color2 : '',
+      sponsors: (Array.isArray(team?.sponsors) ? team.sponsors : []).slice(0, 6).map((sponsor, sponsorIndex) => ({ id: String(sponsor?.id || `patrocinio-${sponsorIndex + 1}`).replace(/[^a-z0-9-]/gi, '').slice(0, 40), name: String(sponsor?.name || '').slice(0, 60), logo: String(sponsor?.logo || '').slice(0, 500) })),
       roster,
       athletes,
       formation: ['4-3-3', '4-4-2', '4-2-3-1', '3-5-2'].includes(team?.formation) ? team.formation : '4-3-3',
@@ -308,6 +311,7 @@ function createDefaultState() {
     sponsorLoop: false,
     lineupTeam: 'home',
     photoLineupShowSponsors: true,
+    squad: {},
     photoLineupStage: 'starters',
     photoLineupPlayerIndex: 0,
     photoLineupAuto: { running: false, nextAt: 0 },
@@ -387,6 +391,7 @@ function normalizeState(saved) {
     clock: normalizedClock,
     visible: { ...defaults.visible, ...saved.visible },
     selectedTeams: { ...defaults.selectedTeams, ...(saved.selectedTeams || {}) },
+    squad: normalizedSquad(saved.squad),
     appearance: { ...defaults.appearance, ...(saved.appearance || {}), sponsorFormat: ['text','logo-name','banner','banner-name'].includes(saved.appearance?.sponsorFormat) ? saved.appearance.sponsorFormat : defaults.appearance.sponsorFormat },
     sponsors: migratedSponsors,
     activeSponsorIndex: clampNumber(saved.activeSponsorIndex, 0, migratedSponsors.length - 1, 0),
@@ -446,7 +451,7 @@ let accessAdmins = [];
 let accessTeamCredentials = [];
 let accessStatus = 'idle';
 let dashboardStats = { status: 'idle', byRoom: {} };
-let operationsData = { championships: [], matches: [], notifications: [], logs: [], delegationStatus: {}, updatedAt: 0 };
+let operationsData = { championships: [], matches: [], notifications: [], logs: [], delegationStatus: {}, teamHistory: {}, updatedAt: 0 };
 let operationsStatus = 'idle';
 let selectedChampionshipId = '';
 let selectedMatchId = '';
@@ -454,6 +459,7 @@ let championshipDraft = null;
 let matchDraft = null;
 let teamDelegation = { status: 'draft' };
 let teamDelegationCompletion = { complete: false, missing: [] };
+let teamPortalDeadline = '';
 let lastClock = '';
 let syncStatus = 'connecting';
 let lastSyncAt = 0;
@@ -633,9 +639,38 @@ function activeLineupTeam() {
   return teamCatalog.find(team => team.id === state.selectedTeams?.[state.lineupTeam]) || matchTeam;
 }
 
+function squadKey(team) {
+  return String(team?.id || state.lineupTeam || 'home').replace(/[^a-z0-9-]/gi, '').slice(0, 64) || 'home';
+}
+
+function normalizedSquad(value) {
+  const squad = {};
+  if (!value || typeof value !== 'object') return squad;
+  const ids = list => (Array.isArray(list) ? list : []).map(id => String(id).replace(/[^a-z0-9-]/gi, '').slice(0, 56)).filter(Boolean).slice(0, 100);
+  for (const [key, entry] of Object.entries(value).slice(0, 40)) {
+    const positions = {};
+    for (const [athleteKey, point] of Object.entries(entry?.positions || {}).slice(0, 30)) {
+      if (Array.isArray(point) && point.length === 2) positions[String(athleteKey).replace(/[^a-z0-9-]/gi, '').slice(0, 56)] = [clampNumber(point[0], 2, 98, 50), clampNumber(point[1], 2, 98, 50)];
+    }
+    squad[String(key).replace(/[^a-z0-9-]/gi, '').slice(0, 64)] = { called: ids(entry?.called), starters: ids(entry?.starters), formation: FORMATIONS[entry?.formation] ? entry.formation : '', positions };
+  }
+  return squad;
+}
+
 function lineupGroups(team = activeLineupTeam()) {
   const matchTeam = state[state.lineupTeam] || state.home;
   const athletes = Array.isArray(team?.athletes) && team.athletes.length ? team.athletes : athletesFromRoster(matchTeam.roster);
+  const squad = state.squad?.[squadKey(team)];
+  if (squad?.starters?.length) {
+    const called = squad.called?.length ? new Set(squad.called) : null;
+    const pool = called ? athletes.filter(athlete => called.has(athlete.id)) : athletes;
+    const byId = new Map(pool.map(athlete => [athlete.id, athlete]));
+    const chosen = squad.starters.map(id => byId.get(id)).filter(Boolean).slice(0, currentSport().teamSize);
+    if (chosen.length) {
+      const chosenIds = new Set(chosen.map(athlete => athlete.id));
+      return { starters: chosen, reserves: pool.filter(athlete => !chosenIds.has(athlete.id)) };
+    }
+  }
   const preferred = athletes.filter(athlete => athlete.squadRole !== 'reserve');
   const remaining = athletes.filter(athlete => athlete.squadRole === 'reserve');
   const starters = [...preferred, ...remaining].slice(0, currentSport().teamSize);
@@ -1003,11 +1038,12 @@ function renderPhotoLineupOverlay() {
   } else if (stage === 'reserves') {
     content = reserves.length ? `<div class="bench-list">${reserves.map((player, index) => `<article class="bench-player" style="--player-index:${index}"><div>${athleteImage(player)}</div><b>${escapeHtml(player.number || '—')}</b><span><strong>${escapeHtml(player.name || `Reserva ${index + 1}`)}</strong><small>${escapeHtml(player.position || 'RESERVA')}</small></span></article>`).join('')}</div>` : '<div class="lineup-empty-stage"><strong>RESERVAS</strong><span>Nenhum atleta foi marcado como reserva.</span></div>';
   } else {
-    const formation = FORMATIONS[team.formation] ? team.formation : '4-3-3';
+    const squad = state.squad?.[squadKey(team)];
+    const formation = FORMATIONS[squad?.formation] ? squad.formation : FORMATIONS[team.formation] ? team.formation : '4-3-3';
     const points = FORMATIONS[formation];
-    content = `<div class="tactical-board"><div class="tactical-pitch"><i class="pitch-half"></i><i class="pitch-circle"></i><i class="pitch-spot"></i>${starters.map((player, index) => { const point = points[index] || [50, 50]; return `<article class="tactical-player" style="--player-x:${point[0]}%;--player-y:${point[1]}%;--player-index:${index}"><b>${escapeHtml(player.number || String(index + 1))}</b><span><strong>${escapeHtml(String(player.name || `Atleta ${index + 1}`).split(/\s+/).slice(-1)[0])}</strong><small>${escapeHtml(player.position || 'TIT')}</small></span></article>`; }).join('')}</div><aside><small>FORMAÇÃO</small><strong>${escapeHtml(formation)}</strong><span>${escapeHtml(matchTeam.short)} · ${starters.length} TITULARES</span></aside></div>`;
+    content = `<div class="tactical-board"><div class="tactical-pitch"><i class="pitch-half"></i><i class="pitch-circle"></i><i class="pitch-spot"></i>${starters.map((player, index) => { const point = squad?.positions?.[player.id] || points[index] || [50, 50]; return `<article class="tactical-player" data-player-id="${escapeHtml(player.id || '')}" data-squad-team="${escapeHtml(squadKey(team))}" style="--player-x:${point[0]}%;--player-y:${point[1]}%;--player-index:${index}"><b>${escapeHtml(player.number || String(index + 1))}</b><span><strong>${escapeHtml(String(player.name || `Atleta ${index + 1}`).split(/\s+/).slice(-1)[0])}</strong><small>${escapeHtml(player.position || 'TIT')}</small></span></article>`; }).join('')}</div><aside><small>FORMAÇÃO</small><strong>${escapeHtml(formation)}</strong><span>${escapeHtml(matchTeam.short)} · ${starters.length} TITULARES</span>${(team.sponsors || []).some(item => item.name) ? `<em>APOIO · ${escapeHtml(team.sponsors.filter(item => item.name).map(item => item.name).join(' · '))}</em>` : ''}</aside></div>`;
   }
-  return `<section class="photo-lineup photo-lineup-style-${escapeHtml(state.appearance?.photoLineupStyle || 'editorial')} photo-lineup-anim-${lineupAnimation} photo-lineup-stage-${escapeHtml(stage)}${transition ? ` is-${transition === 'enter' ? 'entering' : 'exiting'}` : ''}${stageActive ? ' is-stage-changing' : ''}${playerDirection ? ` is-player-${escapeHtml(playerDirection)}` : ''}" style="--photo-lineup-motion-offset:${lineupOffset}ms;--photo-lineup-stage-offset:${stageOffset}ms;--photo-team-color:${safeColor(matchTeam.color)}" data-overlay="photo-lineup" data-stage="${escapeHtml(stage)}"><header class="photo-lineup-head"><div class="photo-lineup-team-mark">${matchTeam.logo ? `<img src="${escapeHtml(matchTeam.logo)}" alt="Escudo ${escapeHtml(matchTeam.name)}">` : escapeHtml(matchTeam.short)}</div><div><h2>${escapeHtml(matchTeam.name.toUpperCase())}</h2></div>${labels[stage] ? `<span>${escapeHtml(labels[stage])}</span>` : ''}</header><div class="photo-lineup-body">${content}</div>${sponsorFooter}</section>`;
+  return `<section class="photo-lineup photo-lineup-style-${escapeHtml(state.appearance?.photoLineupStyle || 'editorial')} photo-lineup-anim-${lineupAnimation} photo-lineup-stage-${escapeHtml(stage)}${transition ? ` is-${transition === 'enter' ? 'entering' : 'exiting'}` : ''}${stageActive ? ' is-stage-changing' : ''}${playerDirection ? ` is-player-${escapeHtml(playerDirection)}` : ''}" style="--photo-lineup-motion-offset:${lineupOffset}ms;--photo-lineup-stage-offset:${stageOffset}ms;--photo-team-color:${safeColor(matchTeam.color)};${team?.color2 ? `--photo-team-color2:${safeColor(team.color2)};` : ''}" data-overlay="photo-lineup" data-stage="${escapeHtml(stage)}"><header class="photo-lineup-head"><div class="photo-lineup-team-mark">${matchTeam.logo ? `<img src="${escapeHtml(matchTeam.logo)}" alt="Escudo ${escapeHtml(matchTeam.name)}">` : escapeHtml(matchTeam.short)}</div><div><h2>${escapeHtml(matchTeam.name.toUpperCase())}</h2></div>${labels[stage] ? `<span>${escapeHtml(labels[stage])}</span>` : ''}</header><div class="photo-lineup-body">${content}</div>${sponsorFooter}</section>`;
 }
 
 function writeLocal() {
@@ -1275,6 +1311,7 @@ async function loadOperationsData() {
       notifications: Array.isArray(data.notifications) ? data.notifications : [],
       logs: Array.isArray(data.logs) ? data.logs : [],
       delegationStatus: data.delegationStatus && typeof data.delegationStatus === 'object' ? data.delegationStatus : {},
+      teamHistory: data.teamHistory && typeof data.teamHistory === 'object' ? data.teamHistory : {},
       updatedAt: Number(data.updatedAt || 0),
     };
     const linkedMatch = operationsData.matches.find(item => item.room === ROOM_ID);
@@ -1356,6 +1393,7 @@ async function initializeTeamPortal() {
     teamPortalTeam = remoteTeam ? normalizeTeamCatalog([remoteTeam])[0] : null;
     teamDelegation = data.delegation || { status: 'draft' };
     teamDelegationCompletion = data.completion || { complete: false, missing: [] };
+    teamPortalDeadline = String(data.deadline || '');
     teamPortalStatus = teamPortalTeam ? 'ready' : 'invalid';
   } catch {
     teamPortalStatus = 'invalid';
@@ -1369,7 +1407,7 @@ async function saveTeamPortal() {
   render();
   try {
     const response = await fetch(`/api/team-portal?team=${encodeURIComponent(teamSession.teamId)}`, {
-      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: teamPortalTeam.name, short: teamPortalTeam.short, color: teamPortalTeam.color, logo: teamPortalTeam.logo, athletes: teamPortalTeam.athletes, staff: teamPortalTeam.staff, coach: teamPortalTeam.coach, formation: teamPortalTeam.formation }),
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: teamPortalTeam.name, short: teamPortalTeam.short, color: teamPortalTeam.color, logo: teamPortalTeam.logo, color2: teamPortalTeam.color2, sponsors: teamPortalTeam.sponsors, athletes: teamPortalTeam.athletes, staff: teamPortalTeam.staff, coach: teamPortalTeam.coach, formation: teamPortalTeam.formation }),
     });
     if (response.status === 401) { teamSession = { status: 'login', teamId: null, teamName: null, error: 'Sessão expirada. Entre novamente.' }; render(); return; }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1603,11 +1641,12 @@ function renderAccessModule() {
   const adminRows = accessAdmins.map(account => `<article class="access-row access-row-compact"><div><strong>${escapeHtml(account.username)}</strong><small>Acesso completo ao painel</small></div><button class="button square subtle" data-action="remove-admin-account" data-value="${escapeHtml(account.id)}" ${accessAdmins.length <= 1 ? 'disabled' : ''} aria-label="Remover ${escapeHtml(account.username)}">${icons.close}</button></article>`).join('') || '<div class="portal-empty">Nenhum administrador cadastrado.</div>';
   const credentialByTeam = new Map(accessTeamCredentials.map(entry => [entry.teamId, entry]));
   const teamRows = teamCatalog.map(team => {
-    const entry = credentialByTeam.get(team.id);
+    const entries = accessTeamCredentials.filter(item => item.teamId === team.id);
+    const entry = entries[0];
     const id = escapeHtml(team.id);
-    return `<article class="access-row"><div class="access-row-head"><div><strong>${escapeHtml(team.name)}</strong><small class="${entry ? 'access-linked' : ''}">${entry ? `Usuário vinculado: ${escapeHtml(entry.username)}` : 'Nenhum usuário vinculado'}</small></div>${entry ? `<button class="button square subtle" data-action="remove-team-credentials" data-value="${id}" aria-label="Remover acesso de ${escapeHtml(team.name)}">${icons.close}</button>` : ''}</div>
-      <div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="${entry ? escapeHtml(entry.username) : 'ex: gestor.time'}"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><div class="password-field"><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"><button type="button" class="button square subtle" data-action="generate-team-password" data-value="${id}" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-team-credentials" data-value="${id}" title="Copiar usuário e senha">${icons.copy}</button></div></div></div>
-      <button class="button subtle access-row-save" data-action="set-team-credentials" data-value="${id}">${entry ? 'Atualizar acesso' : 'Vincular acesso'}</button></article>`;
+    return `<article class="access-row"><div class="access-row-head"><div><strong>${escapeHtml(team.name)}</strong><small class="${entry ? 'access-linked' : ''}">${entries.length ? `${entries.length} usuário(s): ${entries.map(item => escapeHtml(item.username)).join(', ')}` : 'Nenhum usuário vinculado'}</small></div></div>${entries.map(item => `<div class="access-user-row"><span>${escapeHtml(item.username)}</span><button class="button square subtle" data-action="remove-team-credentials" data-value="${id}|${escapeHtml(item.username)}" aria-label="Remover ${escapeHtml(item.username)}">${icons.close}</button></div>`).join('')}
+      <div class="field-row"><div class="field"><label for="access-username-${id}">Usuário</label><input id="access-username-${id}" name="acesso-time-${id}" maxlength="40" autocomplete="off" placeholder="ex: gestor.time"></div><div class="field"><label for="access-password-${id}">Senha · visível para conferência</label><div class="password-field"><input id="access-password-${id}" name="chave-time-${id}" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="mínimo 8 caracteres"><button type="button" class="button square subtle" data-action="generate-team-password" data-value="${id}" title="Gerar senha automática">${icons.refresh}</button><button type="button" class="button square subtle" data-action="copy-team-credentials" data-value="${id}" title="Copiar usuário e senha">${icons.copy}</button></div></div></div>
+      <button class="button subtle access-row-save" data-action="set-team-credentials" data-value="${id}">${entries.length ? 'Adicionar ou atualizar usuário' : 'Vincular acesso'}</button></article>`;
   }).join('') || '<div class="portal-empty">Nenhum time cadastrado.</div>';
   return `<div class="module-section"><div class="section-header"><div><h3 class="section-title">Administradores do painel</h3><p class="help-text">Contas com acesso completo ao painel e a todos os times cadastrados.</p></div></div>
     <div class="team-catalog"><div class="team-catalog-head"><div><strong>${accessAdmins.length} administrador${accessAdmins.length === 1 ? '' : 'es'}</strong><small>É necessário manter pelo menos um administrador ativo.</small></div></div>
@@ -1664,7 +1703,7 @@ function renderMatchesModule() {
   const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === editor.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
   const sorted = [...operationsData.matches].sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || '')));
   const list = sorted.map(item => `<article class="match-operation-card ${item.id === selected?.id ? 'active' : ''}"><button data-action="select-match" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(operationChampionshipName(item.championshipId))} · ${escapeHtml(item.round || 'Rodada')}</span><strong>${escapeHtml(operationTeamName(item.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(item.awayTeamId))}</strong><small>${operationDate(item.kickoffAt, true)} · ${escapeHtml(item.venue || 'Local não informado')}</small></button><a class="button subtle" href="/?room=${encodeURIComponent(item.room)}">Abrir transmissão</a></article>`).join('') || '<div class="portal-empty">Nenhuma partida agendada.</div>';
-  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(editor.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(editor.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(editor.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${editor.status === 'scheduled' ? 'selected' : ''}>Agendada</option><option value="live" ${editor.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${editor.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(editor.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(editor.room || '')}" ${selected ? 'readonly' : ''} placeholder="Gerado automaticamente se ficar vazio"><small>${selected ? 'A sala é permanente para preservar os overlays e URLs desta partida.' : 'Este código aparece em todas as URLs dos overlays desta partida.'}</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(editor.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(editor.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(editor.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${editor.status === 'scheduled' ? 'selected' : ''}>Agendada</option><option value="live" ${editor.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${editor.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-deadline">Prazo do cadastro das equipes</label><input id="match-deadline" type="date" value="${escapeHtml(editor.registrationDeadline || '')}"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(editor.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(editor.room || '')}" ${selected ? 'readonly' : ''} placeholder="Gerado automaticamente se ficar vazio"><small>${selected ? 'A sala é permanente para preservar os overlays e URLs desta partida.' : 'Este código aparece em todas as URLs dos overlays desta partida.'}</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
 }
 
 const OPERATION_ACTION_LABELS = { 'delegation.completed': 'Delegação concluída', 'delegation.changed': 'Delegação alterada', 'delegation.saved': 'Cadastro de delegação salvo', 'championship.created': 'Campeonato criado', 'championship.updated': 'Campeonato atualizado', 'championship.deleted': 'Campeonato excluído', 'match.created': 'Partida criada', 'match.updated': 'Partida atualizada', 'match.deleted': 'Partida excluída' };
@@ -1699,7 +1738,7 @@ function renderDashboardModule() {
       <div class="dashboard-list">${recentLogs}</div>
     </section>
     <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Acessos e times cadastrados</h3><p class="help-text">Usuários com acesso ao painel e aos portais de equipe.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('access'))}">Gerenciar acessos</a></div>
-      <div class="dashboard-stats"><article><strong>${teamCatalog.length}</strong><span>Times cadastrados</span></article><article><strong>${accessTeamCredentials.length}</strong><span>Times com acesso vinculado</span></article><article><strong>${accessAdmins.length}</strong><span>Administradores</span></article></div>
+      <div class="dashboard-stats"><article><strong>${teamCatalog.length}</strong><span>Times cadastrados</span></article><article><strong>${new Set(accessTeamCredentials.map(entry => entry.teamId)).size}</strong><span>Times com acesso vinculado</span></article><article><strong>${accessAdmins.length}</strong><span>Administradores</span></article><article><strong>${delegationRows().filter(row => row.status === 'completed').length}</strong><span>Delegações para revisar</span></article><article><strong>${delegationRows().filter(row => row.late).length}</strong><span>Prazos vencidos</span></article></div>
     </section>
     <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Estatísticas agregadas</h3><p class="help-text">${dashboardStats.status === 'loading' ? 'Calculando a partir dos dados de cada partida…' : `Somado de ${statsRooms.length} de ${matches.length} partida${matches.length === 1 ? '' : 's'} com sala registrada.`}</p></div><button class="button subtle" data-action="refresh-dashboard-stats">${dashboardStats.status === 'loading' ? 'Calculando…' : 'Atualizar'}</button></div>
       ${aggregatedTiles.length ? `<div class="dashboard-stats">${aggregatedTiles.map(([label, value]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div>` : '<div class="portal-empty">Sem dados suficientes ainda. Finalize partidas para ver estatísticas somadas.</div>'}
@@ -1738,7 +1777,7 @@ function renderRosterTab() {
     <div class="field roster-editor"><label for="roster-input">Jogadores · número e nome</label><textarea id="roster-input" data-team="${state.lineupTeam}" data-team-field="roster">${escapeHtml(state[state.lineupTeam].roster)}</textarea></div>
     <div class="lineup-output-choices"><button class="button ${state.visible.lineup ? 'primary' : ''}" data-action="toggle-lineup">${icons.list} ${state.visible.lineup ? 'Retirar escalação simples' : 'Exibir escalação simples'}</button><button class="button ${state.visible.photoLineup ? 'primary' : ''}" data-action="toggle-photo-lineup">${icons.users} ${state.visible.photoLineup ? 'Retirar apresentação' : 'Exibir apresentação'}</button></div>
     <section class="lineup-director"><div class="lineup-director-head"><div><strong>Direção da apresentação</strong><small>Controle cada bloco ou rode a sequência completa.</small></div><button class="button primary" data-action="start-lineup-sequence">${icons.play} Apresentar sequência</button></div><div class="lineup-stage-tabs">${stageButtons.map(([value,label]) => `<button class="${state.photoLineupStage === value ? 'active' : ''}" data-action="set-photo-lineup-stage" data-value="${value}">${label}</button>`).join('')}</div><div class="lineup-director-status"><span>${state.photoLineupAuto?.running ? 'Sequência automática no ar' : 'Controle manual'}</span><strong>${starters.length} titulares · ${reserves.length} reservas</strong></div><div class="individual-nav"><button class="button subtle" data-action="previous-lineup-player">← Anterior</button><span>Titular ${Math.min(Number(state.photoLineupPlayerIndex || 0) + 1, Math.max(1, starters.length))} de ${starters.length}</span><button class="button subtle" data-action="next-lineup-player">Próximo →</button></div></section>
-    ${selectedTeam ? `<section class="lineup-registration"><div class="section-header"><div><h3 class="section-title">Cadastro da apresentação</h3><p class="help-text">Defina foto, função e posição sem sair do painel.</p></div></div><div class="lineup-staff-row"><label><span>Esquema tático</span><select data-lineup-formation="${escapeHtml(selectedTeam.id)}">${Object.keys(FORMATIONS).map(value => `<option value="${value}" ${selectedTeam.formation === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label><span>Treinador</span><input data-lineup-coach-name="${escapeHtml(selectedTeam.id)}" maxlength="100" value="${escapeHtml(selectedTeam.coach?.name || 'Treinador')}"></label><label class="lineup-upload">${selectedTeam.coach?.photo ? 'Trocar foto do treinador' : 'Foto do treinador'}<input type="file" data-lineup-coach-photo="${escapeHtml(selectedTeam.id)}" accept="image/png,image/jpeg,image/webp"></label></div><div class="lineup-athlete-manager">${athletes.map((athlete, index) => `<article class="lineup-athlete-row"><div class="lineup-athlete-thumb">${athlete.photo ? `<img src="${escapeHtml(athlete.photo)}" alt="Foto de ${escapeHtml(athlete.name)}">` : `<span>${escapeHtml(athlete.number || String(index + 1))}</span>`}<label>${athlete.photo ? 'Trocar' : 'Foto'}<input type="file" data-lineup-athlete-photo="${escapeHtml(athlete.id)}" data-lineup-team-id="${escapeHtml(selectedTeam.id)}" accept="image/png,image/jpeg,image/webp"></label></div><div><strong>${escapeHtml(athlete.number || '—')} · ${escapeHtml(athlete.name || `Atleta ${index + 1}`)}</strong><small>${athlete.height ? `${escapeHtml(String(athlete.height).replace('.', ','))} m` : 'Altura não informada'}</small></div><select data-lineup-athlete-role="${escapeHtml(athlete.id)}" data-lineup-team-id="${escapeHtml(selectedTeam.id)}" aria-label="Função de ${escapeHtml(athlete.name)}"><option value="starter" ${athlete.squadRole !== 'reserve' ? 'selected' : ''}>Titular</option><option value="reserve" ${athlete.squadRole === 'reserve' ? 'selected' : ''}>Reserva</option></select><input class="lineup-position-input" data-lineup-athlete-position="${escapeHtml(athlete.id)}" data-lineup-team-id="${escapeHtml(selectedTeam.id)}" maxlength="6" value="${escapeHtml(athlete.position || '')}" placeholder="POS" aria-label="Posição de ${escapeHtml(athlete.name)}"></article>`).join('')}</div></section>` : '<p class="help-text">Selecione um time cadastrado para gerenciar fotos, reservas, treinador e esquema tático.</p>'}
+    ${selectedTeam ? `<section class="lineup-registration"><div class="section-header"><div><h3 class="section-title">Cadastro da apresentação</h3><p class="help-text">Defina foto, função e posição sem sair do painel.</p></div></div><div class="lineup-staff-row"><label><span>Esquema tático</span><select data-lineup-formation="${escapeHtml(selectedTeam.id)}">${Object.keys(FORMATIONS).map(value => `<option value="${value}" ${selectedTeam.formation === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><label><span>Treinador</span><input data-lineup-coach-name="${escapeHtml(selectedTeam.id)}" maxlength="100" value="${escapeHtml(selectedTeam.coach?.name || 'Treinador')}"></label><label class="lineup-upload">${selectedTeam.coach?.photo ? 'Trocar foto do treinador' : 'Foto do treinador'}<input type="file" data-lineup-coach-photo="${escapeHtml(selectedTeam.id)}" accept="image/png,image/jpeg,image/webp"></label></div>${renderMatchSquadEditor(selectedTeam, athletes)}<div class="lineup-athlete-manager">${athletes.map((athlete, index) => `<article class="lineup-athlete-row"><div class="lineup-athlete-thumb">${athlete.photo ? `<img src="${escapeHtml(athlete.photo)}" alt="Foto de ${escapeHtml(athlete.name)}">` : `<span>${escapeHtml(athlete.number || String(index + 1))}</span>`}<label>${athlete.photo ? 'Trocar' : 'Foto'}<input type="file" data-lineup-athlete-photo="${escapeHtml(athlete.id)}" data-lineup-team-id="${escapeHtml(selectedTeam.id)}" accept="image/png,image/jpeg,image/webp"></label></div><div><strong>${escapeHtml(athlete.number || '—')} · ${escapeHtml(athlete.name || `Atleta ${index + 1}`)}</strong><small>${athlete.height ? `${escapeHtml(String(athlete.height).replace('.', ','))} m` : 'Altura não informada'}</small></div><select data-lineup-athlete-role="${escapeHtml(athlete.id)}" data-lineup-team-id="${escapeHtml(selectedTeam.id)}" aria-label="Função de ${escapeHtml(athlete.name)}"><option value="starter" ${athlete.squadRole !== 'reserve' ? 'selected' : ''}>Titular</option><option value="reserve" ${athlete.squadRole === 'reserve' ? 'selected' : ''}>Reserva</option></select><input class="lineup-position-input" data-lineup-athlete-position="${escapeHtml(athlete.id)}" data-lineup-team-id="${escapeHtml(selectedTeam.id)}" maxlength="6" value="${escapeHtml(athlete.position || '')}" placeholder="POS" aria-label="Posição de ${escapeHtml(athlete.name)}"></article>`).join('')}</div></section>` : '<p class="help-text">Selecione um time cadastrado para gerenciar fotos, reservas, treinador e esquema tático.</p>'}
     ${selectedTeam ? renderStaffManager(selectedTeam) : ''}
     <div class="photo-lineup-option"><div><strong>Patrocinadores no rodapé</strong><small>Usa a mídia exclusiva, logo ou banner de cada marca.</small></div><button class="button subtle ${state.photoLineupShowSponsors ? 'active' : ''}" data-action="toggle-photo-lineup-sponsors">${state.photoLineupShowSponsors ? 'Exibindo' : 'Oculto'}</button></div>
     ${appearanceRange('photoLineupSponsorBarSize', 'Tamanho da barra de patrocinadores', state.appearance.photoLineupSponsorBarSize, 60, 180, '%')}
@@ -1790,6 +1829,30 @@ function renderAppearanceComponent(title, caption, prefix) {
   const appearance = state.appearance || defaultAppearance();
   const gcPositions = prefix === 'event' ? `<div class="gc-position-presets"><span>Locais padrão do GC</span><div>${[['left','Esquerda'],['center','Centro'],['right','Direita']].map(([value, label]) => `<button class="button subtle ${appearance.eventPosition === value ? 'active' : ''}" data-action="event-position" data-value="${value}">${label}</button>`).join('')}</div></div>` : '';
   return `<div class="parameter-card"><div class="parameter-card-head"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(caption)}</small></div><span>${escapeHtml(appearance[`${prefix}Scale`])}%</span></div>${appearanceRange(`${prefix}Scale`, 'Tamanho do elemento', appearance[`${prefix}Scale`])}${appearanceRange(`${prefix}Font`, 'Tamanho da fonte', appearance[`${prefix}Font`])}${appearanceTypeface(`${prefix}Typeface`, appearance[`${prefix}Typeface`])}${gcPositions}<div class="position-controls"><strong>Posição no overlay</strong>${appearanceRange(`${prefix}X`, 'Horizontal', appearance[`${prefix}X`], 0, 100, '%')}${appearanceRange(`${prefix}Y`, 'Vertical', appearance[`${prefix}Y`], 0, 100, '%')}</div></div>`;
+}
+
+function renderMatchSquadEditor(team, athletes) {
+  const key = squadKey(team);
+  const squad = state.squad?.[key];
+  const { starters } = lineupGroups(team);
+  const starterIds = new Set(starters.map(athlete => athlete.id));
+  const calledIds = squad?.called?.length ? new Set(squad.called) : new Set(athletes.map(athlete => athlete.id));
+  const limit = currentSport().teamSize;
+  return `<div class="match-squad"><div class="section-header"><div><h3 class="section-title">Elenco desta partida</h3><p class="help-text">Escolha quem foi relacionado e os ${limit} titulares só para este jogo. Arraste as bolinhas na prévia do esquema tático para ajustar posições.</p></div><button class="button subtle" data-action="reset-squad" data-value="${escapeHtml(key)}" ${squad ? '' : 'disabled'}>Voltar ao padrão do time</button></div><div class="lineup-staff-row"><label><span>Esquema nesta partida</span><select data-squad-formation="${escapeHtml(key)}"><option value="">Padrão do time (${escapeHtml(team.formation || '4-3-3')})</option>${Object.keys(FORMATIONS).map(value => `<option value="${value}" ${squad?.formation === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label><button class="button subtle" data-action="reset-squad-positions" data-value="${escapeHtml(key)}" ${Object.keys(squad?.positions || {}).length ? '' : 'disabled'}>Restaurar posições</button></div><div class="match-squad-list">${athletes.map(athlete => `<div class="match-squad-row"><strong>${escapeHtml(athlete.number || '—')} · ${escapeHtml(athlete.name || 'Atleta')}</strong><label><input type="checkbox" data-squad-called="${escapeHtml(athlete.id)}" data-squad-team="${escapeHtml(key)}" ${calledIds.has(athlete.id) ? 'checked' : ''}> Relacionado</label><label><input type="checkbox" data-squad-starter="${escapeHtml(athlete.id)}" data-squad-team="${escapeHtml(key)}" ${starterIds.has(athlete.id) ? 'checked' : ''}> Titular</label></div>`).join('')}</div><small class="help-text">${starters.length} de ${limit} titulares definidos.</small></div>`;
+}
+
+function teamForSquad(key) {
+  return teamCatalog.find(item => squadKey(item) === key) || activeLineupTeam();
+}
+
+function ensureSquad(draft, team, athletes) {
+  const key = squadKey(team);
+  draft.squad ||= {};
+  if (!draft.squad[key]) {
+    const { starters } = lineupGroups(team);
+    draft.squad[key] = { called: athletes.map(athlete => athlete.id), starters: starters.map(athlete => athlete.id), formation: '', positions: {} };
+  }
+  return draft.squad[key];
 }
 
 function renderSponsorManager() {
@@ -2090,6 +2153,7 @@ function renderOverlayBuilder() {
 
 function renderModuleControls(key) {
   if (key === 'dashboard') return renderDashboardModule();
+  if (key === 'delegations') return renderDelegationsModule();
   if (key === 'championships') return renderChampionshipsModule();
   if (key === 'matches') return renderMatchesModule();
   if (key === 'audit') return renderAuditModule();
@@ -2137,7 +2201,7 @@ function renderManagementSidebar(activeKey = 'overview') {
   const footer = `<p class="app-version module-sidebar-version">${versionLabel()}</p>`;
   if (platformMode) {
     const platformHref = item => platformUrl(item.key);
-    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${group('Organização', byKey(['championships', 'matches']), platformHref)}${group('Configuração', byKey(['teams', 'access']), platformHref)}${group('Histórico', byKey(['audit']), platformHref)}${footer}</aside>`;
+    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${group('Organização', byKey(['championships', 'matches']), platformHref)}${group('Configuração', byKey(['teams', 'delegations', 'access']), platformHref)}${group('Histórico', byKey(['audit']), platformHref)}${footer}</aside>`;
   }
   const matchTitle = `${escapeHtml(state.home.short)} × ${escapeHtml(state.away.short)}`;
   const matchModules = MANAGEMENT_MODULES.filter(item => !PLATFORM_MODULE_KEYS.includes(item.key));
@@ -2149,8 +2213,8 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'audit', 'builder', 'access'].includes(module?.key);
-  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? '' : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? '' : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','audit'].includes(module.key) ? 'Gestão da transmissão' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access'].includes(module?.key);
+  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? '' : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? '' : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit'].includes(module.key) ? 'Gestão da transmissão' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
 function renderMatchDashboard() {
@@ -2176,11 +2240,141 @@ function renderAuthWait(message) {
   return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><h1>${escapeHtml(message)}</h1><p>Aguarde um instante.</p></section></main>`;
 }
 
+function teamIssues(team) {
+  const athletes = Array.isArray(team?.athletes) ? team.athletes : [];
+  const issues = [];
+  const byNumber = new Map();
+  for (const athlete of athletes) {
+    const number = String(athlete?.number || '').trim();
+    if (number) byNumber.set(number, [...(byNumber.get(number) || []), athlete.name || 'sem nome']);
+  }
+  for (const [number, names] of byNumber) if (names.length > 1) issues.push({ level: 'error', text: `Número ${number} repetido: ${names.join(', ')}.` });
+  const withoutPhoto = athletes.filter(athlete => !athlete.photo);
+  if (withoutPhoto.length) issues.push({ level: 'warn', text: `${withoutPhoto.length} atleta(s) sem foto.` });
+  for (const athlete of athletes.filter(item => String(item.name || '').length > 26).slice(0, 3)) issues.push({ level: 'warn', text: `Nome longo: "${String(athlete.name).slice(0, 26)}…" será cortado no card (limite de 26 letras).` });
+  if (!team?.logo) issues.push({ level: 'warn', text: 'Equipe sem escudo.' });
+  const starters = athletes.filter(athlete => athlete.squadRole !== 'reserve').length;
+  if (athletes.length && starters !== 11) issues.push({ level: 'warn', text: `${starters} titular(es) marcado(s); o esquema tático usa 11.` });
+  return issues;
+}
+
+function deadlineInfo(deadline) {
+  if (!deadline) return null;
+  const days = Math.ceil((new Date(`${deadline}T23:59:59`).getTime() - Date.now()) / 86400000);
+  if (Number.isNaN(days)) return null;
+  return { days, date: String(deadline).split('-').reverse().join('/'), level: days < 0 ? 'late' : days <= 2 ? 'soon' : 'ok', label: days < 0 ? `Prazo vencido há ${Math.abs(days)} dia(s)` : days === 0 ? 'O prazo termina hoje' : `Faltam ${days} dia(s)` };
+}
+
+function renderPortalChecks() {
+  const info = deadlineInfo(teamPortalDeadline);
+  const status = teamDelegation.status;
+  const banners = [
+    info && status !== 'approved' ? `<div class="portal-banner portal-banner-${info.level}"><strong>Prazo do cadastro: ${escapeHtml(info.date)}</strong><span>${escapeHtml(info.label)}</span></div>` : '',
+    status === 'approved' ? '<div class="portal-banner portal-banner-ok"><strong>Cadastro aprovado pela organização</strong><span>Alterações novas voltam para revisão.</span></div>' : '',
+    status === 'needs-review' && teamDelegation.reviewComment ? `<div class="portal-banner portal-banner-late"><strong>Devolvido pela organização</strong><span>${escapeHtml(teamDelegation.reviewComment)}</span></div>` : '',
+  ].join('');
+  const issues = teamIssues(teamPortalTeam);
+  return `${banners}<section class="portal-checks"><div><strong>Verificações do cadastro</strong><small>Alertas antes de concluir a delegação.</small></div>${issues.length ? `<ul>${issues.map(issue => `<li class="portal-check-${issue.level}">${escapeHtml(issue.text)}</li>`).join('')}</ul>` : '<p class="portal-check-good">Tudo certo: sem números repetidos, fotos faltando ou nomes longos.</p>'}</section>`;
+}
+
+function renderTeamKit() {
+  const team = teamPortalTeam;
+  const sponsors = team.sponsors || [];
+  return `<section class="portal-kit"><div class="section-header"><div><h3 class="section-title">Kit de mídia da equipe</h3><p class="help-text">Cor secundária e apoiadores da equipe.</p></div><button class="button subtle" data-action="portal-add-sponsor" ${sponsors.length >= 6 ? 'disabled' : ''}>+ Apoiador</button></div><label class="color-field"><span>Cor secundária</span><input type="color" data-portal-team-field="color2" value="${safeColor(team.color2, '#d8ad56')}"></label>${sponsors.map(sponsor => `<div class="portal-sponsor-row"><input data-portal-sponsor-name="${escapeHtml(sponsor.id)}" maxlength="60" value="${escapeHtml(sponsor.name)}" placeholder="Nome do apoiador"><button class="button square subtle" data-action="portal-remove-sponsor" data-value="${escapeHtml(sponsor.id)}" aria-label="Remover apoiador">${icons.close}</button></div>`).join('')}<div class="kit-preview" style="--kit-a:${safeColor(team.color)};--kit-b:${safeColor(team.color2, '#d8ad56')}"><span class="kit-shield">${team.logo ? `<img src="${escapeHtml(team.logo)}" alt="">` : escapeHtml(team.short)}</span><b>${escapeHtml(team.short)}</b><span class="kit-name">${escapeHtml(team.name)}</span><span class="kit-score">0</span>${sponsors.filter(sponsor => sponsor.name).map(sponsor => `<em>${escapeHtml(sponsor.name)}</em>`).join('')}</div></section>`;
+}
+
+function renderPortalImport() {
+  return `<details class="portal-import"><summary>Importar elenco por planilha e fotos em lote</summary><p class="help-text">Uma linha por atleta: <code>número;nome;posição;altura;titular ou reserva</code> (posição, altura e função são opcionais). Números que já existem são atualizados.</p><textarea id="portal-csv" rows="6" placeholder="10;Leonardo Lima;MEI;1,78;titular"></textarea><div class="inline-actions"><button class="button subtle" data-action="portal-import-csv">Importar elenco</button><label class="button subtle portal-file-button">Abrir arquivo CSV<input type="file" data-portal-csv-file accept=".csv,text/csv,text/plain"></label><label class="button subtle portal-file-button">Fotos em lote<input type="file" multiple data-portal-batch-photos accept="image/png,image/jpeg,image/webp"></label></div><small class="help-text">Nas fotos em lote, o nome do arquivo deve conter o número da camisa (ex.: 10.jpg). Até 5 MB cada; prefira menos de 1,5 MB.</small></details>`;
+}
+
+function importRosterCsv(text) {
+  const rows = String(text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (rows.length && /^n[uú]mero|^n[º°o]\b/i.test(rows[0])) rows.shift();
+  let added = 0;
+  let updated = 0;
+  for (const [index, row] of rows.entries()) {
+    const delimiter = row.includes(';') ? ';' : row.includes('\t') ? '\t' : ',';
+    const [rawNumber = '', rawName = '', rawPosition = '', rawHeight = '', rawRole = ''] = row.split(delimiter).map(cell => cell.trim());
+    const number = rawNumber.replace(/\D/g, '').slice(0, 3);
+    if (!number || !rawName) continue;
+    const fields = { name: rawName.slice(0, 100), number, position: rawPosition.toUpperCase().replace(/[^A-ZÀ-Ü0-9-]/g, '').slice(0, 6), height: rawHeight.replace(',', '.').replace(/[^0-9.]/g, '').slice(0, 5) };
+    const existing = teamPortalTeam.athletes.find(athlete => String(athlete.number).trim() === number);
+    if (existing) { Object.assign(existing, fields); if (rawRole) existing.squadRole = /reserva/i.test(rawRole) ? 'reserve' : 'starter'; updated += 1; continue; }
+    if (teamPortalTeam.athletes.length >= 100) break;
+    const role = rawRole ? (/reserva/i.test(rawRole) ? 'reserve' : 'starter') : (teamPortalTeam.athletes.length < 11 ? 'starter' : 'reserve');
+    teamPortalTeam.athletes.push({ id: `atleta-${Date.now().toString(36)}${index}`, photo: '', squadRole: role, ...fields });
+    added += 1;
+  }
+  return { added, updated };
+}
+
+async function importBatchPhotos(files) {
+  if (!teamPortalTeam) return;
+  await saveTeamPortal();
+  let sent = 0;
+  let heavy = 0;
+  const failed = [];
+  for (const file of files) {
+    const number = (file.name.match(/\d+/) || [''])[0];
+    const athlete = number ? teamPortalTeam.athletes.find(item => String(item.number).trim() === number) : null;
+    if (!athlete || file.size > 5_000_000) { failed.push(file.name); continue; }
+    if (file.size > 1_500_000) heavy += 1;
+    try {
+      const response = await fetch(`/api/team-athlete-photo?team=${encodeURIComponent(teamSession.teamId)}&athlete=${encodeURIComponent(athlete.id)}`, { method: 'PUT', headers: { 'content-type': file.type || 'image/png' }, body: file });
+      if (!response.ok) throw new Error();
+      const result = await response.json();
+      athlete.photo = `${result.url}${String(result.url).includes('?') ? '&' : '?'}v=${Date.now()}`;
+      sent += 1;
+    } catch { failed.push(file.name); }
+  }
+  teamPortalStatus = 'ready';
+  render();
+  await saveTeamPortal();
+  toast(`${sent} foto(s) enviada(s)${heavy ? `; ${heavy} acima de 1,5 MB` : ''}${failed.length ? `; sem correspondência ou falha: ${failed.slice(0, 3).join(', ')}` : ''}.`);
+}
+
+const DELEGATION_LABELS = { draft: 'Em preenchimento', completed: 'Aguardando revisão', 'needs-review': 'Devolvida ou alterada', approved: 'Aprovada' };
+
+function teamNextDeadline(teamId) {
+  return operationsData.matches.filter(match => (match.homeTeamId === teamId || match.awayTeamId === teamId) && match.registrationDeadline && !['finished', 'cancelled'].includes(match.status)).map(match => match.registrationDeadline).sort()[0] || '';
+}
+
+function delegationRows() {
+  return teamCatalog.map(team => {
+    const status = operationsData.delegationStatus[team.id]?.status || 'draft';
+    const check = delegationCompletion(team);
+    const deadline = deadlineInfo(teamNextDeadline(team.id));
+    return { team, status, check, deadline, percent: Math.round(((7 - check.missing.length) / 7) * 100), late: Boolean(deadline && deadline.days < 0 && !['completed', 'approved'].includes(status)) };
+  });
+}
+
+function renderDelegationsModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  const rows = delegationRows();
+  const count = predicate => rows.filter(predicate).length;
+  const tiles = [[rows.length, 'Equipes'], [count(row => row.status === 'approved'), 'Aprovadas'], [count(row => row.status === 'completed'), 'Aguardando revisão'], [count(row => row.late), 'Prazo vencido']];
+  const cards = rows.map(({ team, status, check, deadline, percent, late }) => {
+    const id = escapeHtml(team.id);
+    const review = operationsData.delegationStatus[team.id] || {};
+    const issues = teamIssues(team);
+    const history = (operationsData.teamHistory[team.id] || []).slice(0, 5);
+    return `<article class="delegation-row ${late ? 'is-late' : ''}"><div class="delegation-row-head"><div><strong>${escapeHtml(team.name)}</strong><small>${escapeHtml(DELEGATION_LABELS[status] || status)}${review.reviewedBy ? ` · por ${escapeHtml(review.reviewedBy)}` : ''}</small></div>${deadline ? `<span class="delegation-deadline delegation-deadline-${deadline.level}">${escapeHtml(deadline.date)} · ${escapeHtml(deadline.label)}</span>` : ''}</div>
+      <div class="delegation-progress" role="progressbar" aria-valuenow="${percent}" aria-valuemin="0" aria-valuemax="100"><i style="width:${percent}%"></i><span>${percent}%</span></div>
+      ${check.missing.length ? `<p class="help-text">Falta: ${escapeHtml(check.missing.join(', '))}.</p>` : ''}
+      ${issues.length ? `<ul class="delegation-issues">${issues.map(issue => `<li class="portal-check-${issue.level}">${escapeHtml(issue.text)}</li>`).join('')}</ul>` : ''}
+      ${review.reviewComment && status === 'needs-review' ? `<p class="help-text">Motivo da devolução: ${escapeHtml(review.reviewComment)}</p>` : ''}
+      <div class="delegation-actions"><button class="button subtle" data-action="delegation-remind" data-value="${id}">Cobrar equipe</button>${status === 'completed' ? `<button class="button primary" data-action="delegation-approve" data-value="${id}">Aprovar</button>` : ''}<input id="delegation-comment-${id}" maxlength="300" placeholder="Motivo para devolver ao time"><button class="button subtle" data-action="delegation-return" data-value="${id}">Devolver</button></div>
+      <details class="delegation-history"><summary>Histórico de versões (${(operationsData.teamHistory[team.id] || []).length})</summary>${history.map(version => `<div class="dashboard-mini-row"><span>${escapeHtml(operationDate(version.at, true))} · ${escapeHtml(version.actor)} · ${escapeHtml(version.summary)}</span><button class="button subtle" data-action="restore-team-version" data-value="${id}|${escapeHtml(version.id)}">Restaurar</button></div>`).join('') || '<div class="portal-empty">Sem versões registradas ainda.</div>'}</details></article>`;
+  }).join('') || '<div class="portal-empty">Nenhuma equipe cadastrada.</div>';
+  return `<div class="module-section"><div class="dashboard-stats">${tiles.map(([value, label]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div><div class="delegation-list">${cards}</div><p class="help-text">O prazo vem do campo "Prazo do cadastro das equipes" de cada partida. Os alertas aparecem aqui e no portal da equipe; não há envio automático de e-mail ou mensagem.</p></div>`;
+}
+
 function renderTeamAuthGate() {
   if (teamSession.status === 'checking') return renderAuthWait('Verificando sessão…');
   const options = teamLoginTeams.map(team => `<option value="${escapeHtml(team.id)}">${escapeHtml(team.name)}</option>`).join('');
   return `<main class="team-portal-shell"><section class="team-portal-card team-portal-state auth-card"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><h1>Acesso da equipe</h1><p>Selecione a equipe e informe o usuário e a senha cadastrados pela organização.</p>
-    <div class="auth-form"><div class="field"><label for="team-select">Equipe</label><select id="team-select">${options || '<option value="">Nenhuma equipe cadastrada</option>'}</select></div><div class="field"><label for="team-username">Usuário</label><input id="team-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="team-password">Senha</label><input id="team-password" type="password" autocomplete="current-password" maxlength="200"></div>${teamSession.error ? `<p class="auth-error">${escapeHtml(teamSession.error)}</p>` : ''}<button class="button primary" data-action="team-login-submit" style="width:100%">Entrar</button></div><p class="app-version">${versionLabel()}</p></section></main>`;
+    <div class="auth-form"><div class="field"><label for="team-select">Equipe</label><select id="team-select">${options || '<option value="">Nenhuma equipe cadastrada</option>'}</select></div><div class="field"><label for="team-username">Usuário</label><input id="team-username" autocomplete="username" maxlength="40"></div><div class="field"><label for="team-password">Senha</label><input id="team-password" type="password" autocomplete="current-password" maxlength="200"></div>${teamSession.error ? `<p class="auth-error">${escapeHtml(teamSession.error)}</p>` : ''}<button class="button primary" data-action="team-login-submit" style="width:100%">Entrar</button><button class="button subtle" data-action="team-reset-request" style="width:100%">Esqueci minha senha</button></div><p class="app-version">${versionLabel()}</p></section></main>`;
 }
 
 function renderAdminAuthGate() {
@@ -2198,10 +2392,11 @@ function renderTeamPortal() {
   const delegationDone = teamDelegation.status === 'completed';
   const statusLabel = teamPortalStatus === 'saving' ? 'Salvando…' : teamPortalStatus === 'saved' ? 'Dados salvos' : teamPortalStatus === 'error' ? 'Erro ao salvar' : 'Alterações salvas manualmente';
   return `<main class="team-portal-shell"><section class="team-portal-card"><header class="team-portal-head"><div class="portal-brand">${brandMark()}<strong>${BRAND_NAME}</strong></div><div style="display:flex;align-items:center;gap:10px"><span class="portal-status portal-status-${escapeHtml(teamPortalStatus)}">${statusLabel}</span><button class="button square subtle" data-action="team-logout" aria-label="Sair">${icons.close}</button></div></header><div class="team-portal-team"><div class="portal-team-logo">${teamPortalTeam.logo ? `<img src="${escapeHtml(teamPortalTeam.logo)}" alt="Escudo de ${escapeHtml(teamPortalTeam.name)}">` : escapeHtml(teamPortalTeam.short)}</div><div><span>Cadastro da escalação</span><h1>${escapeHtml(teamPortalTeam.name)}</h1><p>Preencha os dados usados nas apresentações individuais, escalação geral e Mídia Kit.</p></div></div>
-    <section class="portal-team-settings"><div class="field"><label>Nome da equipe</label><input data-portal-team-field="name" maxlength="80" value="${escapeHtml(teamPortalTeam.name)}"></div><div class="field"><label>Sigla (3 letras)</label><input data-portal-team-field="short" maxlength="3" value="${escapeHtml(teamPortalTeam.short)}"></div><div class="field"><label>Cor principal</label><input type="color" data-portal-team-field="color" value="${safeColor(teamPortalTeam.color)}"></div><label class="sponsor-upload-button">${teamPortalTeam.logo ? 'Trocar escudo' : 'Enviar escudo'}<input type="file" data-portal-team-logo accept="image/png,image/jpeg,image/webp,image/svg+xml"></label></section>
+    ${renderPortalChecks()}<section class="portal-team-settings"><div class="field"><label>Nome da equipe</label><input data-portal-team-field="name" maxlength="80" value="${escapeHtml(teamPortalTeam.name)}"></div><div class="field"><label>Sigla (3 letras)</label><input data-portal-team-field="short" maxlength="3" value="${escapeHtml(teamPortalTeam.short)}"></div><div class="field"><label>Cor principal</label><input type="color" data-portal-team-field="color" value="${safeColor(teamPortalTeam.color)}"></div><label class="sponsor-upload-button">${teamPortalTeam.logo ? 'Trocar escudo' : 'Enviar escudo'}<input type="file" data-portal-team-logo accept="image/png,image/jpeg,image/webp,image/svg+xml"></label></section>
     <section class="portal-coach"><div class="portal-athlete-photo">${teamPortalTeam.coach?.photo ? `<img src="${escapeHtml(teamPortalTeam.coach.photo)}" alt="Foto de ${escapeHtml(teamPortalTeam.coach.name)}">` : '<span>TC</span>'}<label>${teamPortalTeam.coach?.photo ? 'Trocar foto' : 'Enviar foto'}<input type="file" data-portal-coach-photo accept="image/png,image/jpeg,image/webp"></label></div><label><span>Treinador</span><input data-portal-coach-name maxlength="100" value="${escapeHtml(teamPortalTeam.coach?.name || 'Treinador')}" placeholder="Nome do treinador"></label><label><span>Esquema tático</span><select data-portal-formation>${Object.keys(FORMATIONS).map(value => `<option value="${value}" ${teamPortalTeam.formation === value ? 'selected' : ''}>${value}</option>`).join('')}</select></label></section>
+    ${renderTeamKit()}
     ${renderStaffManager(teamPortalTeam, true)}
-    <div class="portal-toolbar"><div><strong>${athletes.length} atleta${athletes.length === 1 ? '' : 's'}</strong><small>Nome, número, altura, função, posição e foto.</small></div><button class="button subtle" data-action="portal-add-athlete">+ Adicionar atleta</button></div>
+    <div class="portal-toolbar"><div><strong>${athletes.length} atleta${athletes.length === 1 ? '' : 's'}</strong><small>Nome, número, altura, função, posição e foto.</small></div><button class="button subtle" data-action="portal-add-athlete">+ Adicionar atleta</button></div>${renderPortalImport()}
     <div class="portal-athlete-list">${athletes.length ? athletes.map((athlete, index) => `<article class="portal-athlete" data-athlete-id="${escapeHtml(athlete.id)}"><div class="portal-athlete-photo">${athlete.photo ? `<img src="${escapeHtml(athlete.photo)}" alt="Foto de ${escapeHtml(athlete.name || `atleta ${index + 1}`)}">` : `<span>${escapeHtml((athlete.name || 'A').slice(0, 1).toUpperCase())}</span>`}<label>${athlete.photo ? 'Trocar foto' : 'Enviar foto'}<input type="file" data-portal-athlete-photo="${escapeHtml(athlete.id)}" accept="image/png,image/jpeg,image/webp"></label></div><div class="portal-athlete-fields"><label><span>Nome completo</span><input data-portal-athlete-field="name" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="100" value="${escapeHtml(athlete.name)}" placeholder="Nome do atleta"></label><div><label><span>Número</span><input data-portal-athlete-field="number" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="6" value="${escapeHtml(athlete.number)}" inputmode="numeric" placeholder="10"></label><label><span>Altura (m)</span><input data-portal-athlete-field="height" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="5" value="${escapeHtml(athlete.height)}" inputmode="decimal" placeholder="1,78"></label><label><span>Função</span><select data-portal-athlete-field="squadRole" data-athlete-id="${escapeHtml(athlete.id)}"><option value="starter" ${athlete.squadRole !== 'reserve' ? 'selected' : ''}>Titular</option><option value="reserve" ${athlete.squadRole === 'reserve' ? 'selected' : ''}>Reserva</option></select></label><label><span>Posição</span><input data-portal-athlete-field="position" data-athlete-id="${escapeHtml(athlete.id)}" maxlength="6" value="${escapeHtml(athlete.position || '')}" placeholder="ZAG"></label></div></div><button class="button square subtle portal-remove-athlete" data-action="portal-remove-athlete" data-value="${escapeHtml(athlete.id)}" aria-label="Remover ${escapeHtml(athlete.name || 'atleta')}">×</button></article>`).join('') : '<div class="portal-empty">Nenhum atleta cadastrado. Use “Adicionar atleta” para começar.</div>'}</div>
     <section class="delegation-completion ${delegationDone ? 'is-complete' : teamDelegation.status === 'needs-review' ? 'needs-review' : ''}"><div><span>${delegationDone ? 'Cadastro concluído' : teamDelegation.status === 'needs-review' ? 'Revisão necessária' : 'Conclusão da delegação'}</span><strong>${delegationDone ? 'O Super Admin já foi avisado.' : completion.complete ? 'Todos os campos obrigatórios estão preenchidos.' : 'Ainda faltam dados para concluir.'}</strong>${completion.missing.length ? `<p>Complete: ${escapeHtml(completion.missing.join(', '))}.</p>` : '<p>Ao concluir, um aviso será enviado ao Super Admin e a ação ficará registrada no histórico.</p>'}</div><button class="button primary" data-action="complete-team-delegation" ${!completion.complete || delegationDone || teamPortalStatus === 'saving' ? 'disabled' : ''}>${delegationDone ? 'Delegação concluída' : 'Concluir e avisar'}</button></section>
     <footer class="portal-footer"><p>As fotos devem estar em PNG, JPG ou WebP e ter até 5 MB.</p><button class="button portal-save" data-action="portal-save" ${teamPortalStatus === 'saving' ? 'disabled' : ''}>${teamPortalStatus === 'saving' ? 'Salvando…' : 'Salvar rascunho'}</button></footer></section></main>`;
@@ -2258,7 +2453,7 @@ function outputFingerprint(layer) {
   if (layer === 'sponsor-bar') return JSON.stringify({ ...common, appearance: { sponsorBarDuration: state.appearance?.sponsorBarDuration, sponsorBarAnimationSpeed: state.appearance?.sponsorBarAnimationSpeed, sponsorBarTransition: state.appearance?.sponsorBarTransition, sponsorBarFit: state.appearance?.sponsorBarFit, sponsorBarScale: state.appearance?.sponsorBarScale, sponsorBarX: state.appearance?.sponsorBarX, sponsorBarY: state.appearance?.sponsorBarY, sponsorBarOpacity: state.appearance?.sponsorBarOpacity, sponsorBarRadius: state.appearance?.sponsorBarRadius, sponsorBarBorder: state.appearance?.sponsorBarBorder, sponsorBarShadow: state.appearance?.sponsorBarShadow, sponsorBarBackground: state.appearance?.sponsorBarBackground }, visible: state.visible.sponsorBar, items: state.sponsorBarItems, activeSponsorIndex: state.sponsorBarActiveIndex, mode: state.sponsorBarMode, video: state.sponsorBarVideo });
   if (layer === 'lineup') return JSON.stringify({ ...common, appearance: appearanceFor('lineup'), visible: state.visible.lineup, lineupTeam: state.lineupTeam, home: state.home, away: state.away });
   if (layer === 'custom') { const item = selectedCustomOverlay(); return JSON.stringify(item ? { ...item, transition: undefined } : null); }
-  return JSON.stringify({ ...common, appearance: appearanceFor('photoLineup'), visible: state.visible.photoLineup, lineupTeam: state.lineupTeam, selectedTeams: state.selectedTeams, home: state.home, away: state.away, teamCatalog, stage: state.photoLineupStage, player: state.photoLineupPlayerIndex, showSponsors: state.photoLineupShowSponsors, sponsor: activeSponsor() });
+  return JSON.stringify({ ...common, appearance: appearanceFor('photoLineup'), visible: state.visible.photoLineup, lineupTeam: state.lineupTeam, squad: state.squad, selectedTeams: state.selectedTeams, home: state.home, away: state.away, teamCatalog, stage: state.photoLineupStage, player: state.photoLineupPlayerIndex, showSponsors: state.photoLineupShowSponsors, sponsor: activeSponsor() });
 }
 
 function outputAnimationFingerprint(layer) {
@@ -2558,7 +2753,7 @@ function handleAction(action, target) {
   if (action === 'new-operation-match') { selectedMatchId = ''; matchDraft = { championshipId: '', homeTeamId: '', awayTeamId: '', kickoffAt: '', status: 'scheduled', round: '', venue: '', room: '' }; render(); return; }
   if (action === 'select-match') { selectedMatchId = target.dataset.value; matchDraft = structuredClone(operationsData.matches.find(item => item.id === selectedMatchId) || null); render(); return; }
   if (action === 'save-operation-match') {
-    const item = { id: target.dataset.value || '', championshipId: document.getElementById('match-championship')?.value || '', homeTeamId: document.getElementById('operation-home')?.value || '', awayTeamId: document.getElementById('operation-away')?.value || '', kickoffAt: document.getElementById('match-kickoff')?.value || '', status: document.getElementById('match-status')?.value || 'scheduled', round: document.getElementById('match-round')?.value || '', venue: document.getElementById('match-venue')?.value || '', room: document.getElementById('match-room')?.value || '' };
+    const item = { id: target.dataset.value || '', championshipId: document.getElementById('match-championship')?.value || '', homeTeamId: document.getElementById('operation-home')?.value || '', awayTeamId: document.getElementById('operation-away')?.value || '', kickoffAt: document.getElementById('match-kickoff')?.value || '', status: document.getElementById('match-status')?.value || 'scheduled', round: document.getElementById('match-round')?.value || '', venue: document.getElementById('match-venue')?.value || '', registrationDeadline: document.getElementById('match-deadline')?.value || '', room: document.getElementById('match-room')?.value || '' };
     postOperation('upsert-match', { item }).then(ok => { if (!ok) return; const saved = operationsData.matches.find(entry => entry.id === item.id) || operationsData.matches[0]; selectedMatchId = saved?.id || ''; matchDraft = null; toast('Partida salva com uma sala própria de overlays.'); render(); });
     return;
   }
@@ -2758,7 +2953,7 @@ function handleAction(action, target) {
     fetch('/api/auth/team/credentials', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: teamIdValue, username, password }) })
       .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
       .then(({ ok, data }) => {
-        if (ok) accessTeamCredentials = [...accessTeamCredentials.filter(entry => entry.teamId !== teamIdValue), { teamId: teamIdValue, username: data.username, updatedAt: Date.now() }];
+        if (ok) accessTeamCredentials = [...accessTeamCredentials.filter(entry => !(entry.teamId === teamIdValue && entry.username === data.username)), { teamId: teamIdValue, username: data.username, updatedAt: Date.now() }];
         toast(ok ? `Acesso de "${data.username}" salvo para a equipe.` : (data.error || 'Falha ao salvar acesso da equipe.'));
         render();
       })
@@ -2766,11 +2961,11 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'remove-team-credentials') {
-    const teamIdValue = target.dataset.value;
-    fetch(`/api/auth/team/credentials?teamId=${encodeURIComponent(teamIdValue)}`, { method: 'DELETE' })
+    const [teamIdValue, removedUser = ''] = String(target.dataset.value || '').split('|');
+    fetch(`/api/auth/team/credentials?teamId=${encodeURIComponent(teamIdValue)}${removedUser ? `&username=${encodeURIComponent(removedUser)}` : ''}`, { method: 'DELETE' })
       .then(async response => ({ ok: response.ok, data: await response.json().catch(() => ({})) }))
       .then(({ ok, data }) => {
-        if (ok) accessTeamCredentials = accessTeamCredentials.filter(entry => entry.teamId !== teamIdValue);
+        if (ok) accessTeamCredentials = accessTeamCredentials.filter(entry => entry.teamId !== teamIdValue || (removedUser && entry.username !== removedUser));
         toast(ok ? 'Acesso da equipe removido.' : (data.error || 'Falha ao remover acesso da equipe.'));
         render();
       })
@@ -2801,6 +2996,57 @@ function handleAction(action, target) {
         render();
       })
       .catch(() => toast('Falha ao remover administrador.'));
+    return;
+  }
+  if (action === 'reset-squad') { commit(draft => { delete draft.squad?.[target.dataset.value]; }, { immediate: true }); toast('Elenco da partida voltou ao padrão do time.'); return; }
+  if (action === 'reset-squad-positions') { commit(draft => { if (draft.squad?.[target.dataset.value]) draft.squad[target.dataset.value].positions = {}; }, { immediate: true }); return; }
+  if (action === 'delegation-approve') { postOperation('review-delegation', { teamId: target.dataset.value, decision: 'approved' }).then(ok => { if (ok) toast('Delegação aprovada.'); }); return; }
+  if (action === 'delegation-return') {
+    const comment = document.getElementById(`delegation-comment-${target.dataset.value}`)?.value.trim() || '';
+    if (!comment) { toast('Informe o motivo da devolução.'); return; }
+    postOperation('review-delegation', { teamId: target.dataset.value, decision: 'returned', comment }).then(ok => { if (ok) toast('Delegação devolvida ao time.'); });
+    return;
+  }
+  if (action === 'restore-team-version') {
+    const [restoreTeamId, versionId] = String(target.dataset.value || '').split('|');
+    if (!confirm('Restaurar esta versão do cadastro? A versão atual continua guardada no histórico.')) return;
+    postOperation('restore-team-version', { teamId: restoreTeamId, versionId }).then(ok => { if (ok) { toast('Versão restaurada.'); pollTeamCatalog(); } });
+    return;
+  }
+  if (action === 'delegation-remind') {
+    const row = delegationRows().find(item => item.team.id === target.dataset.value);
+    if (!row) return;
+    const message = `Olá! Ainda há pendências no cadastro da delegação ${row.team.name}${row.check.missing.length ? ` (falta: ${row.check.missing.join(', ')})` : ''}.${row.deadline ? ` Prazo: ${row.deadline.date}.` : ''} Acesse ${location.origin}/team para completar.`;
+    copyText(message, 'Mensagem de cobrança copiada. Cole no WhatsApp ou e-mail da equipe.');
+    return;
+  }
+  if (action === 'team-reset-request') {
+    const requestedTeam = document.getElementById('team-select')?.value || '';
+    const requestedUser = document.getElementById('team-username')?.value.trim() || '';
+    if (!requestedTeam || requestedUser.length < 3) { toast('Selecione a equipe e informe o usuário para pedir a redefinição.'); return; }
+    fetch('/api/auth/team/reset-request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ teamId: requestedTeam, username: requestedUser }) })
+      .then(() => toast('Se o usuário existir, a organização foi avisada e vai gerar uma nova senha.'))
+      .catch(() => toast('Não foi possível enviar o pedido agora.'));
+    return;
+  }
+  if (action === 'portal-add-sponsor') {
+    if (!teamPortalTeam || (teamPortalTeam.sponsors || []).length >= 6) return;
+    teamPortalTeam.sponsors = [...(teamPortalTeam.sponsors || []), { id: `patrocinio-${Date.now().toString(36)}`, name: '', logo: '' }];
+    render();
+    return;
+  }
+  if (action === 'portal-remove-sponsor') {
+    if (!teamPortalTeam) return;
+    teamPortalTeam.sponsors = (teamPortalTeam.sponsors || []).filter(item => item.id !== target.dataset.value);
+    render();
+    return;
+  }
+  if (action === 'portal-import-csv') {
+    if (!teamPortalTeam) return;
+    const result = importRosterCsv(document.getElementById('portal-csv')?.value || '');
+    if (!result.added && !result.updated) { toast('Nenhuma linha válida encontrada. Use: número;nome;posição;altura;função.'); return; }
+    toast(`${result.added} atleta(s) adicionado(s) e ${result.updated} atualizado(s). Salvando…`);
+    saveTeamPortal();
     return;
   }
   if (action === 'portal-add-athlete') {
@@ -3161,6 +3407,34 @@ function handleAction(action, target) {
   if (action === 'open-preview') { window.open(`${location.origin}/preview?room=${encodeURIComponent(ROOM_ID)}`, '_blank', 'noopener,noreferrer'); }
 }
 
+let tacticalDrag = null;
+app.addEventListener('pointerdown', event => {
+  const dot = isAdminPanel ? event.target.closest?.('.tactical-player[data-player-id]') : null;
+  const pitch = dot?.closest('.tactical-pitch');
+  if (!dot || !pitch || event.button > 0) return;
+  event.preventDefault();
+  tacticalDrag = { dot, pitch, playerId: dot.dataset.playerId, teamKey: dot.dataset.squadTeam, point: null };
+  dot.setPointerCapture?.(event.pointerId);
+});
+app.addEventListener('pointermove', event => {
+  if (!tacticalDrag) return;
+  const box = tacticalDrag.pitch.getBoundingClientRect();
+  const x = clampNumber(((event.clientX - box.left) / box.width) * 100, 4, 96, 50);
+  const y = clampNumber(((event.clientY - box.top) / box.height) * 100, 6, 94, 50);
+  tacticalDrag.point = [Math.round(x), Math.round(y)];
+  tacticalDrag.dot.style.setProperty('--player-x', `${tacticalDrag.point[0]}%`);
+  tacticalDrag.dot.style.setProperty('--player-y', `${tacticalDrag.point[1]}%`);
+});
+const finishTacticalDrag = () => {
+  const drag = tacticalDrag;
+  tacticalDrag = null;
+  if (!drag?.point) return;
+  const team = teamForSquad(drag.teamKey);
+  commit(draft => { ensureSquad(draft, team, Array.isArray(team?.athletes) ? team.athletes : []).positions[drag.playerId] = drag.point; }, { immediate: true });
+};
+app.addEventListener('pointerup', finishTacticalDrag);
+app.addEventListener('pointercancel', finishTacticalDrag);
+
 app.addEventListener('click', event => {
   if (event.target.matches('[data-backdrop]')) { drawer = null; render(); return; }
   const actionable = event.target.closest('[data-action]');
@@ -3196,10 +3470,15 @@ app.addEventListener('input', event => {
     }, { backup: false });
     return;
   }
+  if (target.matches('[data-portal-sponsor-name]')) {
+    const sponsor = teamPortalTeam?.sponsors?.find(item => item.id === target.dataset.portalSponsorName);
+    if (sponsor) { sponsor.name = target.value.slice(0, 60); teamPortalStatus = 'ready'; }
+    return;
+  }
   if (target.matches('[data-portal-team-field]')) {
     const key = target.dataset.portalTeamField;
     if (!teamPortalTeam) return;
-    teamPortalTeam[key] = key === 'short' ? target.value.toUpperCase().slice(0, 3) : key === 'color' ? safeColor(target.value, teamPortalTeam.color) : target.value.slice(0, 80);
+    teamPortalTeam[key] = key === 'short' ? target.value.toUpperCase().slice(0, 3) : key === 'color' || key === 'color2' ? safeColor(target.value, teamPortalTeam[key] || '#8253cd') : target.value.slice(0, 80);
     teamPortalStatus = 'ready';
     return;
   }
@@ -3389,6 +3668,33 @@ app.addEventListener('change', event => {
   }
   if (target.matches('[data-report-selection]')) { reportSelection = clampNumber(target.value, 0, state.completedReports.length, 0); render(); return; }
   if (target.matches('[data-portal-formation]')) { teamPortalTeam.formation = FORMATIONS[target.value] ? target.value : '4-3-3'; teamPortalStatus = 'ready'; return; }
+  if (target.matches('[data-squad-called], [data-squad-starter], [data-squad-formation]')) {
+    const team = teamForSquad(target.dataset.squadTeam || target.dataset.squadFormation);
+    const athletes = Array.isArray(team?.athletes) ? team.athletes : [];
+    const limit = currentSport().teamSize;
+    if (target.matches('[data-squad-formation]')) {
+      commit(draft => { ensureSquad(draft, team, athletes).formation = FORMATIONS[target.value] ? target.value : ''; }, { immediate: true });
+      return;
+    }
+    const athleteKey = target.dataset.squadCalled || target.dataset.squadStarter;
+    let blocked = false;
+    commit(draft => {
+      const squad = ensureSquad(draft, team, athletes);
+      const has = list => list.includes(athleteKey);
+      if (target.dataset.squadCalled) {
+        if (target.checked) { if (!has(squad.called)) squad.called.push(athleteKey); }
+        else { squad.called = squad.called.filter(id => id !== athleteKey); squad.starters = squad.starters.filter(id => id !== athleteKey); }
+      } else if (target.checked) {
+        if (squad.starters.length >= limit && !has(squad.starters)) { blocked = true; return; }
+        if (!has(squad.called)) squad.called.push(athleteKey);
+        if (!has(squad.starters)) squad.starters.push(athleteKey);
+      } else {
+        squad.starters = squad.starters.filter(id => id !== athleteKey);
+      }
+    }, { immediate: true });
+    if (blocked) { toast(`Máximo de ${limit} titulares. Desmarque alguém antes.`); render(); }
+    return;
+  }
   if (target.matches('[data-lineup-formation]')) {
     const team = teamCatalog.find(item => item.id === target.dataset.lineupFormation);
     if (!team) return;
@@ -3427,6 +3733,14 @@ app.addEventListener('change', event => {
     uploadTeamPresentationPhoto(teamPortalTeam, memberId, target.files[0])
       .then(url => { if (!url) return; member.photo = url; syncLegacyCoach(teamPortalTeam); teamPortalStatus = 'ready'; render(); })
       .catch(() => { teamPortalStatus = 'error'; render(); });
+    return;
+  }
+  if (target.matches('[data-portal-csv-file]') && target.files?.[0]) {
+    target.files[0].text().then(text => { const box = document.getElementById('portal-csv'); if (box) box.value = text.slice(0, 40000); toast('Planilha carregada. Revise e clique em "Importar elenco".'); });
+    return;
+  }
+  if (target.matches('[data-portal-batch-photos]') && target.files?.length) {
+    importBatchPhotos([...target.files]);
     return;
   }
   if (target.matches('[data-portal-athlete-photo]') && target.files?.[0]) {

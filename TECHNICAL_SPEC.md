@@ -72,6 +72,8 @@ No Docker, estado e mídias ficam no volume `/app/.data`. Na versão hospedada p
 | `/manage/pregame` | Resumo para narradores |
 | `/manage/report` | Relatório e histórico da partida |
 | `/manage/teams` | Cadastro geral de equipes |
+| `/manage/delegations` | Pendências, revisão, prazos e histórico das delegações |
+| `/manage/dashboard` | Visão geral da plataforma (sem partida selecionada) |
 | `/manage/appearance` | Aparência global dos overlays |
 | `/preview` | Visualização completa em 1920×1080 |
 | `/overlay` | Saída transparente para o OBS |

@@ -26,8 +26,38 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ## [Não publicado]
 
+## [32] - 2026-09-29
+
 ### Adicionado
-- Versionamento visível: a versão vem de `package.json` (`31.0.0`, correspondente à seção `[31]` deste changelog;
+- Módulo da plataforma `/manage/delegations` ("Delegações"): painel de pendências por equipe (percentual de
+  preenchimento, faltas obrigatórias, números repetidos, atletas sem foto, nomes acima de 26 letras, sem escudo,
+  titulares diferentes de 11), status (em preenchimento, aguardando revisão, devolvida ou alterada, aprovada), botão
+  "Cobrar equipe" (copia a mensagem pronta), "Aprovar", "Devolver" com motivo e histórico de versões com "Restaurar".
+  O dashboard da plataforma mostra também delegações para revisar e prazos vencidos.
+- Backend (Node e Worker): `operationsStore` ganha `teamHistory` (até 15 versões por equipe, gravadas a cada salvamento
+  no portal; `GET/POST /api/operations` devolvem só os metadados, sem o snapshot) e as ações `review-delegation`
+  (`teamId`, `decision` = `approved` | `returned`, `comment` obrigatório ao devolver; grava `reviewComment`,
+  `reviewedAt`, `reviewedBy` em `delegationStatus`) e `restore-team-version` (`teamId`, `versionId`; guarda a versão
+  atual antes de restaurar). `markDelegationChanged` também volta uma delegação `approved` para `needs-review`.
+- Prazo de cadastro por partida: campo `registrationDeadline` (AAAA-MM-DD) em `upsert-match` e no editor de partidas.
+  `GET /api/team-portal` devolve `deadline` (menor prazo das próximas partidas da equipe). Não há envio automático de
+  e-mail ou mensagem; os alertas aparecem no painel e no portal.
+- Portal da equipe: faixas de prazo/aprovação/devolução, verificações do cadastro, importação do elenco por CSV
+  (`número;nome;posição;altura;titular|reserva`; números existentes são atualizados), envio de fotos em lote pelo número
+  no nome do arquivo (aviso acima de 1,5 MB, limite de 5 MB) e "Kit de mídia": `color2` e `sponsors` (até 6 apoiadores
+  com `name`, `logo` reservado) em `/api/team-portal` e no catálogo, com prévia de placar. `color2` vira o realce da
+  apresentação e os apoiadores aparecem no painel do esquema tático.
+- Elenco por partida: `state.squad[teamId] = { called, starters, formation, positions }` na sala. O módulo Escalações
+  ganhou "Elenco desta partida" (relacionados, titulares até o limite do esporte e esquema próprio) e as bolinhas do
+  esquema tático podem ser arrastadas na prévia do painel; a saída OBS respeita o elenco, o esquema e as posições.
+  Sem `squad` o comportamento anterior (função de cada atleta no cadastro) é mantido.
+- Acesso das equipes com vários usuários: `PUT /api/auth/team/credentials` agora adiciona ou atualiza pelo par
+  equipe+usuário (antes substituía o único acesso da equipe) e `DELETE` aceita `&username=` para remover só um usuário
+  (sem `username` remove todos, como antes). A tela Usuários/Acessos lista e remove cada usuário.
+- Recuperação de senha: `POST /api/auth/team/reset-request` (`teamId`, `username`) cria um aviso `password-reset` para
+  os administradores, no máximo um não lido a cada 10 minutos por equipe, e responde sempre `ok` para não revelar quais
+  usuários existem. Botão "Esqueci minha senha" no login da equipe; a nova senha continua sendo gerada pelo administrador.
+- Versionamento visível: a versão vem de `package.json` (`32.0.0`, correspondente à seção `[32]` deste changelog;
   ao publicar a seção `[N]`, atualize `version` para `N.0.0`). `GET /health` passa a devolver `version` no servidor
   Node e no Worker (`build.mjs` embute a versão no build). A interface mostra "Versão X" no rodapé das telas de
   login (administrador e equipe) e no rodapé da barra lateral do painel.
