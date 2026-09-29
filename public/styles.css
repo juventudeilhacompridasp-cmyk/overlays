@@ -1,3 +1,14 @@
+/* Fontes hospedadas no projeto (OFL) para a fonte global; subconjunto latino, cobre o português. */
+@font-face { font-family: 'Roboto'; font-style: normal; font-weight: 400 500; font-display: block; src: url('/fonts/roboto-500.woff2') format('woff2'); }
+@font-face { font-family: 'Roboto'; font-style: normal; font-weight: 600 900; font-display: block; src: url('/fonts/roboto-700.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow Condensed'; font-style: normal; font-weight: 400 500; font-display: block; src: url('/fonts/barlow-condensed-500.woff2') format('woff2'); }
+@font-face { font-family: 'Barlow Condensed'; font-style: normal; font-weight: 600 900; font-display: block; src: url('/fonts/barlow-condensed-700.woff2') format('woff2'); }
+@font-face { font-family: 'Oswald'; font-style: normal; font-weight: 400 500; font-display: block; src: url('/fonts/oswald-500.woff2') format('woff2'); }
+@font-face { font-family: 'Oswald'; font-style: normal; font-weight: 600 900; font-display: block; src: url('/fonts/oswald-700.woff2') format('woff2'); }
+@font-face { font-family: 'Montserrat'; font-style: normal; font-weight: 400 500; font-display: block; src: url('/fonts/montserrat-500.woff2') format('woff2'); }
+@font-face { font-family: 'Montserrat'; font-style: normal; font-weight: 600 900; font-display: block; src: url('/fonts/montserrat-700.woff2') format('woff2'); }
+@font-face { font-family: 'Bebas Neue'; font-style: normal; font-weight: 400 900; font-display: block; src: url('/fonts/bebas-neue-400.woff2') format('woff2'); }
+
 :root {
   color-scheme: dark;
   --bg: #08090d;
@@ -1843,3 +1854,12 @@ section.photo-lineup.photo-lineup-layout-matchday.is-exiting .photo-player { ani
 .tactical-player b.has-photo { width: calc(3.7cqw * var(--formation-photo, 1)); height: calc(3.7cqw * var(--formation-photo, 1)); overflow: hidden; padding: 0; }
 .tactical-player b.has-photo img { width: 100%; height: 100%; display: block; object-fit: cover; object-position: center top; }
 .photo-lineup-layout-sidebar .tactical-player b.has-photo { width: calc(2.5cqw * var(--formation-photo, 1)); height: calc(2.5cqw * var(--formation-photo, 1)); }
+
+/* Biblioteca de patrocínios (sem partida) e herança nas partidas */
+.library-banner { margin-bottom: 14px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; border: 1px solid var(--line); border-left: 3px solid var(--blue, #2f7df6); border-radius: 6px; background: var(--surface-2); }
+.library-banner.is-inherited { border-left-color: var(--green, #38d996); }
+.library-banner strong { font-size: 12px; }
+.library-banner p { margin: 4px 0 0; max-width: 62ch; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.library-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.library-locked { min-width: 0; margin: 0; padding: 0; border: 0; opacity: .55; }
+.library-locked::before { display: block; margin-bottom: 8px; color: var(--muted); content: 'Somente leitura: esta partida usa a biblioteca da plataforma.'; font-size: 11px; }

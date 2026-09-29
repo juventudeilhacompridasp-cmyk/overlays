@@ -4,7 +4,11 @@ const isAdminRoute = !['/overlay', '/preview', '/team'].includes(location.pathna
 if (!requestedRoom && !isAdminRoute) {
   try { requestedRoom = localStorage.getItem('juventude.overlay.lastRoom'); } catch {}
 }
-const ROOM_ID = (requestedRoom || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
+// Biblioteca de patrocínios: uma sala especial, sem partida, editada pelos módulos de patrocínio na plataforma.
+const LIBRARY_ROOM = 'biblioteca-patrocinios';
+const LIBRARY_MODULES = ['sponsors', 'sponsor-bar'];
+const libraryMode = !requestedRoom && (location.pathname === '/manage' || location.pathname.startsWith('/manage/')) && LIBRARY_MODULES.includes(location.pathname.split('/').filter(Boolean)[1]);
+const ROOM_ID = libraryMode ? LIBRARY_ROOM : (requestedRoom || 'principal').toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 48) || 'principal';
 if (requestedRoom) { try { localStorage.setItem('juventude.overlay.lastRoom', ROOM_ID); } catch {} }
 const STORAGE_KEY = `juventude.overlay-studio.v2.${ROOM_ID}`;
 const TEAM_CATALOG_KEY = 'juventude.overlay-team-catalog.v1';
@@ -16,7 +20,7 @@ const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -274,6 +278,12 @@ const TYPEFACES = {
   oswald: { label: 'Impacto', stack: "Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif" },
   montserrat: { label: 'Moderna', stack: "Arial, 'Segoe UI', sans-serif" },
   orbitron: { label: 'Técnica', stack: "'Lucida Console', Monaco, monospace" },
+  // Fontes hospedadas em /fonts (ver @font-face no início de styles.css).
+  roboto: { label: 'Roboto', stack: "'Roboto', 'Segoe UI', Arial, sans-serif" },
+  barlow: { label: 'Barlow Condensed', stack: "'Barlow Condensed', 'Arial Narrow', sans-serif" },
+  oswaldweb: { label: 'Oswald', stack: "'Oswald', Impact, 'Arial Narrow Bold', sans-serif" },
+  montserratweb: { label: 'Montserrat', stack: "'Montserrat', 'Segoe UI', Arial, sans-serif" },
+  bebas: { label: 'Bebas Neue', stack: "'Bebas Neue', Impact, 'Arial Narrow Bold', sans-serif" },
 };
 
 function freshSportData() {
@@ -289,12 +299,12 @@ function freshSportData() {
 
 function defaultAppearance() {
   return {
-    scoreboardScale: 100, scoreboardFont: 100, scoreboardTypeface: 'rajdhani', scoreboardX: 4, scoreboardY: 7, scoreboardLayout: 'compact', scoreboardShowBadge: false, scoreboardStyle: 'classic', scoreboardRadius: 4, scoreboardSurface: 100, scoreboardAccent: 2, scoreboardShadow: 'soft', scoreboardAnimation: 'assemble', scoreboardAnimationSpeed: 100,
-    eventScale: 100, eventFont: 100, eventTypeface: 'rajdhani', eventX: 2, eventY: 72, eventPosition: 'left', eventStyle: 'broadcast',
-    lineupScale: 100, lineupFont: 100, lineupTypeface: 'rajdhani', lineupX: 7, lineupY: 18, lineupStyle: 'panel',
-    photoLineupScale: 100, photoLineupFont: 100, photoLineupTypeface: 'rajdhani', photoLineupX: 7, photoLineupY: 12, photoLineupSurface: 96, photoLineupRadius: 2, photoLineupSponsorCount: 6, photoLineupSponsorBarSize: 100, photoLineupIndividualDuration: 3, photoLineupPanelDuration: 5, photoLineupLayout: 'classic', photoLineupFormationMark: 'number', photoLineupFormationPhotoSize: 100, photoLineupStyle: 'editorial', photoLineupAnimation: 'slide',
-    sponsorScale: 100, sponsorFont: 100, sponsorTypeface: 'rajdhani', sponsorX: 78, sponsorY: 7, sponsorFormat: 'banner-name', sponsorAnimation: 'fade', sponsorAnimationSpeed: 100, sponsorDuration: 10, sponsorStyle: 'boxed',
-    statsScale: 100, statsFont: 100, statsTypeface: 'rajdhani', statsX: 30, statsY: 56, statsStyle: 'broadcast', statsAnimation: 'rise', statsDuration: 12,
+    scoreboardScale: 100, scoreboardFont: 100, scoreboardTypeface: 'global', scoreboardX: 4, scoreboardY: 7, scoreboardLayout: 'compact', scoreboardShowBadge: false, scoreboardStyle: 'classic', scoreboardRadius: 4, scoreboardSurface: 100, scoreboardAccent: 2, scoreboardShadow: 'soft', scoreboardAnimation: 'assemble', scoreboardAnimationSpeed: 100,
+    eventScale: 100, eventFont: 100, eventTypeface: 'global', eventX: 2, eventY: 72, eventPosition: 'left', eventStyle: 'broadcast',
+    lineupScale: 100, lineupFont: 100, lineupTypeface: 'global', lineupX: 7, lineupY: 18, lineupStyle: 'panel',
+    photoLineupScale: 100, photoLineupFont: 100, photoLineupTypeface: 'global', photoLineupX: 7, photoLineupY: 12, photoLineupSurface: 96, photoLineupRadius: 2, photoLineupSponsorCount: 6, photoLineupSponsorBarSize: 100, photoLineupIndividualDuration: 3, photoLineupPanelDuration: 5, photoLineupLayout: 'classic', photoLineupFormationMark: 'number', photoLineupFormationPhotoSize: 100, photoLineupStyle: 'editorial', photoLineupAnimation: 'slide',
+    sponsorScale: 100, sponsorFont: 100, sponsorTypeface: 'global', sponsorX: 78, sponsorY: 7, sponsorFormat: 'banner-name', sponsorAnimation: 'fade', sponsorAnimationSpeed: 100, sponsorDuration: 10, sponsorStyle: 'boxed',
+    statsScale: 100, statsFont: 100, statsTypeface: 'global', statsX: 30, statsY: 56, statsStyle: 'broadcast', statsAnimation: 'rise', statsDuration: 12,
     sponsorBarDuration: 10, sponsorBarAnimationSpeed: 100, sponsorBarTransition: 'fade', sponsorBarFit: 'cover', sponsorBarBorder: 'thin', sponsorBarShadow: 'none', sponsorBarScale: 100, sponsorBarX: 50, sponsorBarY: 91, sponsorBarOpacity: 100, sponsorBarRadius: 0, sponsorBarBackground: '#08090d',
     periodScale: 100, periodFont: 100, periodSurface: 100, extraTimeScale: 100,
     goalText: 'GOOOL', goalWordDuration: 2, goalTeamDuration: 2, goalAnimation: 'typewriter', cardDisplayMode: 'lower-third',
@@ -333,6 +343,7 @@ function createDefaultState() {
     sponsor: 'PATROCINADOR',
     sponsorBanner: '',
     sponsors: [{ id: 'sponsor-1', name: 'PATROCINADOR', banner: '', logo: '', wideAsset: '', lineupMedia: '', lineupMediaType: 'image' }],
+    sponsorSource: 'platform',
     sponsorBarMode: 'images',
     sponsorBarVideo: '',
     sponsorBarItems: [{ id: 'bar-1', asset: '' }],
@@ -441,6 +452,8 @@ function normalizeState(saved) {
     statsMetrics: normalizedStatsMetrics(saved.statsMetrics),
     statsPlayer: { team: saved.statsPlayer?.team === 'away' ? 'away' : 'home', name: String(saved.statsPlayer?.name || '').slice(0, 80), note: String(saved.statsPlayer?.note || '').slice(0, 120) },
     appearance: { ...defaults.appearance, ...(saved.appearance || {}), sponsorFormat: ['text','logo-name','banner','banner-name'].includes(saved.appearance?.sponsorFormat) ? saved.appearance.sponsorFormat : defaults.appearance.sponsorFormat },
+    // Salas já salvas sem o campo mantêm os próprios patrocínios; salas novas herdam a biblioteca da plataforma.
+    sponsorSource: saved.sponsorSource === 'platform' || (saved.sponsorSource == null && !saved.updatedAt) ? 'platform' : 'match',
     sponsors: migratedSponsors,
     activeSponsorIndex: clampNumber(saved.activeSponsorIndex, 0, migratedSponsors.length - 1, 0),
     sponsorLoop: Boolean(saved.sponsorLoop),
@@ -574,8 +587,9 @@ function cssNumber(value) {
   return Number(Number(value).toFixed(4));
 }
 
+// 'global' (padrão) segue a fonte escolhida em Aparência; um valor próprio sobrepõe só aquele overlay.
 function appearanceFont(key) {
-  return TYPEFACES[state.appearance?.[key]] || TYPEFACES.rajdhani;
+  return TYPEFACES[state.appearance?.[key]] || TYPEFACES[state.typeface] || TYPEFACES.rajdhani;
 }
 
 function goalLetters(value = state.appearance?.goalText) {
@@ -1637,10 +1651,37 @@ async function uploadTeamPresentationPhoto(team, subjectId, file) {
   return `${result.url}${String(result.url).includes('?') ? '&' : '?'}v=${Date.now()}`;
 }
 
+let sponsorLibrary = null;
+const SPONSOR_LIBRARY_FIELDS = ['sponsors', 'sponsorBarMode', 'sponsorBarVideo', 'sponsorBarItems', 'sponsorBarAutoSchedule', 'sponsorBarScheduleInterval'];
+
+function applySponsorLibrary(target = state) {
+  if (libraryMode || !sponsorLibrary || target.sponsorSource !== 'platform') return false;
+  const signature = source => JSON.stringify(SPONSOR_LIBRARY_FIELDS.map(field => source[field]));
+  if (signature(target) === signature(sponsorLibrary.fields)) return false;
+  for (const field of SPONSOR_LIBRARY_FIELDS) target[field] = JSON.parse(JSON.stringify(sponsorLibrary.fields[field]));
+  target.activeSponsorIndex = clampNumber(target.activeSponsorIndex, 0, Math.max(0, target.sponsors.length - 1), 0);
+  target.sponsorBarActiveIndex = clampNumber(target.sponsorBarActiveIndex, 0, Math.max(0, target.sponsorBarItems.length - 1), 0);
+  return true;
+}
+
+async function pollSponsorLibrary() {
+  if (libraryMode || isTeamPortal) return;
+  try {
+    const response = await fetch(`/api/state?room=${LIBRARY_ROOM}&ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) return;
+    const remote = await response.json();
+    if (!remote?.updatedAt) return;
+    const normalized = normalizeState(remote);
+    sponsorLibrary = { updatedAt: Number(remote.updatedAt), fields: Object.fromEntries(SPONSOR_LIBRARY_FIELDS.map(field => [field, normalized[field]])) };
+    if (applySponsorLibrary()) { writeLocal(); render(); } else if (isManagement) render();
+  } catch {}
+}
+
 function receiveState(incoming) {
   if (!incoming || typeof incoming !== 'object' || !incoming.updatedAt || Number(incoming.updatedAt) <= Number(state.updatedAt)) return;
   state = normalizeState(incoming);
   if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
+  applySponsorLibrary(state);
   writeLocal();
   render();
 }
@@ -2024,7 +2065,7 @@ function appearanceRange(field, label, value, minimum = 60, maximum = 180, suffi
 }
 
 function appearanceTypeface(field, value) {
-  return `<label class="parameter-select"><span>Tipografia</span><select data-appearance="${field}">${Object.entries(TYPEFACES).map(([key, font]) => `<option value="${key}" ${value === key ? 'selected' : ''}>${font.label}</option>`).join('')}</select></label>`;
+  return `<label class="parameter-select"><span>Tipografia</span><select data-appearance="${field}"><option value="global" ${value === 'global' || !TYPEFACES[value] ? 'selected' : ''}>Fonte global do projeto</option>${Object.entries(TYPEFACES).map(([key, font]) => `<option value="${key}" ${value === key ? 'selected' : ''}>${font.label}</option>`).join('')}</select></label>`;
 }
 
 const OVERLAY_STYLE_OPTIONS = {
@@ -2430,7 +2471,19 @@ function renderModuleControls(key) {
   if (key === 'sponsor-bar' && !content) content = `${renderSponsorBarSettings()}${renderSponsorWideControls()}`;
   if (key === 'teams') return `<div class="module-section">${renderTeamsTab()}</div>`;
   if (key === 'appearance') return `<div class="module-section">${renderChampionshipTheme()}${renderAppearanceTab()}</div>`;
+  if (LIBRARY_MODULES.includes(key)) {
+    const locked = !libraryMode && sponsorLibrary && state.sponsorSource === 'platform' && moduleTab !== 'control' && moduleTab !== 'settings';
+    return `${renderSponsorSourceBanner()}${moduleTabs()}${locked ? `<fieldset class="library-locked" disabled>${content}</fieldset>` : content}`;
+  }
   return `${moduleTabs()}${content}`;
+}
+
+function renderSponsorSourceBanner() {
+  const editUrl = platformUrl('sponsors');
+  if (libraryMode) return '<div class="library-banner"><div><strong>Biblioteca da plataforma</strong><p>Marcas, mídias e barra cadastradas aqui valem para todas as partidas que usam a biblioteca. Também podem ir ao ar sem partida: use <b>Saídas OBS</b> para copiar os links fixos desta biblioteca.</p></div></div>';
+  if (!sponsorLibrary) return `<div class="library-banner"><div><strong>Patrocínios só desta partida</strong><p>Crie a biblioteca da plataforma para cadastrar marcas uma vez e usar em todas as partidas.</p></div><a class="button" href="${escapeHtml(editUrl)}">Criar biblioteca</a></div>`;
+  const inherited = state.sponsorSource === 'platform';
+  return `<div class="library-banner ${inherited ? 'is-inherited' : ''}"><div><strong>${inherited ? 'Usando a biblioteca da plataforma' : 'Personalizado para esta partida'}</strong><p>${inherited ? 'Marcas e barra vêm da biblioteca; para alterar, edite a biblioteca ou personalize só esta partida.' : 'Esta partida usa marcas próprias. Volte à biblioteca para receber as atualizações da plataforma.'}</p></div><div class="library-banner-actions"><a class="button subtle" href="${escapeHtml(editUrl)}">Editar biblioteca</a><button class="button ${inherited ? '' : 'primary'}" data-action="sponsor-source" data-value="${inherited ? 'match' : 'platform'}">${inherited ? 'Personalizar esta partida' : 'Usar biblioteca'}</button></div></div>`;
 }
 
 function moduleOnAir(layer) {
@@ -2519,7 +2572,7 @@ function renderManagementSidebar(activeKey = 'overview') {
   const footer = `<p class="app-version module-sidebar-version">${versionLabel()}</p>`;
   if (platformMode) {
     const platformHref = item => platformUrl(item.key);
-    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${group('Organização', byKey(['championships', 'matches']), platformHref)}${group('Configuração', byKey(['teams', 'delegations', 'access']), platformHref)}${group('Histórico', byKey(['audit']), platformHref)}${footer}</aside>`;
+    return `<aside class="module-sidebar" aria-label="Navegação da plataforma"><a class="module-sidebar-overview ${activeKey === 'dashboard' ? 'active' : ''}" href="${escapeHtml(platformUrl('dashboard'))}">${icons.monitor}<span>Visão geral da plataforma</span></a>${group('Organização', byKey(['championships', 'matches']), platformHref)}${group('Biblioteca de patrocínios', byKey(['sponsors', 'sponsor-bar']), platformHref)}${group('Configuração', byKey(['teams', 'delegations', 'access']), platformHref)}${group('Histórico', byKey(['audit']), platformHref)}${footer}</aside>`;
   }
   const matchTitle = `${escapeHtml(state.home.short)} × ${escapeHtml(state.away.short)}`;
   const groupLabels = { championships: 'Organização', scoreboard: 'Overlays', pregame: 'Partida', teams: 'Configuração' };
@@ -2531,7 +2584,7 @@ function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
   const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access'].includes(module?.key);
-  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? '' : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? '' : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit'].includes(module.key) ? 'Gestão da transmissão' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
+  return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
 function renderMatchDashboard() {
@@ -3657,13 +3710,24 @@ function handleAction(action, target) {
   if (['yellow','red','substitution','lower-third'].includes(action)) { drawer = { type: action }; render(); return; }
   if (action === 'confirm-event') { confirmEvent(); return; }
   if (action === 'theme') { commit(draft => { draft.theme = target.dataset.value; }); return; }
-  if (action === 'typeface') { if (TYPEFACES[target.dataset.value]) commit(draft => { draft.typeface = target.dataset.value; }); return; }
+  if (action === 'typeface') {
+    // A fonte global vale para todos os overlays: zera as fontes individuais para que sigam esta escolha.
+    if (TYPEFACES[target.dataset.value]) commit(draft => { draft.typeface = target.dataset.value; for (const key of Object.keys(draft.appearance)) if (key.endsWith('Typeface')) draft.appearance[key] = 'global'; }, { immediate: true });
+    return;
+  }
   if (action === 'appearance-option') {
     const [field, value] = String(target.dataset.value || '').split('|');
     const options = OVERLAY_STYLE_OPTIONS[field];
     if (!options) return;
     const chosen = options.some(([option]) => option === value) ? value : options[0][0];
     commit(draft => { draft.appearance[field] = chosen; }, { immediate: true });
+    return;
+  }
+  if (action === 'sponsor-source') {
+    const source = target.dataset.value === 'platform' ? 'platform' : 'match';
+    if (source === 'platform' && !sponsorLibrary) { toast('A biblioteca da plataforma ainda não foi criada.'); return; }
+    commit(draft => { draft.sponsorSource = source; applySponsorLibrary(draft); }, { immediate: true });
+    toast(source === 'platform' ? 'Esta partida voltou a usar a biblioteca da plataforma.' : 'Esta partida agora usa patrocínios próprios (cópia da biblioteca).');
     return;
   }
   if (action === 'sponsor-bar-preset') {
@@ -4186,7 +4250,7 @@ app.addEventListener('input', event => {
         if (key === 'eventX') draft.appearance.eventPosition = 'custom';
         if (key === 'sponsorDuration' && draft.visible.sponsor) draft.sponsorExpiresAt = Date.now() + draft.appearance.sponsorDuration * 1000;
       }
-      else if (key.endsWith('Typeface')) draft.appearance[key] = TYPEFACES[target.value] ? target.value : 'rajdhani';
+      else if (key.endsWith('Typeface')) draft.appearance[key] = TYPEFACES[target.value] ? target.value : 'global';
       else if (OVERLAY_STYLE_OPTIONS[key]) draft.appearance[key] = OVERLAY_STYLE_OPTIONS[key].some(([value]) => value === target.value) ? target.value : OVERLAY_STYLE_OPTIONS[key][0][0];
       else if (key === 'goalAnimation') draft.appearance[key] = ['typewriter','bounce','sweep'].includes(target.value) ? target.value : 'typewriter';
       else if (key === 'scoreboardAnimation') draft.appearance[key] = ['assemble','slide','zoom','flip','elastic','glitch'].includes(target.value) ? target.value : 'assemble';
@@ -4562,6 +4626,8 @@ else {
   if (!isOutput) loadAppVersion();
   initializeSharedState();
   initializeTeamCatalog();
+  pollSponsorLibrary();
+  setInterval(pollSponsorLibrary, isOutput || isPreview ? 2500 : 4000);
   setInterval(pollServer, isOutput || isPreview ? 320 : 800);
   setInterval(pollTeamCatalog, isOutput || isPreview ? 1600 : 5000);
   if (isAdminPanel) setInterval(loadOperationsData, 5000);

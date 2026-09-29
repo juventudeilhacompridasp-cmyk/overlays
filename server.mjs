@@ -738,6 +738,7 @@ const server = http.createServer(async (request, response) => {
       '.jpg': 'image/jpeg',
       '.jpeg': 'image/jpeg',
       '.webp': 'image/webp',
+      '.woff2': 'font/woff2',
     }[extension] || 'application/octet-stream';
     response.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store' });
     response.end(data);

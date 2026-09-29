@@ -284,7 +284,7 @@ try {
   verify('Control dashboard renders live monitor', dashboard.app.innerHTML.includes('Pré-visualização ao vivo'));
   verify('Four preconfigured themes are available', (dashboard.app.innerHTML.match(/class="theme-choice/g) || []).length === 4);
   verify('Four sports are available in the modality selector', (dashboard.app.innerHTML.match(/class="sport-choice /g) || []).length === 4);
-  verify('Four broadcast typefaces are available', (dashboard.app.innerHTML.match(/class="typeface-choice /g) || []).length === 4);
+  verify('Nine typefaces are available, including the hosted web fonts', (dashboard.app.innerHTML.match(/class="typeface-choice /g) || []).length === 9 && ['roboto','barlow','oswaldweb','montserratweb','bebas'].every(key => dashboard.app.innerHTML.includes(`data-value="${key}"`)));
   verify('Starting score is zero to zero', dashboard.getState().home.score === 0 && dashboard.getState().away.score === 0);
   verify('Compact scoreboard is the default and uses three-letter team abbreviations', dashboard.getState().appearance.scoreboardLayout === 'compact' && dashboard.app.innerHTML.includes('data-layout="compact"') && dashboard.app.innerHTML.includes('<span class="scorebug-team-name">JUV</span>'));
 
@@ -433,6 +433,9 @@ try {
   verify('Photo-lineup output isolates athlete cards and its sponsor footer', photoLineupOutput.app.innerHTML.includes('data-overlay="photo-lineup"') && photoLineupOutput.app.innerHTML.includes('photo-lineup-sponsors') && !photoLineupOutput.app.innerHTML.includes('data-overlay="scoreboard"'));
   verify('Sponsor output isolates the advertiser graphic', sponsorOutput.app.innerHTML.includes('data-overlay="sponsor"') && !sponsorOutput.app.innerHTML.includes('data-overlay="scoreboard"'));
 
+  dashboard.click('typeface', 'oswald');
+  dashboard.click('typeface', 'roboto');
+  verify('Global typeface applies to every overlay and hosted fonts are declared', dashboard.getState().typeface === 'roboto' && Object.entries(dashboard.getState().appearance).filter(([key]) => key.endsWith('Typeface')).every(([, value]) => value === 'global') && ['Roboto','Barlow Condensed','Oswald','Montserrat','Bebas Neue'].every(family => stylesheet.includes(`font-family: '${family}'`)));
   dashboard.click('typeface', 'oswald');
   verify('Scoreboard typography can be changed independently', dashboard.getState().typeface === 'oswald' && dashboard.app.innerHTML.includes('Impacto'));
 

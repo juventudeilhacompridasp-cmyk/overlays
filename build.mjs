@@ -21,7 +21,7 @@ for (const filename of textAssets) {
 // copied as-is so the ASSETS binding (see wrangler.json) serves them directly.
 for (const filename of await fs.readdir(path.join(root, 'public'))) {
   if (textAssets.includes(filename)) continue;
-  await fs.copyFile(path.join(root, 'public', filename), path.join(assets, filename));
+  await fs.cp(path.join(root, 'public', filename), path.join(assets, filename), { recursive: true });
 }
 
 const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
