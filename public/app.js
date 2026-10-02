@@ -19,9 +19,10 @@ const isOutput = location.pathname === '/overlay';
 const isPreview = location.pathname === '/preview';
 const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
-const isAdminPanel = !isOutput && !isPreview && !isTeamPortal;
+const isPublicPage = location.pathname === '/campeonatos' || /^\/(c|o|embed)\//.test(location.pathname);
+const isAdminPanel = !isOutput && !isPreview && !isTeamPortal && !isPublicPage;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -58,6 +59,7 @@ const MANAGEMENT_MODULES = [
   { key: 'dashboard', label: 'Dashboard', caption: 'Visão geral de agenda, avisos, acessos e estatísticas da plataforma', layer: 'all', icon: icons.monitor },
   { key: 'live', label: 'Ao vivo agora', caption: 'Partidas em andamento, placar, o que está no ar e atalhos de emergência', layer: 'all', icon: icons.monitor },
   { key: 'standings', label: 'Classificação e súmulas', caption: 'Tabela do campeonato, artilharia, cartões e súmula de cada partida', layer: 'all', icon: icons.list },
+  { key: 'feed', label: 'Notícias e mídia', caption: 'Notícias, fotos e vídeos por campeonato e rodada, exibidos na página pública', layer: 'all', icon: icons.text },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
   { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
   { key: 'scoreboard', label: 'Placar', caption: 'Resultado, tempo e formato', layer: 'scoreboard', icon: icons.monitor },
@@ -295,7 +297,7 @@ const TYPEFACES = {
 const BUILDER_TYPES = ['text', 'image', 'video', 'shape'];
 const BUILDER_ANIMATIONS = [['none', 'Sem animação'], ['fade', 'Fade'], ['slide-left', 'Deslizar da esquerda'], ['slide-right', 'Deslizar da direita'], ['slide-up', 'Subir'], ['slide-down', 'Descer'], ['zoom', 'Zoom'], ['pop', 'Pop com ressalto'], ['wipe', 'Cortina'], ['flip', 'Virar']];
 const BUILDER_ANIMATION_KEYS = BUILDER_ANIMATIONS.map(([key]) => key);
-const BUILDER_TOKENS = [['{home.name}', 'Mandante'], ['{home.short}', 'Sigla mandante'], ['{home.score}', 'Placar mandante'], ['{away.name}', 'Visitante'], ['{away.short}', 'Sigla visitante'], ['{away.score}', 'Placar visitante'], ['{clock}', 'Cronômetro'], ['{period}', 'Período'], ['{competition}', 'Competição'], ['{sponsor}', 'Patrocinador'], ['{time}', 'Hora']];
+const BUILDER_TOKENS = [['{home.name}', 'Mandante'], ['{home.short}', 'Sigla mandante'], ['{home.score}', 'Placar mandante'], ['{away.name}', 'Visitante'], ['{away.short}', 'Sigla visitante'], ['{away.score}', 'Placar visitante'], ['{clock}', 'Cronômetro'], ['{period}', 'Período'], ['{competition}', 'Competição'], ['{sponsor}', 'Patrocinador'], ['{time}', 'Hora'], ['{champ.name}', 'Campeonato (tabela)'], ['{table.1.name}', '1º colocado'], ['{table.1.points}', 'Pontos do 1º'], ['{table.2.name}', '2º colocado']];
 const BUILDER_IMAGE_TOKENS = [['token:home.logo', 'Escudo do mandante'], ['token:away.logo', 'Escudo do visitante'], ['token:sponsor', 'Logo do patrocinador ativo']];
 const BUILDER_SIZES = [['1920x1080', 'Tela cheia 1920 × 1080'], ['1280x720', 'Tela cheia 1280 × 720'], ['1080x1920', 'Vertical 1080 × 1920'], ['1500x200', 'Barra 1500 × 200'], ['1200x260', 'Lower third 1200 × 260'], ['800x450', 'Cartão 800 × 450'], ['600x600', 'Quadrado 600 × 600']];
 const BUILDER_ELEMENT_NAMES = { text: 'Texto', image: 'Imagem', video: 'Vídeo', shape: 'Forma' };
@@ -608,7 +610,7 @@ let accessSearch = '';
 let accessTeamFilter = 'all';
 let accessRevealed = {};
 let dashboardStats = { status: 'idle', byRoom: {} };
-let operationsData = { championships: [], matches: [], notifications: [], announcements: [], logs: [], delegationStatus: {}, teamHistory: {}, updatedAt: 0 };
+let operationsData = { championships: [], matches: [], notifications: [], announcements: [], posts: [], logs: [], delegationStatus: {}, teamHistory: {}, updatedAt: 0 };
 let operationsStatus = 'idle';
 let selectedChampionshipId = '';
 let selectedMatchId = '';
@@ -1253,9 +1255,27 @@ function renderSponsorBarOverlay() {
   return `<div class="sponsor-wide-bar sponsor-style-${escapeHtml(appearance.sponsorStyle || 'boxed')} sponsor-bar-border-${borderStyle} sponsor-bar-shadow-${shadowStyle}${transitionClass}" style="--sponsor-motion-duration:${duration}ms;--sponsor-motion-offset:${offset}ms;--sponsor-bar-scale:${clampNumber(appearance.sponsorBarScale, 60, 180, 100) / 100};--sponsor-bar-x:${clampNumber(appearance.sponsorBarX, 0, 100, 50)}%;--sponsor-bar-y:${clampNumber(appearance.sponsorBarY, 0, 100, 91)}%;--sponsor-bar-opacity:${clampNumber(appearance.sponsorBarOpacity, 20, 100, 100) / 100};--sponsor-bar-radius:${clampNumber(appearance.sponsorBarRadius, 0, 24, 0)}px;--sponsor-bar-background:${safeColor(appearance.sponsorBarBackground, '#08090d')};${overlayThemeStyle('sponsorBar')}" data-overlay="sponsor-bar">${media}</div>`;
 }
 
+let overlayTable = { rows: [], championship: null, loadedAt: 0, loading: false };
+const SAMPLE_TABLE = [['Equipe A', 'EQA', 9, 3, 2], ['Equipe B', 'EQB', 7, 3, 1], ['Equipe C', 'EQC', 4, 3, 0], ['Equipe D', 'EQD', 3, 3, -1], ['Equipe E', 'EQE', 1, 3, -2], ['Equipe F', 'EQF', 0, 3, -3]].map(([name, short, points, played, gd], index) => ({ position: index + 1, name, short, points, played, gd, won: Math.floor(points / 3), drawn: points % 3, lost: played - Math.floor(points / 3) - (points % 3), gf: 0, ga: 0 }));
+
+async function loadOverlayTable() {
+  if (overlayTable.loading || Date.now() - overlayTable.loadedAt < 20000) return;
+  overlayTable.loading = true;
+  overlayTable.loadedAt = Date.now();
+  try {
+    const response = await fetch(`/api/public/room-table?room=${encodeURIComponent(ROOM_ID)}`, { cache: 'no-store' });
+    if (response.ok) { const data = await response.json(); overlayTable.rows = data.rows || []; overlayTable.championship = data.championship || null; }
+  } catch {}
+  overlayTable.loading = false;
+}
+
 function builderTokenValues() {
   const sport = currentSport();
+  const table = overlayTable.rows.length || !isAdminPanel ? overlayTable.rows : SAMPLE_TABLE;
+  const tableValues = {};
+  table.slice(0, 16).forEach((row, index) => { for (const key of ['name', 'short', 'points', 'played', 'won', 'drawn', 'lost', 'gf', 'ga', 'gd', 'position']) tableValues[`table.${index + 1}.${key}`] = row[key]; });
   return {
+    ...tableValues, 'champ.name': overlayTable.championship?.name || (isAdminPanel ? 'Campeonato' : ''),
     'home.name': state.home.name, 'home.short': state.home.short, 'home.score': state.home.score,
     'away.name': state.away.name, 'away.short': state.away.short, 'away.score': state.away.score,
     clock: clockText(), period: (sport.periods || []).find(([value]) => value === state.period)?.[1] || '',
@@ -1264,7 +1284,7 @@ function builderTokenValues() {
 }
 
 function resolveBuilderText(template, values = builderTokenValues()) {
-  return String(template ?? '').replace(/\{([a-z.]+)\}/g, (match, key) => (key in values ? String(values[key] ?? '') : match));
+  return String(template ?? '').replace(/\{([a-z0-9.]+)\}/g, (match, key) => (key in values ? String(values[key] ?? '') : match));
 }
 
 function resolveBuilderSource(src) {
@@ -1655,6 +1675,7 @@ async function loadOperationsData() {
       matches: Array.isArray(data.matches) ? data.matches : [],
       notifications: Array.isArray(data.notifications) ? data.notifications : [],
       announcements: Array.isArray(data.announcements) ? data.announcements : [],
+      posts: Array.isArray(data.posts) ? data.posts : [],
       logs: Array.isArray(data.logs) ? data.logs : [],
       delegationStatus: data.delegationStatus && typeof data.delegationStatus === 'object' ? data.delegationStatus : {},
       teamHistory: data.teamHistory && typeof data.teamHistory === 'object' ? data.teamHistory : {},
@@ -1997,7 +2018,7 @@ function renderTeamsTab() {
   const options = (selectedId) => teamCatalog.map(team => `<option value="${escapeHtml(team.id)}" ${team.id === selectedId ? 'selected' : ''}>${escapeHtml(team.name)} · ${escapeHtml(team.short)}</option>`).join('');
   if (!selected) return '<div class="empty-events">Nenhum time cadastrado.</div>';
   return `<div class="team-match-picker"><div class="section-header"><div><h3 class="section-title">Times da partida</h3><p class="help-text">Selecione dois times cadastrados para preencher escudo, cores e atletas.</p></div></div><div class="field-row"><div class="field"><label for="match-home-team">Mandante</label><select id="match-home-team" data-match-team="home">${options(state.selectedTeams?.home)}</select></div><div class="field"><label for="match-away-team">Visitante</label><select id="match-away-team" data-match-team="away">${options(state.selectedTeams?.away)}</select></div></div></div>
-    <div class="team-catalog"><div class="team-catalog-head"><div><strong>Cadastro de times</strong><small>Biblioteca permanente para todas as partidas.</small></div><button class="button subtle" data-action="add-team">+ Novo time</button></div>
+    <div class="team-catalog"><div class="team-catalog-head"><div><strong>Cadastro de times</strong><small>Biblioteca permanente para todas as partidas.</small></div><div class="inline-actions"><label class="button subtle" title="Colunas: Equipe;Sigla;Cor;Número;Atleta;Posição;Altura;Função">Importar planilha<input type="file" data-teams-import accept=".csv,.tsv,.txt,text/csv" hidden></label><button class="button subtle" data-action="teams-template">Modelo (.csv)</button><button class="button subtle" data-action="add-team">+ Novo time</button></div></div>
       <div class="field"><label for="catalog-team-select">Time em edição</label><select id="catalog-team-select">${options(selected.id)}</select></div>
       <div class="team-editor"><div class="team-title"><strong>${escapeHtml(selected.name)}</strong><div class="color-field"><input type="color" id="catalog-team-color" data-catalog-field="color" data-catalog-id="${escapeHtml(selected.id)}" value="${safeColor(selected.color)}" aria-label="Cor principal do time"></div></div>
         <div class="field"><label for="catalog-team-name">Nome da equipe</label><input id="catalog-team-name" data-catalog-field="name" data-catalog-id="${escapeHtml(selected.id)}" maxlength="80" value="${escapeHtml(selected.name)}"></div>
@@ -2120,31 +2141,75 @@ function renderMatchSwitcher() {
   return `<label class="active-match-switcher"><span>Partida ativa</span><select id="active-match-switcher">${sorted.map(item => `<option value="${escapeHtml(item.room)}" ${item.room === ROOM_ID ? 'selected' : ''}>${escapeHtml(operationTeamName(item.homeTeamId))} × ${escapeHtml(operationTeamName(item.awayTeamId))} · ${escapeHtml(item.round || operationDate(item.kickoffAt, true))}</option>`).join('')}</select></label>`;
 }
 
+const SPORT_LABELS = { football: 'Futebol', futsal: 'Futsal', volleyball: 'Vôlei', basketball: 'Basquete', esports: 'E-sports', other: 'Outra modalidade' };
+const FORMAT_LABELS = { league: 'Pontos corridos (todos contra todos)', groups: 'Fase de grupos + mata-mata', knockout: 'Mata-mata' };
+const TIEBREAKER_LABELS = { wins: 'Mais vitórias', goalDiff: 'Saldo de gols', goalsFor: 'Gols marcados', goalsAgainst: 'Menos gols sofridos', headToHead: 'Confronto direto', fewerCards: 'Menos cartões', alphabetical: 'Ordem alfabética' };
+const CHAMPIONSHIP_STATUS_LABELS = { planned: 'Planejado', active: 'Em andamento', finished: 'Encerrado' };
+const DEFAULT_TIEBREAKERS = ['wins', 'goalDiff', 'goalsFor', 'headToHead'];
+let fixtureOptions = { mode: '', doubleRound: false, groups: 2, advance: 2, twoLegs: false, startDate: '', time: '15:00', intervalDays: 7, venue: '', shuffle: true, replace: false };
+let championshipSectionsOpen = { general: true };
+
+function blankChampionship() {
+  return { name: '', season: '', startDate: '', endDate: '', status: 'planned', sport: 'football', format: 'league', description: '', isPublic: false, slug: '', organizer: '', organizerName: '', rules: { pointsWin: 3, pointsDraw: 1, pointsLoss: 0, tiebreakers: [...DEFAULT_TIEBREAKERS], yellowLimit: 3, redGames: 1 }, teamIds: [], moderators: [] };
+}
+
+function championshipPublicUrl(item) {
+  return item?.slug ? `${location.origin}/c/${item.slug}` : '';
+}
+
 function renderChampionshipsModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
   const selected = operationsData.championships.find(item => item.id === selectedChampionshipId) || null;
-  const editor = championshipDraft || selected || { name: '', season: '', startDate: '', endDate: '', status: 'planned' };
-  const list = operationsData.championships.map(item => `<button class="operations-item ${item.id === selected?.id ? 'active' : ''}" data-action="select-championship" data-value="${escapeHtml(item.id)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.season || 'Temporada não informada')} · ${operationDate(item.startDate)} → ${operationDate(item.endDate)}</small></span><b>${item.status === 'active' ? 'Em andamento' : item.status === 'finished' ? 'Encerrado' : 'Planejado'}</b></button>`).join('') || '<div class="portal-empty">Nenhum campeonato cadastrado.</div>';
-  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Campeonatos</strong><small>${operationsData.championships.length} cadastrado${operationsData.championships.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-championship">+ Novo</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar campeonato' : 'Novo campeonato'}</h3><p class="help-text">O campeonato organiza temporadas, partidas e a identidade usada na transmissão.</p></div></div><div class="field"><label for="championship-name">Nome</label><input id="championship-name" maxlength="100" value="${escapeHtml(editor.name || '')}" placeholder="Ex.: Campeonato Municipal"></div><div class="field-row"><div class="field"><label for="championship-season">Temporada</label><input id="championship-season" maxlength="40" value="${escapeHtml(editor.season || '')}" placeholder="2026"></div><div class="field"><label for="championship-status">Status</label><select id="championship-status"><option value="planned" ${editor.status === 'planned' ? 'selected' : ''}>Planejado</option><option value="active" ${editor.status === 'active' ? 'selected' : ''}>Em andamento</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Encerrado</option></select></div></div><div class="field-row"><div class="field"><label for="championship-start">Início</label><input id="championship-start" type="date" value="${escapeHtml(editor.startDate || '')}"></div><div class="field"><label for="championship-end">Fim</label><input id="championship-end" type="date" value="${escapeHtml(editor.endDate || '')}"></div></div><div class="operations-actions"><button class="button primary" data-action="save-championship" data-value="${escapeHtml(selected?.id || '')}">Salvar campeonato</button>${selected ? '<button class="button subtle danger" data-action="delete-championship" data-value="' + escapeHtml(selected.id) + '">Excluir</button>' : ''}</div></section></div>`;
+  championshipDraft ||= selected ? structuredClone(selected) : null;
+  const editor = { ...blankChampionship(), ...(championshipDraft || {}) };
+  editor.rules = { ...blankChampionship().rules, ...(editor.rules || {}) };
+  const matchesOf = selected ? operationsData.matches.filter(match => match.championshipId === selected.id) : [];
+  const list = operationsData.championships.map(item => `<button class="operations-item ${item.id === selected?.id ? 'active' : ''}" data-action="select-championship" data-value="${escapeHtml(item.id)}"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(SPORT_LABELS[item.sport] || 'Futebol')} · ${escapeHtml(FORMAT_LABELS[item.format] || FORMAT_LABELS.league).split(' (')[0]} · ${operationsData.matches.filter(match => match.championshipId === item.id).length} partida(s)${item.isPublic ? ' · público' : ''}</small></span><b>${CHAMPIONSHIP_STATUS_LABELS[item.status] || 'Planejado'}</b></button>`).join('') || '<div class="portal-empty">Nenhum campeonato cadastrado.</div>';
+  const field = (label, path, value, attrs = '', type = 'text') => `<div class="field"><label>${label}</label><input data-ch-field="${path}" ${type === 'number' ? 'data-ch-type="number"' : ''} type="${type}" value="${escapeHtml(String(value ?? ''))}" ${attrs}></div>`;
+  const select = (label, path, value, options) => `<div class="field"><label>${label}</label><select data-ch-field="${path}">${options.map(([key, text]) => `<option value="${escapeHtml(key)}" ${value === key ? 'selected' : ''}>${escapeHtml(text)}</option>`).join('')}</select></div>`;
+  const check = (label, path, checked) => `<label class="builder-check"><input type="checkbox" data-ch-field="${path}" data-ch-type="bool" ${checked ? 'checked' : ''}> ${label}</label>`;
+  const section = (key, title, caption, body) => `<details class="settings-section" data-champ-section="${key}" ${championshipSectionsOpen[key] ?? false ? 'open' : ''}><summary><span><strong>${title}</strong><small>${caption}</small></span></summary><div class="settings-section-body">${body}</div></details>`;
+  const order = [...editor.rules.tiebreakers, ...Object.keys(TIEBREAKER_LABELS).filter(key => !editor.rules.tiebreakers.includes(key))];
+  const tiebreakers = `<div class="tiebreak-list">${order.map(key => { const on = editor.rules.tiebreakers.includes(key); const position = editor.rules.tiebreakers.indexOf(key); return `<div class="tiebreak-row ${on ? 'is-on' : ''}"><label><input type="checkbox" data-action="ch-tb" data-value="${key}|toggle" ${on ? 'checked' : ''}> ${on ? `<b>${position + 1}º</b>` : ''} ${TIEBREAKER_LABELS[key]}</label>${on ? `<span><button class="button subtle" data-action="ch-tb" data-value="${key}|up" ${position === 0 ? 'disabled' : ''} aria-label="Subir">↑</button><button class="button subtle" data-action="ch-tb" data-value="${key}|down" ${position === editor.rules.tiebreakers.length - 1 ? 'disabled' : ''} aria-label="Descer">↓</button></span>` : ''}</div>`; }).join('')}</div>`;
+  const teams = teamCatalog.map(team => `<label class="announce-team"><input type="checkbox" data-ch-team="${escapeHtml(team.id)}" ${editor.teamIds.includes(team.id) ? 'checked' : ''}> ${escapeHtml(team.name)}</label>`).join('') || '<p class="help-text">Cadastre equipes no módulo Times.</p>';
+  const mode = fixtureOptions.mode || editor.format;
+  const fx = (label, key, type = 'text', attrs = '') => `<div class="field"><label>${label}</label><input data-fx="${key}" type="${type}" value="${escapeHtml(String(fixtureOptions[key] ?? ''))}" ${attrs}></div>`;
+  const fxCheck = (label, key) => `<label class="builder-check"><input type="checkbox" data-fx="${key}" data-fx-bool ${fixtureOptions[key] ? 'checked' : ''}> ${label}</label>`;
+  const generator = selected ? `<div class="field"><label>Formato</label><select data-fx="mode">${Object.entries(FORMAT_LABELS).map(([key, text]) => `<option value="${key}" ${mode === key ? 'selected' : ''}>${text}</option>`).join('')}</select></div>
+    <div class="field-row">${fx('Primeira rodada em', 'startDate', 'date')}${fx('Horário', 'time', 'time')}${fx('Dias entre rodadas', 'intervalDays', 'number', 'min="1" max="60"')}</div>${fx('Local (opcional)', 'venue', 'text', 'maxlength="120"')}
+    ${mode !== 'knockout' ? fxCheck('Turno e returno (ida e volta)', 'doubleRound') : fxCheck('Ida e volta nas fases até a semifinal', 'twoLegs')}${mode === 'groups' ? `<div class="field-row">${fx('Número de grupos', 'groups', 'number', 'min="2" max="16"')}${fx('Classificados por grupo', 'advance', 'number', 'min="1" max="4"')}</div>` : ''}
+    ${fxCheck('Sortear a ordem das equipes', 'shuffle')}${matchesOf.some(match => match.generated) ? fxCheck('Substituir as partidas geradas anteriormente (só se nenhuma começou)', 'replace') : ''}
+    <div class="operations-actions"><button class="button primary" data-action="generate-fixtures">Gerar partidas (${editor.teamIds.length} equipes)</button>${mode !== 'league' ? '<button class="button" data-action="generate-next-round">Gerar próxima fase</button>' : ''}</div><p class="help-text">${matchesOf.length} partida(s) neste campeonato. O mata-mata só avança quando a fase anterior estiver finalizada; empates exigem pênaltis. As salas de overlay de cada jogo são criadas automaticamente.</p>` : '<p class="help-text">Salve o campeonato para gerar as partidas.</p>';
+  const moderatorsBody = adminSession.role === 'admin' ? ((accessAdmins.filter(account => account.role === 'operator').map(account => `<label class="announce-team"><input type="checkbox" data-ch-mod="${escapeHtml(account.username)}" ${editor.moderators.includes(account.username) ? 'checked' : ''}> ${escapeHtml(account.username)} <small>(operador)</small></label>`).join('')) || '<p class="help-text">Nenhum operador cadastrado. Crie contas com o papel Operador em Usuários/Acessos.</p>') + '<p class="help-text">Sem moderadores marcados, qualquer operador administra este campeonato. Com moderadores, só eles (e os administradores) podem editar.</p>' : '<p class="help-text">Somente administradores definem moderadores.</p>';
+  const publicLink = championshipPublicUrl(selected || editor);
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Campeonatos</strong><small>${operationsData.championships.length} cadastrado${operationsData.championships.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-championship">+ Novo</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? escapeHtml(editor.name || 'Editar campeonato') : 'Novo campeonato'}</h3><p class="help-text">Organize formato, regras, equipes e partidas. Cada seção abaixo pode ser aberta ou recolhida.</p></div></div>
+    ${section('general', 'Dados gerais', 'Nome, modalidade, período e descrição', `${field('Nome', 'name', editor.name, 'maxlength="100" placeholder="Ex.: Campeonato Municipal"')}<div class="field-row">${field('Temporada', 'season', editor.season, 'maxlength="40" placeholder="2026"')}${select('Status', 'status', editor.status, Object.entries(CHAMPIONSHIP_STATUS_LABELS))}</div><div class="field-row">${select('Modalidade', 'sport', editor.sport, Object.entries(SPORT_LABELS))}${select('Formato', 'format', editor.format, Object.entries(FORMAT_LABELS))}</div><div class="field-row">${field('Início', 'startDate', editor.startDate, '', 'date')}${field('Fim', 'endDate', editor.endDate, '', 'date')}</div><div class="field"><label>Descrição (página pública)</label><textarea data-ch-field="description" maxlength="600" rows="3">${escapeHtml(editor.description || '')}</textarea></div>`)}
+    ${section('rules', 'Regras e desempate', 'Pontuação, critérios de desempate e suspensões', `<div class="field-row">${field('Vitória', 'rules.pointsWin', editor.rules.pointsWin, 'min="0" max="10"', 'number')}${field('Empate', 'rules.pointsDraw', editor.rules.pointsDraw, 'min="0" max="10"', 'number')}${field('Derrota', 'rules.pointsLoss', editor.rules.pointsLoss, 'min="0" max="10"', 'number')}</div><strong class="tiny-label">Critérios de desempate (em ordem)</strong>${tiebreakers}<div class="field-row">${field('Amarelos para suspender (0 = off)', 'rules.yellowLimit', editor.rules.yellowLimit, 'min="0" max="10"', 'number')}${field('Jogos por vermelho', 'rules.redGames', editor.rules.redGames, 'min="0" max="10"', 'number')}</div>`)}
+    ${section('teams', 'Equipes participantes', `${editor.teamIds.length} selecionada(s)`, `<div class="announce-teams">${teams}</div>`)}
+    ${section('fixtures', 'Gerar partidas e fases', 'Todos contra todos, grupos ou mata-mata', generator)}
+    ${section('public', 'Divulgação e página pública', editor.isPublic ? 'Publicado' : 'Privado', `${check('Publicar página pública deste campeonato (qualquer pessoa com o link vê)', 'isPublic', editor.isPublic)}${field('Endereço (slug)', 'slug', editor.slug, 'maxlength="48" placeholder="gerado a partir do nome"')}${field('Nome do organizador (exibido)', 'organizerName', editor.organizerName, 'maxlength="80"')}${field('Endereço do organizador', 'organizer', editor.organizer, 'maxlength="48" placeholder="ex.: prefeitura-cajati"')}${publicLink ? `<div class="copy-row"><input readonly value="${escapeHtml(publicLink)}" aria-label="Link público"><button class="button" data-action="copy-public-link" data-value="${escapeHtml(publicLink)}">${icons.copy} Copiar</button><a class="button subtle" href="${escapeHtml(publicLink)}" target="_blank" rel="noopener">Abrir</a></div>` : '<p class="help-text">O link aparece depois de salvar.</p>'}`)}
+    ${section('moderators', 'Moderadores', 'Quem pode administrar este campeonato', moderatorsBody)}
+    <div class="operations-actions"><button class="button primary" data-action="save-championship" data-value="${escapeHtml(selected?.id || '')}">Salvar campeonato</button>${selected ? `<button class="button subtle danger" data-action="delete-championship" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div></section></div>`;
 }
 
 let standingsRooms = {};
 let standingsChampionshipId = '';
 let standingsSummaryId = '';
 let standingsLoadedAt = 0;
+let standingsBundle = null;
+let standingsBundleFor = '';
 
 async function loadStandingsRooms(force = false) {
-  if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'standings') return;
-  if (!force && Date.now() - standingsLoadedAt < 12000) return;
+  if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'standings' || !standingsChampionshipId) return;
+  if (!force && Date.now() - standingsLoadedAt < 12000 && standingsBundleFor === standingsChampionshipId) return;
   standingsLoadedAt = Date.now();
-  const wanted = operationsData.matches.filter(match => ['finished', 'live'].includes(match.status) && (!standingsChampionshipId || match.championshipId === standingsChampionshipId)).slice(0, 80);
-  await Promise.all(wanted.map(async match => {
-    try {
-      const response = await fetch(`/api/state?room=${encodeURIComponent(match.room)}&ts=${Date.now()}`, { cache: 'no-store' });
-      if (response.ok) standingsRooms[match.room] = await response.json();
-    } catch {}
-  }));
+  try {
+    const response = await fetch(`/api/public/championship?id=${encodeURIComponent(standingsChampionshipId)}&ts=${Date.now()}`, { cache: 'no-store' });
+    if (response.ok) { standingsBundle = await response.json(); standingsBundleFor = standingsChampionshipId; }
+    const summary = standingsBundle?.matches.find(match => match.id === standingsSummaryId);
+    if (summary) { const room = await fetch(`/api/state?room=${encodeURIComponent(summary.room)}&ts=${Date.now()}`, { cache: 'no-store' }); if (room.ok) standingsRooms[summary.room] = await room.json(); }
+  } catch {}
   if (managementModule === 'standings') render();
 }
 
@@ -2153,40 +2218,22 @@ function eventKind(title) {
   return /go+l|cesta|ponto/.test(value) ? 'goal' : /amarelo/.test(value) ? 'yellow' : /vermelho/.test(value) ? 'red' : /substitui/.test(value) ? 'sub' : '';
 }
 
-function computeStandings(matches) {
-  const table = new Map();
-  const row = id => { if (!table.has(id)) table.set(id, { id, name: operationTeamName(id), played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, points: 0 }); return table.get(id); };
-  const scorers = new Map();
-  const cards = new Map();
-  for (const match of matches) {
-    const remote = standingsRooms[match.room];
-    if (!remote) continue;
-    const sides = { [remote.home?.short]: match.homeTeamId, [remote.away?.short]: match.awayTeamId };
-    for (const event of remote.events || []) {
-      const kind = eventKind(event.title);
-      const teamId = sides[event.team];
-      const name = String(event.name || '').trim();
-      if (!kind || !teamId || !name || kind === 'sub') continue;
-      const key = `${name}|${teamId}`;
-      if (kind === 'goal') scorers.set(key, { name, teamId, goals: (scorers.get(key)?.goals || 0) + 1 });
-      else cards.set(key, { name, teamId, yellow: (cards.get(key)?.yellow || 0) + (kind === 'yellow' ? 1 : 0), red: (cards.get(key)?.red || 0) + (kind === 'red' ? 1 : 0) });
-    }
-    if (match.status !== 'finished') continue;
-    const home = row(match.homeTeamId); const away = row(match.awayTeamId);
-    const hs = Number(remote.home?.score || 0); const as = Number(remote.away?.score || 0);
-    home.played++; away.played++; home.gf += hs; home.ga += as; away.gf += as; away.ga += hs;
-    if (hs > as) { home.won++; away.lost++; home.points += 3; } else if (hs < as) { away.won++; home.lost++; away.points += 3; } else { home.drawn++; away.drawn++; home.points++; away.points++; }
-  }
-  const ranking = [...table.values()].sort((a, b) => b.points - a.points || (b.gf - b.ga) - (a.gf - a.ga) || b.gf - a.gf || a.name.localeCompare(b.name, 'pt-BR'));
-  return { ranking, scorers: [...scorers.values()].sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name, 'pt-BR')).slice(0, 10), cards: [...cards.values()].sort((a, b) => (b.red * 3 + b.yellow) - (a.red * 3 + a.yellow)).slice(0, 10) };
+function formChips(form = []) {
+  return `<span class="form-chips">${form.map(item => `<i class="form-${item === 'V' ? 'w' : item === 'E' ? 'd' : 'l'}" title="${item === 'V' ? 'Vitória' : item === 'E' ? 'Empate' : 'Derrota'}">${item}</i>`).join('')}</span>`;
+}
+
+function standingsTableMarkup(rows, teams = [], compact = false) {
+  if (!rows.length) return '<div class="portal-empty">Sem partidas finalizadas ainda.</div>';
+  const logo = id => { const team = teams.find(item => item.id === id); return team?.logo ? `<img class="table-logo" src="${escapeHtml(team.logo)}" alt="">` : `<span class="table-logo is-initials" style="--team-color:${safeColor(team?.color)}">${escapeHtml((team?.short || '').slice(0, 3))}</span>`; };
+  return `<div class="table-scroll"><table class="standings-table"><thead><tr><th>#</th><th>Equipe</th><th>P</th><th>J</th>${compact ? '' : '<th>V</th><th>E</th><th>D</th><th>GP</th><th>GC</th>'}<th>SG</th>${compact ? '' : '<th>Últimos</th>'}</tr></thead><tbody>${rows.map(row => `<tr><td>${row.position}</td><td><span class="table-team">${logo(row.teamId)}${escapeHtml(row.name)}</span></td><td><b>${row.points}</b></td><td>${row.played}</td>${compact ? '' : `<td>${row.won}</td><td>${row.drawn}</td><td>${row.lost}</td><td>${row.gf}</td><td>${row.ga}</td>`}<td>${row.gd}</td>${compact ? '' : `<td>${formChips(row.form)}</td>`}</tr>`).join('')}</tbody></table></div>`;
 }
 
 function renderMatchSummary(match) {
   const remote = standingsRooms[match.room];
-  if (!remote) return '<div class="portal-empty">Carregando súmula…</div>';
   const kindLabel = { goal: 'Gol', yellow: 'Cartão amarelo', red: 'Cartão vermelho', sub: 'Substituição' };
-  const rows = [...(remote.events || [])].reverse().map(event => ({ event, kind: eventKind(event.title) })).filter(item => item.kind).map(({ event, kind }) => `<tr><td>${escapeHtml(event.minute || '')}</td><td>${escapeHtml(kindLabel[kind])}</td><td>${escapeHtml(event.team || '')}</td><td>${escapeHtml(event.name || '—')}${event.note ? ` <small>(${escapeHtml(event.note)})</small>` : ''}</td><td>${escapeHtml(event.score || '')}</td></tr>`).join('') || '<tr><td colspan="5">Nenhum lance registrado.</td></tr>';
-  return `<section class="dashboard-section standings-summary"><div class="section-header"><div><h3 class="section-title">Súmula · ${escapeHtml(operationTeamName(match.homeTeamId))} ${Number(remote.home?.score || 0)} × ${Number(remote.away?.score || 0)} ${escapeHtml(operationTeamName(match.awayTeamId))}</h3><p class="help-text">${escapeHtml(operationChampionshipName(match.championshipId))}${match.round ? ` · ${escapeHtml(match.round)}` : ''} · ${escapeHtml(operationDate(match.kickoffAt, true))}${match.venue ? ` · ${escapeHtml(match.venue)}` : ''}</p></div><div class="operations-actions"><button class="button subtle" data-action="standings-print">Imprimir</button><button class="button subtle" data-action="standings-summary" data-value="">Fechar</button></div></div><table class="standings-table"><thead><tr><th>Min</th><th>Lance</th><th>Equipe</th><th>Atleta</th><th>Placar</th></tr></thead><tbody>${rows}</tbody></table></section>`;
+  const rows = remote ? [...(remote.events || [])].reverse().map(event => ({ event, kind: eventKind(event.title) })).filter(item => item.kind).map(({ event, kind }) => `<tr><td>${escapeHtml(event.minute || '')}</td><td>${escapeHtml(kindLabel[kind])}</td><td>${escapeHtml(event.team || '')}</td><td>${escapeHtml(event.name || '—')}${event.note ? ` <small>(${escapeHtml(event.note)})</small>` : ''}</td><td>${escapeHtml(event.score || '')}</td></tr>`).join('') || '<tr><td colspan="5">Nenhum lance registrado.</td></tr>' : '<tr><td colspan="5">Carregando súmula…</td></tr>';
+  const score = match.homeScore === null ? '–' : `${match.homeScore} × ${match.awayScore}`;
+  return `<section class="dashboard-section standings-summary"><div class="section-header"><div><h3 class="section-title">Súmula · ${escapeHtml(match.homeName)} ${score} ${escapeHtml(match.awayName)}</h3><p class="help-text">${escapeHtml(match.round || '')} · ${escapeHtml(operationDate(match.kickoffAt, true))}${match.venue ? ` · ${escapeHtml(match.venue)}` : ''}</p></div><div class="operations-actions"><button class="button" data-action="art-result" data-value="${escapeHtml(match.id)}">Gerar arte do resultado</button><button class="button subtle" data-action="standings-print">Imprimir</button><button class="button subtle" data-action="standings-summary" data-value="">Fechar</button></div></div><table class="standings-table"><thead><tr><th>Min</th><th>Lance</th><th>Equipe</th><th>Atleta</th><th>Placar</th></tr></thead><tbody>${rows}</tbody></table></section>`;
 }
 
 function renderStandingsModule() {
@@ -2195,20 +2242,148 @@ function renderStandingsModule() {
   if (!standingsChampionshipId || !operationsData.championships.some(item => item.id === standingsChampionshipId)) standingsChampionshipId = (operationsData.championships.find(item => item.status === 'active') || operationsData.championships[0])?.id || '';
   if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato e partidas para gerar a classificação.</div>';
   loadStandingsRooms();
-  const matches = operationsData.matches.filter(match => match.championshipId === standingsChampionshipId);
-  const done = matches.filter(match => match.status === 'finished');
-  const { ranking, scorers, cards } = computeStandings(matches);
   const options = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === standingsChampionshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
-  const table = ranking.length ? `<table class="standings-table"><thead><tr><th>#</th><th>Equipe</th><th>P</th><th>J</th><th>V</th><th>E</th><th>D</th><th>GP</th><th>GC</th><th>SG</th></tr></thead><tbody>${ranking.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td><b>${item.points}</b></td><td>${item.played}</td><td>${item.won}</td><td>${item.drawn}</td><td>${item.lost}</td><td>${item.gf}</td><td>${item.ga}</td><td>${item.gf - item.ga}</td></tr>`).join('')}</tbody></table><p class="help-text">Pontos: vitória 3, empate 1. Considera apenas partidas finalizadas, usando o placar registrado em cada sala.</p>` : '<div class="portal-empty">Nenhuma partida finalizada neste campeonato ainda.</div>';
-  const scorerRows = scorers.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(operationTeamName(item.teamId))}</td><td><b>${item.goals}</b></td></tr>`).join('');
-  const cardRows = cards.map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(operationTeamName(item.teamId))}</td><td>${item.yellow}</td><td>${item.red}</td></tr>`).join('');
-  const matchRows = done.map(match => { const remote = standingsRooms[match.room]; return `<button class="operations-item ${standingsSummaryId === match.id ? 'active' : ''}" data-action="standings-summary" data-value="${escapeHtml(match.id)}"><span><strong>${escapeHtml(operationTeamName(match.homeTeamId))} ${remote ? Number(remote.home?.score || 0) : '–'} × ${remote ? Number(remote.away?.score || 0) : '–'} ${escapeHtml(operationTeamName(match.awayTeamId))}</strong><small>${escapeHtml(match.round || 'Rodada')} · ${escapeHtml(operationDate(match.kickoffAt, true))}</small></span><b>Súmula</b></button>`; }).join('') || '<div class="portal-empty">Sem partidas finalizadas.</div>';
-  const openMatch = done.find(match => match.id === standingsSummaryId);
-  return `<div class="module-section"><div class="field standings-select"><label for="standings-championship">Campeonato</label><select id="standings-championship">${options}</select></div>
-    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Classificação</h3></div></div>${table}</section>
+  const bundle = standingsBundleFor === standingsChampionshipId ? standingsBundle : null;
+  if (!bundle) return `<div class="module-section"><div class="field standings-select"><label for="standings-championship">Campeonato</label><select id="standings-championship">${options}</select></div><div class="portal-empty">Carregando classificação…</div></div>`;
+  const tables = bundle.groups.length ? bundle.groups.map(group => `<section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Grupo ${escapeHtml(group.group)}</h3></div></div>${standingsTableMarkup(group.table, bundle.teams)}</section>`).join('') : `<section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Classificação</h3><p class="help-text">Pontos: vitória ${bundle.championship.rules.pointsWin}, empate ${bundle.championship.rules.pointsDraw}. Desempate: ${bundle.championship.rules.tiebreakers.map(key => TIEBREAKER_LABELS[key]).join(' › ')}.</p></div><button class="button" data-action="art-standings">Gerar arte da tabela</button></div>${standingsTableMarkup(bundle.standings, bundle.teams)}</section>`;
+  const scorerRows = bundle.scorers.slice(0, 10).map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.teamName)}</td><td><b>${item.goals}</b></td></tr>`).join('');
+  const cardRows = bundle.cards.slice(0, 10).map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.teamName)}</td><td>${item.yellow}</td><td>${item.red}</td></tr>`).join('');
+  const suspended = bundle.suspended.map(item => `<div class="dashboard-mini-row"><span>${escapeHtml(item.name)} · ${escapeHtml(item.teamName)}</span><small>${item.games} jogo(s)</small></div>`).join('');
+  const finished = bundle.matches.filter(match => match.status === 'finished');
+  const matchRows = finished.map(match => `<button class="operations-item ${standingsSummaryId === match.id ? 'active' : ''}" data-action="standings-summary" data-value="${escapeHtml(match.id)}"><span><strong>${escapeHtml(match.homeName)} ${match.homeScore === null ? '–' : match.homeScore} × ${match.awayScore === null ? '–' : match.awayScore} ${escapeHtml(match.awayName)}</strong><small>${escapeHtml(match.round || 'Rodada')} · ${escapeHtml(operationDate(match.kickoffAt, true))}</small></span><b>Súmula</b></button>`).join('') || '<div class="portal-empty">Sem partidas finalizadas.</div>';
+  const openMatch = finished.find(match => match.id === standingsSummaryId);
+  const link = bundle.championship.slug ? `${location.origin}/c/${bundle.championship.slug}` : '';
+  return `<div class="module-section"><div class="standings-head"><div class="field standings-select"><label for="standings-championship">Campeonato</label><select id="standings-championship">${options}</select></div>${link ? `<a class="button subtle" href="${escapeHtml(link)}" target="_blank" rel="noopener">Abrir página pública</a>` : '<span class="help-text">Publique o campeonato para ter uma página pública.</span>'}</div>
+    ${bundle.championship.championName ? `<div class="library-banner is-inherited"><div><strong>Campeão: ${escapeHtml(bundle.championship.championName)}</strong></div></div>` : ''}${tables}
     <div class="dashboard-grid"><section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Artilharia</h3></div></div>${scorerRows ? `<table class="standings-table"><thead><tr><th>#</th><th>Atleta</th><th>Equipe</th><th>Gols</th></tr></thead><tbody>${scorerRows}</tbody></table>` : '<div class="portal-empty">Nenhum gol com autor identificado.</div>'}</section>
-    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Cartões</h3></div></div>${cardRows ? `<table class="standings-table"><thead><tr><th>Atleta</th><th>Equipe</th><th>🟨</th><th>🟥</th></tr></thead><tbody>${cardRows}</tbody></table>` : '<div class="portal-empty">Nenhum cartão registrado.</div>'}</section></div>
-    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Súmulas das partidas</h3><p class="help-text">Abra a súmula com os lances registrados em cada jogo.</p></div></div><div class="dashboard-list">${matchRows}</div></section>${openMatch ? renderMatchSummary(openMatch) : ''}</div>`;
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Cartões e suspensões</h3></div></div>${cardRows ? `<table class="standings-table"><thead><tr><th>Atleta</th><th>Equipe</th><th>🟨</th><th>🟥</th></tr></thead><tbody>${cardRows}</tbody></table>` : '<div class="portal-empty">Nenhum cartão registrado.</div>'}${suspended ? `<div class="dashboard-list"><strong>Suspensos para a próxima partida</strong>${suspended}</div>` : ''}</section></div>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Súmulas das partidas</h3><p class="help-text">Abra a súmula com os lances registrados em cada jogo e gere a arte do resultado.</p></div></div><div class="dashboard-list">${matchRows}</div></section>${openMatch ? renderMatchSummary(openMatch) : ''}</div>`;
+}
+
+// ---------- Artes para redes sociais (canvas 1080 × 1080/1350, baixar ou compartilhar) ----------
+let artPreview = null;
+
+function artImage(url) {
+  return new Promise(resolve => {
+    if (!url || !String(url).startsWith('/')) { resolve(null); return; }
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => resolve(null);
+    image.src = url;
+  });
+}
+
+async function artContext(width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext('2d');
+  try { await Promise.all([document.fonts.load('700 60px "Barlow Condensed"'), document.fonts.load('500 30px "Roboto"')]); } catch {}
+  const gradient = context.createLinearGradient(0, 0, width, height);
+  gradient.addColorStop(0, '#07080c'); gradient.addColorStop(1, '#1a1233');
+  context.fillStyle = gradient; context.fillRect(0, 0, width, height);
+  context.fillStyle = 'rgba(216,173,86,.14)';
+  context.beginPath(); context.moveTo(width * .55, 0); context.lineTo(width, 0); context.lineTo(width, height * .42); context.closePath(); context.fill();
+  context.fillStyle = '#d8ad56'; context.fillRect(0, 0, width, 14);
+  return { canvas, context };
+}
+
+function artText(context, text, x, y, { size = 40, weight = 700, color = '#fff', align = 'center', family = '"Barlow Condensed", Arial Narrow, sans-serif', spacing = 0, max = 0 } = {}) {
+  context.font = `${weight} ${size}px ${family}`;
+  context.textAlign = align; context.fillStyle = color; context.textBaseline = 'middle';
+  if ('letterSpacing' in context) context.letterSpacing = `${spacing}px`;
+  let value = String(text);
+  if (max) while (context.measureText(value).width > max && value.length > 3) value = `${value.slice(0, -2)}…`;
+  context.fillText(value, x, y);
+}
+
+function artBadge(context, image, label, color, cx, cy, radius) {
+  context.save();
+  context.beginPath(); context.arc(cx, cy, radius, 0, Math.PI * 2); context.closePath();
+  context.fillStyle = '#ffffff'; context.fill(); context.clip();
+  if (image) context.drawImage(image, cx - radius * .8, cy - radius * .8, radius * 1.6, radius * 1.6);
+  else { context.fillStyle = color; context.fillRect(cx - radius, cy - radius, radius * 2, radius * 2); artText(context, label, cx, cy, { size: radius * .7, color: '#fff' }); }
+  context.restore();
+  context.lineWidth = 6; context.strokeStyle = '#d8ad56'; context.beginPath(); context.arc(cx, cy, radius, 0, Math.PI * 2); context.stroke();
+}
+
+function artFooter(context, width, height) {
+  artText(context, 'JUVENTUDE ESPORTE CLUBE', width / 2, height - 70, { size: 34, color: '#d8ad56', spacing: 8 });
+  artText(context, location.host, width / 2, height - 30, { size: 24, weight: 500, color: '#8c8f9d', family: 'Roboto, Arial, sans-serif' });
+}
+
+async function buildResultArt(match, bundle) {
+  const { canvas, context } = await artContext(1080, 1080);
+  const teamOf = id => bundle.teams.find(team => team.id === id) || {};
+  const [homeImage, awayImage] = await Promise.all([artImage(teamOf(match.homeTeamId).logo), artImage(teamOf(match.awayTeamId).logo)]);
+  artText(context, bundle.championship.name.toUpperCase(), 540, 120, { size: 58, color: '#d8ad56', spacing: 4, max: 960 });
+  artText(context, [match.round, match.status === 'finished' ? 'FIM DE JOGO' : match.status === 'live' ? 'AO VIVO' : ''].filter(Boolean).join(' · ').toUpperCase(), 540, 190, { size: 36, weight: 500, color: '#b4b6c2', spacing: 6, family: 'Roboto, Arial, sans-serif' });
+  artBadge(context, homeImage, teamOf(match.homeTeamId).short || match.homeName.slice(0, 3), teamOf(match.homeTeamId).color || '#8253cd', 190, 450, 110);
+  artBadge(context, awayImage, teamOf(match.awayTeamId).short || match.awayName.slice(0, 3), teamOf(match.awayTeamId).color || '#8253cd', 890, 450, 110);
+  artText(context, match.homeScore === null ? 'VS' : `${match.homeScore}  ×  ${match.awayScore}`, 540, 450, { size: match.homeScore === null ? 130 : 170, color: '#ffffff' });
+  if (match.homePenalties !== null && match.awayPenalties !== null) artText(context, `(${match.homePenalties} × ${match.awayPenalties} nos pênaltis)`, 540, 580, { size: 38, weight: 500, color: '#d8ad56', family: 'Roboto, Arial, sans-serif' });
+  artText(context, match.homeName.toUpperCase(), 190, 640, { size: 46, max: 360 });
+  artText(context, match.awayName.toUpperCase(), 890, 640, { size: 46, max: 360 });
+  const when = match.kickoffAt ? new Date(match.kickoffAt).toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) : '';
+  artText(context, when, 540, 800, { size: 36, weight: 500, color: '#b4b6c2', family: 'Roboto, Arial, sans-serif' });
+  if (match.venue) artText(context, match.venue, 540, 860, { size: 36, weight: 500, color: '#8c8f9d', family: 'Roboto, Arial, sans-serif', max: 900 });
+  artFooter(context, 1080, 1080);
+  return canvas;
+}
+
+async function buildStandingsArt(bundle) {
+  const rows = (bundle.standings.length ? bundle.standings : bundle.groups.flatMap(group => group.table)).slice(0, 10);
+  const { canvas, context } = await artContext(1080, 1350);
+  artText(context, bundle.championship.name.toUpperCase(), 540, 110, { size: 62, color: '#d8ad56', spacing: 4, max: 960 });
+  artText(context, 'CLASSIFICAÇÃO', 540, 180, { size: 44, color: '#ffffff', spacing: 10 });
+  const top = 250; const step = 86;
+  artText(context, 'EQUIPE', 190, top - 20, { size: 26, weight: 500, color: '#8c8f9d', align: 'left', family: 'Roboto, Arial, sans-serif' });
+  [['P', 700], ['J', 790], ['SG', 880], ['GP', 975]].forEach(([label, x]) => artText(context, label, x, top - 20, { size: 26, weight: 500, color: '#8c8f9d', family: 'Roboto, Arial, sans-serif' }));
+  rows.forEach((row, index) => {
+    const y = top + 30 + index * step;
+    context.fillStyle = index % 2 ? 'rgba(255,255,255,.03)' : 'rgba(255,255,255,.07)';
+    context.fillRect(60, y - 36, 960, 72);
+    artText(context, row.position, 100, y, { size: 44, color: index < 3 ? '#d8ad56' : '#fff' });
+    artText(context, row.name.toUpperCase(), 160, y, { size: 42, align: 'left', max: 480 });
+    [[row.points, 700, '#d8ad56'], [row.played, 790, '#fff'], [row.gd, 880, '#fff'], [row.gf, 975, '#fff']].forEach(([value, x, color]) => artText(context, value, x, y, { size: 44, color }));
+  });
+  artFooter(context, 1080, 1350);
+  return canvas;
+}
+
+async function openArt(canvas, name) {
+  const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) { toast('Não foi possível gerar a imagem.'); return; }
+  if (artPreview?.url) URL.revokeObjectURL(artPreview.url);
+  artPreview = { url: URL.createObjectURL(blob), blob, name };
+  drawer = { type: 'art' };
+  render();
+}
+
+function renderArtDrawer() {
+  return `<div class="drawer-backdrop" data-backdrop><aside class="drawer art-drawer"><div class="drawer-head"><h2>Arte pronta</h2><button class="button square" data-action="close-drawer">${icons.close}</button></div><img class="art-preview" src="${escapeHtml(artPreview?.url || '')}" alt="Prévia da arte"><div class="operations-actions"><button class="button primary" data-action="art-download">Baixar PNG</button><button class="button" data-action="art-share">Compartilhar (Instagram / WhatsApp)</button></div><p class="help-text">Envie para o celular ou compartilhe direto pelos aplicativos. Escudos só entram na arte quando estão hospedados no próprio sistema.</p></aside></div>`;
+}
+
+let selectedPostId = '';
+let postMediaUrl = '';
+const POST_KIND_LABELS = { news: 'Notícia', photo: 'Foto', video: 'Vídeo' };
+
+function renderFeedModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato para publicar notícias e mídia.</div>';
+  const posts = operationsData.posts || [];
+  const selected = posts.find(item => item.id === selectedPostId) || null;
+  const editor = selected || { championshipId: standingsChampionshipId || operationsData.championships[0].id, kind: 'news', title: '', body: '', round: '', link: '', media: '' };
+  const media = postMediaUrl || editor.media || '';
+  const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === editor.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
+  const list = posts.map(post => `<button class="operations-item ${post.id === selected?.id ? 'active' : ''}" data-action="select-post" data-value="${escapeHtml(post.id)}"><span><strong>${escapeHtml(post.title || POST_KIND_LABELS[post.kind])}</strong><small>${escapeHtml(POST_KIND_LABELS[post.kind])} · ${escapeHtml(operationChampionshipName(post.championshipId))}${post.round ? ` · ${escapeHtml(post.round)}` : ''} · ${escapeHtml(operationDate(post.createdAt, true))}</small></span></button>`).join('') || '<div class="portal-empty">Nenhuma publicação ainda.</div>';
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Publicações</strong><small>${posts.length} no total</small></div><button class="button primary" data-action="new-post">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar publicação' : 'Nova publicação'}</h3><p class="help-text">Aparece na aba Notícias da página pública do campeonato (precisa estar publicada em Campeonatos > Divulgação).</p></div></div>
+    <div class="field-row"><div class="field"><label for="post-championship">Campeonato</label><select id="post-championship">${championshipOptions}</select></div><div class="field"><label for="post-kind">Tipo</label><select id="post-kind">${Object.entries(POST_KIND_LABELS).map(([key, label]) => `<option value="${key}" ${editor.kind === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="field"><label for="post-round">Rodada (opcional)</label><input id="post-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Rodada 3"></div></div>
+    <div class="field"><label for="post-title">Título</label><input id="post-title" maxlength="140" value="${escapeHtml(editor.title || '')}"></div>
+    <div class="field"><label for="post-body">Texto</label><textarea id="post-body" maxlength="4000" rows="6">${escapeHtml(editor.body || '')}</textarea></div>
+    <div class="field"><label for="post-link">Link externo (vídeo do YouTube, matéria...)</label><input id="post-link" type="url" maxlength="300" value="${escapeHtml(editor.link || '')}" placeholder="https://"></div>
+    <div class="field"><label>Imagem</label>${media ? `<img class="post-media-preview" src="${escapeHtml(media)}" alt="">` : ''}<label class="sponsor-upload-button">${media ? 'Trocar imagem' : 'Enviar imagem'}<input type="file" data-post-media accept="image/png,image/jpeg,image/webp"></label>${media ? '<button class="button subtle" data-action="clear-post-media">Remover imagem</button>' : ''}</div>
+    <div class="operations-actions"><button class="button primary" data-action="save-post" data-value="${escapeHtml(selected?.id || '')}">${selected ? 'Salvar alterações' : 'Publicar'}</button>${selected ? `<button class="button subtle danger" data-action="delete-post" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div></section></div>`;
 }
 
 const LIVE_LAYER_LABELS = { scoreboard: 'Placar', sponsor: 'Patrocinador', sponsorBar: 'Barra de patrocinadores', lineup: 'Escalação simples', photoLineup: 'Apresentação', stats: 'Estatísticas' };
@@ -2313,11 +2488,11 @@ function renderMatchesModule() {
   const teamOptions = value => teamCatalog.map(team => `<option value="${escapeHtml(team.id)}" ${team.id === value ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('');
   const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === editor.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
   const sorted = [...operationsData.matches].sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || '')));
-  const list = sorted.map(item => `<article class="match-operation-card ${item.id === selected?.id ? 'active' : ''}"><button data-action="select-match" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(operationChampionshipName(item.championshipId))} · ${escapeHtml(item.round || 'Rodada')}</span><strong>${escapeHtml(operationTeamName(item.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(item.awayTeamId))}</strong><small>${operationDate(item.kickoffAt, true)} · ${escapeHtml(item.venue || 'Local não informado')}</small><small>Escalação: ${['homeTeamId', 'awayTeamId'].map(side => `${escapeHtml(operationTeamName(item[side]))} ${teamCatalog.find(team => team.id === item[side])?.matchSquads?.[item.id]?.starters?.length ? '✓' : '—'}`).join(' · ')}</small></button><a class="button subtle" href="/?room=${encodeURIComponent(item.room)}">Abrir transmissão</a></article>`).join('') || '<div class="portal-empty">Nenhuma partida agendada.</div>';
-  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(editor.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(editor.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(editor.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${editor.status === 'scheduled' ? 'selected' : ''}>Agendada</option><option value="live" ${editor.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${editor.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-deadline">Prazo do cadastro das equipes</label><input id="match-deadline" type="date" value="${escapeHtml(editor.registrationDeadline || '')}"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(editor.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(editor.room || '')}" ${selected ? 'readonly' : ''} placeholder="Gerado automaticamente se ficar vazio"><small>${selected ? 'A sala é permanente para preservar os overlays e URLs desta partida.' : 'Este código aparece em todas as URLs dos overlays desta partida.'}</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
+  const list = sorted.map(item => `<article class="match-operation-card ${item.id === selected?.id ? 'active' : ''}"><button data-action="select-match" data-value="${escapeHtml(item.id)}"><span>${escapeHtml(operationChampionshipName(item.championshipId))} · ${escapeHtml(item.round || 'Rodada')}</span><strong>${escapeHtml(operationTeamName(item.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(item.awayTeamId))}</strong><small>${operationDate(item.kickoffAt, true)} · ${escapeHtml(item.venue || 'Local não informado')}${item.homeScore !== null && item.homeScore !== undefined && item.awayScore !== null && item.awayScore !== undefined ? ` · <b>${item.homeScore} × ${item.awayScore}</b>` : ''}${item.stage === 'group' ? ` · Grupo ${escapeHtml(item.group)}` : item.stage === 'knockout' ? ' · Mata-mata' : ''}</small><small>Escalação: ${['homeTeamId', 'awayTeamId'].map(side => `${escapeHtml(operationTeamName(item[side]))} ${teamCatalog.find(team => team.id === item[side])?.matchSquads?.[item.id]?.starters?.length ? '✓' : '—'}`).join(' · ')}</small></button><a class="button subtle" href="/?room=${encodeURIComponent(item.room)}">Abrir transmissão</a></article>`).join('') || '<div class="portal-empty">Nenhuma partida agendada.</div>';
+  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Agenda de partidas</strong><small>${operationsData.matches.length} partida${operationsData.matches.length === 1 ? '' : 's'}</small></div><button class="button primary" data-action="new-operation-match">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar partida' : 'Nova partida'}</h3><p class="help-text">Cada partida recebe uma sala própria. Placar, eventos, escalações e URLs do OBS ficam isolados nessa sala.</p></div></div>${operationsData.championships.length ? `<div class="field"><label for="match-championship">Campeonato</label><select id="match-championship"><option value="">Selecione</option>${championshipOptions}</select></div><div class="field-row"><div class="field"><label for="operation-home">Mandante</label><select id="operation-home"><option value="">Selecione</option>${teamOptions(editor.homeTeamId)}</select></div><div class="field"><label for="operation-away">Visitante</label><select id="operation-away"><option value="">Selecione</option>${teamOptions(editor.awayTeamId)}</select></div></div><div class="field-row"><div class="field"><label for="match-kickoff">Data e horário</label><input id="match-kickoff" type="datetime-local" value="${escapeHtml(editor.kickoffAt || '')}"></div><div class="field"><label for="match-status">Status</label><select id="match-status"><option value="scheduled" ${editor.status === 'scheduled' ? 'selected' : ''}>Agendada</option><option value="live" ${editor.status === 'live' ? 'selected' : ''}>Ao vivo</option><option value="finished" ${editor.status === 'finished' ? 'selected' : ''}>Finalizada</option><option value="cancelled" ${editor.status === 'cancelled' ? 'selected' : ''}>Cancelada</option></select></div></div><div class="field-row"><div class="field"><label for="match-round">Rodada / fase</label><input id="match-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Semifinal"></div><div class="field"><label for="match-deadline">Prazo do cadastro das equipes</label><input id="match-deadline" type="date" value="${escapeHtml(editor.registrationDeadline || '')}"></div><div class="field"><label for="match-venue">Local</label><input id="match-venue" maxlength="120" value="${escapeHtml(editor.venue || '')}" placeholder="Estádio ou ginásio"></div></div><div class="field-row"><div class="field"><label for="match-home-score">Placar do mandante</label><input id="match-home-score" type="number" min="0" max="999" value="${editor.homeScore ?? ''}"></div><div class="field"><label for="match-away-score">Placar do visitante</label><input id="match-away-score" type="number" min="0" max="999" value="${editor.awayScore ?? ''}"></div><div class="field"><label for="match-home-pen">Pênaltis mandante</label><input id="match-home-pen" type="number" min="0" max="999" value="${editor.homePenalties ?? ''}"></div><div class="field"><label for="match-away-pen">Pênaltis visitante</label><input id="match-away-pen" type="number" min="0" max="999" value="${editor.awayPenalties ?? ''}"></div></div>${selected ? `<div class="operations-actions"><button class="button subtle" data-action="match-import-score" data-value="${escapeHtml(selected.room)}">Importar placar da sala de transmissão</button></div>` : ''}<p class="help-text">O resultado alimenta a classificação e as páginas públicas. Com o status "Finalizada" e sem placar aqui, o placar da sala de transmissão é usado.</p><div class="field"><label for="match-room">Código da sala</label><input id="match-room" maxlength="48" value="${escapeHtml(editor.room || '')}" ${selected ? 'readonly' : ''} placeholder="Gerado automaticamente se ficar vazio"><small>${selected ? 'A sala é permanente para preservar os overlays e URLs desta partida.' : 'Este código aparece em todas as URLs dos overlays desta partida.'}</small></div><div class="operations-actions"><button class="button primary" data-action="save-operation-match" data-value="${escapeHtml(selected?.id || '')}">Salvar partida</button>${selected ? `<a class="button" href="/?room=${encodeURIComponent(selected.room)}">Abrir transmissão</a><button class="button subtle danger" data-action="delete-operation-match" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div>` : '<div class="portal-empty">Cadastre um campeonato antes de criar partidas.</div>'}</section></div>`;
 }
 
-const OPERATION_ACTION_LABELS = { 'delegation.completed': 'Delegação concluída', 'delegation.changed': 'Delegação alterada', 'delegation.saved': 'Cadastro de delegação salvo', 'championship.created': 'Campeonato criado', 'championship.updated': 'Campeonato atualizado', 'championship.deleted': 'Campeonato excluído', 'match.created': 'Partida criada', 'match.updated': 'Partida atualizada', 'match.deleted': 'Partida excluída', 'delegation.approved': 'Delegação aprovada', 'delegation.returned': 'Delegação devolvida', 'team.restored': 'Versão do time restaurada', 'team.planning.saved': 'Inscrição ou escalação salva', 'announcement.created': 'Comunicado publicado', 'announcement.updated': 'Comunicado atualizado', 'announcement.deleted': 'Comunicado excluído' };
+const OPERATION_ACTION_LABELS = { 'delegation.completed': 'Delegação concluída', 'delegation.changed': 'Delegação alterada', 'delegation.saved': 'Cadastro de delegação salvo', 'championship.created': 'Campeonato criado', 'championship.updated': 'Campeonato atualizado', 'championship.deleted': 'Campeonato excluído', 'match.created': 'Partida criada', 'match.updated': 'Partida atualizada', 'match.deleted': 'Partida excluída', 'delegation.approved': 'Delegação aprovada', 'delegation.returned': 'Delegação devolvida', 'team.restored': 'Versão do time restaurada', 'team.planning.saved': 'Inscrição ou escalação salva', 'announcement.created': 'Comunicado publicado', 'announcement.updated': 'Comunicado atualizado', 'announcement.deleted': 'Comunicado excluído', 'fixtures.generated': 'Partidas geradas', 'result.saved': 'Resultado lançado', 'result.cleared': 'Resultado removido', 'championship.finished': 'Campeonato encerrado', 'post.created': 'Publicação criada', 'post.updated': 'Publicação atualizada', 'post.deleted': 'Publicação excluída' };
 
 function renderDashboardModule() {
   const pending = renderOperationsState();
@@ -2799,6 +2974,17 @@ const BUILDER_TEMPLATES = [
     { type: 'text', name: 'Visitante', text: '{away.name}', x: 66, y: 68, w: 28, h: 10, size: 46, weight: 700, align: 'center', transform: 'uppercase', animIn: 'slide-up', delay: 650 },
     { type: 'text', name: 'Período', text: '{period}', x: 30, y: 62, w: 40, h: 7, size: 40, weight: 600, align: 'center', color: '#b4b6c2', animIn: 'fade', delay: 800 },
   ] },
+  { key: 'standings', name: 'Classificação (top 6)', caption: 'Tabela do campeonato ao vivo, pela API', width: 900, height: 620, elements: [
+    { type: 'shape', name: 'Fundo', x: 0, y: 0, w: 100, h: 100, fill: '#0d0f15', fillOpacity: 94, radius: 18, shadow: 'soft', animIn: 'zoom' },
+    { type: 'shape', name: 'Faixa', x: 0, y: 0, w: 100, h: 13, fill: '#d8ad56', radius: 18, animIn: 'slide-down', delay: 100 },
+    { type: 'text', name: 'Título', text: '{champ.name}', x: 4, y: 0, w: 92, h: 13, size: 40, weight: 800, color: '#10131a', transform: 'uppercase', animIn: 'fade', delay: 250 },
+    ...[1, 2, 3, 4, 5, 6].flatMap(position => [
+      { type: 'text', name: `Posição ${position}`, text: `{table.${position}.position}`, x: 4, y: 14 + (position - 1) * 14, w: 7, h: 14, size: 34, weight: 800, align: 'center', color: '#d8ad56', animIn: 'slide-left', delay: 300 + position * 90 },
+      { type: 'text', name: `Equipe ${position}`, text: `{table.${position}.name}`, x: 13, y: 14 + (position - 1) * 14, w: 55, h: 14, size: 36, weight: 700, transform: 'uppercase', animIn: 'slide-left', delay: 340 + position * 90 },
+      { type: 'text', name: `Pontos ${position}`, text: `{table.${position}.points} pts`, x: 68, y: 14 + (position - 1) * 14, w: 14, h: 14, size: 36, weight: 800, align: 'right', color: '#d8ad56', animIn: 'fade', delay: 380 + position * 90 },
+      { type: 'text', name: `Saldo ${position}`, text: `SG {table.${position}.gd}`, x: 83, y: 14 + (position - 1) * 14, w: 14, h: 14, size: 26, weight: 500, align: 'right', color: '#b4b6c2', animIn: 'fade', delay: 400 + position * 90 },
+    ]),
+  ] },
   { key: 'sponsor-tag', name: 'Selo de patrocínio', caption: '"Apresentado por" com logo', width: 700, height: 200, elements: [
     { type: 'shape', name: 'Fundo', x: 0, y: 8, w: 100, h: 84, fill: '#ffffff', radius: 100, shadow: 'soft', animIn: 'slide-left' },
     { type: 'text', name: 'Rótulo', text: 'APRESENTADO POR', x: 8, y: 22, w: 46, h: 24, size: 24, weight: 700, color: '#5b5f6e', spacing: 14, animIn: 'fade', delay: 300 },
@@ -2940,6 +3126,7 @@ function renderModuleControls(key) {
   if (key === 'announcements') return renderAnnouncementsModule();
   if (key === 'live') return renderLiveModule();
   if (key === 'standings') return renderStandingsModule();
+  if (key === 'feed') return renderFeedModule();
   if (key === 'backup') return renderBackupModule();
   let content = '';
   if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : key === 'stats' ? 'overlay-stats' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
@@ -3051,7 +3238,7 @@ function renderModuleHub() {
 const PLATFORM_MENU_GROUPS = [
   ['operation', 'Operação', ['live', 'championships', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
-  ['content', 'Conteúdo', ['sponsors', 'sponsor-bar', 'builder']],
+  ['content', 'Conteúdo', ['feed', 'sponsors', 'sponsor-bar', 'builder']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
   ['administration', 'Administração', ['access', 'backup']],
 ];
@@ -3086,7 +3273,7 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings'].includes(module?.key);
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed'].includes(module?.key);
   return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements','live','standings'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${adminSession.role === 'viewer' ? '<div class="library-banner"><div><strong>Acesso somente leitura</strong><p>Seu papel é Leitor: você pode consultar dados e prévias, mas alterações não são salvas.</p></div></div>' : ''}${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
@@ -3158,6 +3345,27 @@ function renderTeamKit() {
 
 function renderPortalImport() {
   return `<details class="portal-import"><summary>Importar elenco por planilha e fotos em lote</summary><p class="help-text">Uma linha por atleta: <code>número;nome;posição;altura;titular ou reserva</code> (posição, altura e função são opcionais). Números que já existem são atualizados.</p><textarea id="portal-csv" rows="6" placeholder="10;Leonardo Lima;MEI;1,78;titular"></textarea><div class="inline-actions"><button class="button subtle" data-action="portal-import-csv">Importar elenco</button><label class="button subtle portal-file-button">Abrir arquivo CSV<input type="file" data-portal-csv-file accept=".csv,text/csv,text/plain"></label><label class="button subtle portal-file-button">Fotos em lote<input type="file" multiple data-portal-batch-photos accept="image/png,image/jpeg,image/webp"></label></div><small class="help-text">Nas fotos em lote, o nome do arquivo deve conter o número da camisa (ex.: 10.jpg). Até 5 MB cada; prefira menos de 1,5 MB.</small></details>`;
+}
+
+// Planilha de times e atletas (CSV com ; , ou tab): Equipe;Sigla;Cor;Número;Atleta;Posição;Altura;Função
+function parseTeamsSpreadsheet(text) {
+  const rows = String(text || '').replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (rows.length && /^(equipe|time)\b/i.test(rows[0])) rows.shift();
+  const teams = new Map();
+  for (const row of rows) {
+    const delimiter = row.includes(';') ? ';' : row.includes('\t') ? '\t' : ',';
+    const cells = row.split(delimiter).map(cell => cell.trim().replace(/^"|"$/g, ''));
+    const [name = '', short = '', color = '', number = '', athlete = '', position = '', height = '', role = ''] = cells;
+    if (!name) continue;
+    const key = name.toLocaleLowerCase('pt-BR');
+    if (!teams.has(key)) teams.set(key, { name: name.slice(0, 80), short: short.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3), color: /^#[0-9a-f]{6}$/i.test(color) ? color : '', athletes: [] });
+    const team = teams.get(key);
+    if (short && !team.short) team.short = short.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    if (/^#[0-9a-f]{6}$/i.test(color) && !team.color) team.color = color;
+    const digits = number.replace(/\D/g, '').slice(0, 3);
+    if (athlete && digits) team.athletes.push({ number: digits, name: athlete.slice(0, 100), position: position.toUpperCase().replace(/[^A-ZÀ-Ü0-9-]/g, '').slice(0, 6), height: height.replace(',', '.').replace(/[^0-9.]/g, '').slice(0, 5), squadRole: /reserva/i.test(role) ? 'reserve' : 'starter' });
+  }
+  return [...teams.values()].slice(0, 64);
 }
 
 function importRosterCsv(text) {
@@ -3496,6 +3704,7 @@ function renderTeamPortal() {
 }
 
 function renderDrawer() {
+  if (drawer.type === 'art') return renderArtDrawer();
   if (drawer.type === 'obs') return renderObsDrawer();
   return renderEventDrawer();
 }
@@ -3589,7 +3798,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-field','data-custom-field','data-el-field','data-size-preset','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -3622,10 +3831,143 @@ function ensureMatchSwitcher() {
   actions.prepend(wrapper);
 }
 
+// ===== Páginas públicas (sem login): /campeonatos, /c/<slug>, /o/<slug> e /embed/<visão>?c=<slug> =====
+let publicData = { status: 'loading', home: null, bundle: null, organizer: null, sponsors: [], query: '', filter: 'all', team: '' };
+let publicSearchTimer = 0;
+
+function publicRoute() {
+  const parts = location.pathname.split('/').filter(Boolean);
+  if (parts[0] === 'c' && parts[1]) return { kind: 'championship', slug: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'o' && parts[1]) return { kind: 'organizer', slug: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'embed') return { kind: 'embed', view: parts[1] || 'standings', slug: new URLSearchParams(location.search).get('c') || '' };
+  return { kind: 'home' };
+}
+
+async function loadPublicData() {
+  const route = publicRoute();
+  try {
+    if (route.kind === 'home') {
+      const response = await fetch(`/api/public/championships${publicData.query ? `?q=${encodeURIComponent(publicData.query)}` : ''}`, { cache: 'no-store' });
+      publicData.home = await response.json();
+    } else if (route.kind === 'organizer') {
+      const response = await fetch(`/api/public/organizer?slug=${encodeURIComponent(route.slug)}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('404');
+      publicData.organizer = await response.json();
+    } else {
+      const response = await fetch(`/api/public/championship?slug=${encodeURIComponent(route.slug)}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('404');
+      const bundle = await response.json();
+      const same = publicData.bundle && JSON.stringify({ ...publicData.bundle, generatedAt: 0 }) === JSON.stringify({ ...bundle, generatedAt: 0 });
+      publicData.bundle = bundle;
+      if (same) return;
+    }
+    publicData.status = 'ready';
+  } catch { publicData.status = 'error'; }
+  render();
+}
+
+async function loadPublicSponsors() {
+  try {
+    const response = await fetch(`/api/state?room=${LIBRARY_ROOM}`, { cache: 'no-store' });
+    const remote = response.ok ? await response.json() : null;
+    if (remote?.updatedAt) { publicData.sponsors = normalizeState(remote).sponsors.filter(item => item.wideAsset || item.banner || item.logo).slice(0, 6); render(); }
+  } catch {}
+}
+
+function initializePublicPage() {
+  loadPublicData();
+  const route = publicRoute();
+  if (route.kind !== 'home') setInterval(loadPublicData, 15000);
+  if (route.kind === 'championship' || route.kind === 'home') loadPublicSponsors();
+  window.addEventListener('hashchange', render);
+}
+
+const FAVORITES_KEY = 'juventude.favoritos.v1';
+
+function publicFavorites() {
+  try { return JSON.parse(localStorage.getItem(FAVORITES_KEY)) || []; } catch { return []; }
+}
+
+const PUBLIC_STATUS = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Encerrada', cancelled: 'Cancelada' };
+const PUBLIC_TABS = [['classificacao', 'Classificação'], ['jogos', 'Jogos'], ['artilharia', 'Artilharia'], ['disciplina', 'Disciplina'], ['noticias', 'Notícias e fotos']];
+
+function publicHeader(extra = '') {
+  return `<header class="public-header"><a class="public-brand" href="/campeonatos">${brandMark()}<span><strong>Juventude</strong><small>Esporte Clube</small></span></a><nav><a href="/campeonatos">Campeonatos</a></nav>${extra}</header>`;
+}
+
+function publicFooter() {
+  const sponsors = publicData.sponsors.map(item => `<img src="${escapeHtml(item.wideAsset || item.banner || item.logo)}" alt="${escapeHtml(item.name || 'Patrocinador')}" loading="lazy">`).join('');
+  return `${sponsors ? `<section class="public-sponsors"><small>Patrocinadores</small><div>${sponsors}</div></section>` : ''}<footer class="public-footer"><span>Juventude Esporte Clube</span><a href="/api/public/championships" rel="noopener">API JSON</a></footer>`;
+}
+
+function publicMatchRow(match) {
+  const when = match.kickoffAt ? new Date(match.kickoffAt) : null;
+  const dateText = when && !Number.isNaN(when.getTime()) ? new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(when) : 'A definir';
+  const timeText = when && !Number.isNaN(when.getTime()) ? new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(when) : '';
+  const hasScore = match.homeScore !== null && match.awayScore !== null;
+  const penalties = match.homePenalties !== null && match.awayPenalties !== null ? `<small>(${match.homePenalties} × ${match.awayPenalties} pên.)</small>` : '';
+  return `<article class="public-match is-${escapeHtml(match.status)}"><div class="public-match-when"><b>${escapeHtml(dateText)}</b><small>${escapeHtml(timeText)}</small></div><div class="public-match-teams"><span class="home">${escapeHtml(match.homeName)}</span><strong class="public-score">${hasScore ? `${match.homeScore} × ${match.awayScore}` : timeText || 'vs'}</strong><span class="away">${escapeHtml(match.awayName)}</span></div><div class="public-match-meta"><span class="portal-chip ${match.status === 'live' ? 'is-live' : match.status === 'finished' ? 'is-done' : ''}">${escapeHtml(PUBLIC_STATUS[match.status] || match.status)}</span>${penalties}${match.venue ? `<small>${escapeHtml(match.venue)}</small>` : ''}</div></article>`;
+}
+
+function publicChampionshipTab(bundle, tab) {
+  if (tab === 'jogos') {
+    const teamFilter = publicData.team;
+    const matches = bundle.matches.filter(match => !teamFilter || match.homeTeamId === teamFilter || match.awayTeamId === teamFilter);
+    const rounds = new Map();
+    for (const match of matches) rounds.set(match.round || 'Partidas', [...(rounds.get(match.round || 'Partidas') || []), match]);
+    const options = `<option value="">Todas as equipes</option>${bundle.teams.map(team => `<option value="${escapeHtml(team.id)}" ${team.id === teamFilter ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('')}`;
+    return `<div class="public-filter"><select data-public-team aria-label="Filtrar por equipe">${options}</select></div>${[...rounds].map(([round, list]) => `<section class="public-round"><h3>${escapeHtml(round)}</h3>${list.map(publicMatchRow).join('')}</section>`).join('') || '<div class="portal-empty">Nenhuma partida cadastrada.</div>'}`;
+  }
+  if (tab === 'artilharia') return bundle.scorers.length ? `<div class="table-scroll"><table class="standings-table"><thead><tr><th>#</th><th>Atleta</th><th>Equipe</th><th>Gols</th></tr></thead><tbody>${bundle.scorers.map((item, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.teamName)}</td><td><b>${item.goals}</b></td></tr>`).join('')}</tbody></table></div>` : '<div class="portal-empty">A artilharia aparece conforme os gols forem registrados.</div>';
+  if (tab === 'disciplina') return `${bundle.suspended.length ? `<section class="public-round"><h3>Suspensos para a próxima partida</h3>${bundle.suspended.map(item => `<div class="public-line"><span>${escapeHtml(item.name)} · ${escapeHtml(item.teamName)}</span><small>${item.games} jogo(s)</small></div>`).join('')}</section>` : ''}${bundle.cards.length ? `<div class="table-scroll"><table class="standings-table"><thead><tr><th>Atleta</th><th>Equipe</th><th>🟨</th><th>🟥</th></tr></thead><tbody>${bundle.cards.map(item => `<tr><td>${escapeHtml(item.name)}</td><td>${escapeHtml(item.teamName)}</td><td>${item.yellow}</td><td>${item.red}</td></tr>`).join('')}</tbody></table></div>` : '<div class="portal-empty">Nenhum cartão registrado até agora.</div>'}`;
+  if (tab === 'noticias') return bundle.posts.length ? `<div class="public-posts">${bundle.posts.map(post => `<article class="public-post">${post.media ? `<img src="${escapeHtml(post.media)}" alt="" loading="lazy">` : ''}<div><small>${escapeHtml(POST_KIND_LABELS[post.kind] || 'Notícia')}${post.round ? ` · ${escapeHtml(post.round)}` : ''} · ${escapeHtml(operationDate(post.createdAt))}</small><h3>${escapeHtml(post.title)}</h3><p>${escapeHtml(post.body).replace(/\n/g, '<br>')}</p>${post.link ? `<a href="${escapeHtml(post.link)}" target="_blank" rel="noopener noreferrer">Abrir link</a>` : ''}</div></article>`).join('')}</div>` : '<div class="portal-empty">Ainda não há notícias, fotos ou vídeos.</div>';
+  const tables = bundle.groups.length ? bundle.groups.map(group => `<section class="public-round"><h3>Grupo ${escapeHtml(group.group)}</h3>${standingsTableMarkup(group.table, bundle.teams)}</section>`).join('') : standingsTableMarkup(bundle.standings, bundle.teams);
+  const knockout = bundle.matches.filter(match => match.stage === 'knockout');
+  return `${tables}<p class="help-text">Pontos: vitória ${bundle.championship.rules.pointsWin}, empate ${bundle.championship.rules.pointsDraw}. Desempate: ${bundle.championship.rules.tiebreakers.map(key => TIEBREAKER_LABELS[key]).join(' › ')}.</p>${knockout.length ? `<section class="public-round"><h3>Mata-mata</h3>${knockout.map(publicMatchRow).join('')}</section>` : ''}`;
+}
+
+function renderPublicApp() {
+  const route = publicRoute();
+  if (publicData.status === 'loading') return `<div class="public-shell">${publicHeader()}<div class="portal-empty">Carregando…</div></div>`;
+  if (publicData.status === 'error') return `<div class="public-shell">${publicHeader()}<section class="public-hero"><div><h1>Página não encontrada</h1><p>O campeonato ou organizador não existe ou ainda não foi publicado.</p><a class="button primary" href="/campeonatos">Ver campeonatos</a></div></section></div>`;
+  if (route.kind === 'home') {
+    const data = publicData.home || { championships: [], organizers: [] };
+    const showChampionships = publicData.filter !== 'organizers';
+    const showOrganizers = publicData.filter !== 'championships';
+    const chips = [['all', 'Todos'], ['championships', 'Campeonatos'], ['organizers', 'Organizadores']].map(([key, label]) => `<button class="access-chip ${publicData.filter === key ? 'active' : ''}" data-action="public-filter" data-value="${key}">${label}</button>`).join('');
+    const followed = publicFavorites();
+    const followedCards = !publicData.query && showChampionships ? data.championships.filter(item => followed.includes(item.slug)) : [];
+    const cards = showChampionships ? data.championships.map(item => `<a class="public-card" href="/c/${encodeURIComponent(item.slug)}"><small>${escapeHtml(SPORT_LABELS[item.sport] || 'Futebol')} · ${escapeHtml(item.season || 'Temporada')}</small><strong>${escapeHtml(item.name)}</strong><span>${item.teams} equipes · ${item.matches} partidas</span><b class="portal-chip ${item.status === 'active' ? 'is-ok' : ''}">${escapeHtml(CHAMPIONSHIP_STATUS_LABELS[item.status] || '')}</b></a>`).join('') : '';
+    const organizers = showOrganizers ? data.organizers.map(item => `<a class="public-card is-organizer" href="/o/${encodeURIComponent(item.slug)}"><small>Organizador</small><strong>${escapeHtml(item.name)}</strong><span>${item.championships} campeonato(s)</span></a>`).join('') : '';
+    return `<div class="public-shell">${publicHeader()}<section class="public-hero"><div><span class="public-kicker">Juventude Esporte Clube</span><h1>Acompanhe os campeonatos</h1><p>Classificação ao vivo, jogos, artilharia e notícias, direto no celular.</p></div></section><section class="public-search"><input type="search" data-public-search value="${escapeHtml(publicData.query)}" placeholder="Buscar campeonato ou organizador" aria-label="Buscar"><div class="access-chips">${chips}</div></section>${followedCards.length ? `<section class="public-followed"><h3>Seus campeonatos</h3><div class="public-cards">${followedCards.map(item => `<a class="public-card" href="/c/${encodeURIComponent(item.slug)}"><small>★ Seguindo</small><strong>${escapeHtml(item.name)}</strong><span>${item.teams} equipes · ${item.matches} partidas</span></a>`).join('')}</div></section>` : ''}<section class="public-cards">${cards}${organizers}${cards || organizers ? '' : '<div class="portal-empty">Nenhum resultado.</div>'}</section>${publicFooter()}</div>`;
+  }
+  if (route.kind === 'organizer') {
+    const { organizer, championships } = publicData.organizer;
+    document.title = `${organizer.name} · Juventude Esporte Clube`;
+    return `<div class="public-shell">${publicHeader()}<section class="public-hero"><div><span class="public-kicker">Organizador</span><h1>${escapeHtml(organizer.name)}</h1><p>${championships.length} campeonato(s)</p></div></section><section class="public-cards">${championships.map(item => `<a class="public-card" href="/c/${encodeURIComponent(item.slug)}"><small>${escapeHtml(SPORT_LABELS[item.sport] || 'Futebol')} · ${escapeHtml(item.season || '')}</small><strong>${escapeHtml(item.name)}</strong><span>${item.teams} equipes · ${item.matches} partidas</span></a>`).join('')}</section>${publicFooter()}</div>`;
+  }
+  const bundle = publicData.bundle;
+  document.title = `${bundle.championship.name} · Juventude Esporte Clube`;
+  if (route.kind === 'embed') {
+    const view = route.view;
+    const body = view === 'matches' ? bundle.matches.filter(match => match.status !== 'cancelled').slice(-12).map(publicMatchRow).join('') : view === 'scorers' ? publicChampionshipTab(bundle, 'artilharia') : publicChampionshipTab(bundle, 'classificacao');
+    return `<div class="embed-shell"><h2>${escapeHtml(bundle.championship.name)}</h2>${body}<a class="embed-credit" href="${location.origin}/c/${encodeURIComponent(bundle.championship.slug)}" target="_blank" rel="noopener">Ver campeonato completo</a></div>`;
+  }
+  const tab = PUBLIC_TABS.some(([key]) => key === location.hash.slice(1)) ? location.hash.slice(1) : 'classificacao';
+  const live = bundle.matches.filter(match => match.status === 'live');
+  const info = bundle.championship;
+  return `<div class="public-shell">${publicHeader(`<button class="button subtle" data-action="public-favorite" data-value="${escapeHtml(info.slug)}">${publicFavorites().includes(info.slug) ? '★ Seguindo' : '☆ Seguir'}</button><button class="button subtle" data-action="public-share">Compartilhar</button>`)}<section class="public-hero"><div><span class="public-kicker">${escapeHtml(SPORT_LABELS[info.sport] || 'Futebol')}${info.season ? ` · ${escapeHtml(info.season)}` : ''}</span><h1>${escapeHtml(info.name)}</h1>${info.description ? `<p>${escapeHtml(info.description)}</p>` : ''}<div class="public-chips"><span class="portal-chip ${info.status === 'active' ? 'is-ok' : ''}">${escapeHtml(CHAMPIONSHIP_STATUS_LABELS[info.status] || '')}</span><span class="portal-chip">${escapeHtml((FORMAT_LABELS[info.format] || '').split(' (')[0])}</span>${info.organizer ? `<a class="portal-chip" href="/o/${encodeURIComponent(info.organizer)}">${escapeHtml(info.organizerName || info.organizer)}</a>` : ''}</div>${info.championName ? `<div class="public-champion">🏆 Campeão: <strong>${escapeHtml(info.championName)}</strong></div>` : ''}</div></section>
+    ${live.length ? `<section class="public-live"><h3><i></i> Ao vivo</h3>${live.map(publicMatchRow).join('')}</section>` : ''}
+    <nav class="public-tabs" aria-label="Seções">${PUBLIC_TABS.map(([key, label]) => `<a class="${tab === key ? 'active' : ''}" href="#${key}">${label}</a>`).join('')}</nav>
+    <section class="public-content">${publicChampionshipTab(bundle, tab)}</section>${publicFooter()}</div>`;
+}
+
 function render() {
   if (isOutput) { renderIsolatedOutput(); return; }
   const remembered = rememberFocusedField();
-  if (isTeamPortal) {
+  if (isPublicPage) {
+    app.innerHTML = renderPublicApp();
+  } else if (isTeamPortal) {
     app.innerHTML = teamSession.status === 'authenticated' ? renderTeamPortal() : renderTeamAuthGate();
   } else if (isPreview) {
     app.innerHTML = `<div class="full-preview-stage">${renderPreviewBackground()}${previewCompositeMarkup()}<div class="safe-guides"><i></i><i></i></div><div class="monitor-label">VISUALIZAÇÃO COMPLETA · ${escapeHtml(currentSport().label.toUpperCase())} · SALA ${escapeHtml(ROOM_ID)}</div></div>`;
@@ -3833,9 +4175,28 @@ function handleAction(action, target) {
   }
   if (action === 'team-logout') { logoutTeamPortal(); return; }
   if (action === 'complete-team-delegation') { completeTeamDelegation(); return; }
-  if (action === 'new-championship') { selectedChampionshipId = ''; championshipDraft = { name: '', season: '', startDate: '', endDate: '', status: 'planned' }; render(); return; }
+  if (action === 'new-championship') { selectedChampionshipId = ''; championshipDraft = blankChampionship(); championshipSectionsOpen = { general: true }; render(); return; }
   if (action === 'select-championship') { selectedChampionshipId = target.dataset.value; championshipDraft = structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || null); render(); return; }
-  if (action === 'standings-summary') { standingsSummaryId = target.dataset.value || ''; render(); return; }
+  if (action === 'art-result') {
+    const match = standingsBundle?.matches.find(item => item.id === target.dataset.value);
+    if (match) buildResultArt(match, standingsBundle).then(canvas => openArt(canvas, `resultado-${match.id}`));
+    return;
+  }
+  if (action === 'art-standings') { if (standingsBundle) buildStandingsArt(standingsBundle).then(canvas => openArt(canvas, `classificacao-${standingsBundle.championship.slug || 'campeonato'}`)); return; }
+  if (action === 'art-download') {
+    if (!artPreview) return;
+    const link = document.createElement('a'); link.href = artPreview.url; link.download = `${artPreview.name}.png`;
+    document.body.appendChild(link); link.click(); link.remove();
+    return;
+  }
+  if (action === 'art-share') {
+    if (!artPreview) return;
+    const file = new File([artPreview.blob], `${artPreview.name}.png`, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file], title: 'Resultado' }).catch(() => {});
+    else { toast('Seu navegador não compartilha arquivos; a imagem será baixada.'); handleAction('art-download', { dataset: {} }); }
+    return;
+  }
+  if (action === 'standings-summary') { standingsSummaryId = target.dataset.value || ''; render(); if (standingsSummaryId) loadStandingsRooms(true); return; }
   if (action === 'standings-print') { window.print(); return; }
   if (action === 'export-csv') {
     const { name, rows } = exportRows(target.dataset.value);
@@ -3869,6 +4230,35 @@ function handleAction(action, target) {
       .catch(() => toast('Não foi possível retirar os overlays do ar.'));
     return;
   }
+  if (action === 'public-filter') { publicData.filter = target.dataset.value || 'all'; render(); return; }
+  if (action === 'public-favorite') {
+    const slug = target.dataset.value;
+    const favorites = new Set(publicFavorites());
+    if (favorites.has(slug)) favorites.delete(slug); else favorites.add(slug);
+    try { localStorage.setItem(FAVORITES_KEY, JSON.stringify([...favorites].slice(0, 50))); } catch {}
+    toast(favorites.has(slug) ? 'Você segue este campeonato; ele aparece no topo da lista.' : 'Você deixou de seguir.');
+    render();
+    return;
+  }
+  if (action === 'public-share') {
+    const data = { title: publicData.bundle?.championship.name || 'Campeonato', url: location.href.split('#')[0] };
+    if (navigator.share) navigator.share(data).catch(() => {}); else copyText(data.url, 'Link copiado.');
+    return;
+  }
+  if (action === 'new-post') { selectedPostId = ''; postMediaUrl = ''; render(); return; }
+  if (action === 'select-post') { selectedPostId = target.dataset.value || ''; postMediaUrl = ''; render(); return; }
+  if (action === 'clear-post-media') { postMediaUrl = '-'; render(); return; }
+  if (action === 'save-post') {
+    const existing = (operationsData.posts || []).find(item => item.id === target.dataset.value);
+    const item = { id: target.dataset.value || '', championshipId: document.getElementById('post-championship')?.value || '', kind: document.getElementById('post-kind')?.value || 'news', round: document.getElementById('post-round')?.value || '', title: document.getElementById('post-title')?.value || '', body: document.getElementById('post-body')?.value || '', link: document.getElementById('post-link')?.value || '', media: postMediaUrl === '-' ? '' : postMediaUrl || existing?.media || '' };
+    postOperation('upsert-post', { item }).then(ok => { if (!ok) return; selectedPostId = ''; postMediaUrl = ''; toast('Publicação salva.'); render(); });
+    return;
+  }
+  if (action === 'delete-post') {
+    if (!confirm('Excluir esta publicação?')) return;
+    postOperation('delete-post', { id: target.dataset.value }).then(ok => { if (ok) { selectedPostId = ''; postMediaUrl = ''; toast('Publicação excluída.'); } });
+    return;
+  }
   if (action === 'new-announcement') { selectedAnnouncementId = ''; render(); return; }
   if (action === 'select-announcement') { selectedAnnouncementId = target.dataset.value || ''; render(); return; }
   if (action === 'save-announcement') {
@@ -3884,9 +4274,39 @@ function handleAction(action, target) {
     postOperation('delete-announcement', { id: target.dataset.value }).then(ok => { if (ok) { selectedAnnouncementId = ''; toast('Comunicado excluído.'); } });
     return;
   }
-  if (action === 'save-championship') {
-    const item = { id: target.dataset.value || '', name: document.getElementById('championship-name')?.value || '', season: document.getElementById('championship-season')?.value || '', startDate: document.getElementById('championship-start')?.value || '', endDate: document.getElementById('championship-end')?.value || '', status: document.getElementById('championship-status')?.value || 'planned' };
-    postOperation('upsert-championship', { item }).then(ok => { if (!ok) return; selectedChampionshipId = operationsData.championships.find(entry => entry.name === item.name)?.id || selectedChampionshipId; championshipDraft = null; toast('Campeonato salvo.'); render(); });
+  if (action === 'ch-tb') {
+    const [key, move] = String(target.dataset.value || '').split('|');
+    championshipDraft ||= blankChampionship();
+    const rules = championshipDraft.rules ||= blankChampionship().rules;
+    const list = [...rules.tiebreakers];
+    const index = list.indexOf(key);
+    if (move === 'toggle') { if (index >= 0) { if (list.length > 1) list.splice(index, 1); } else list.push(key); }
+    else if (index >= 0) { const to = move === 'up' ? index - 1 : index + 1; if (to >= 0 && to < list.length) [list[index], list[to]] = [list[to], list[index]]; }
+    rules.tiebreakers = list;
+    championshipSectionsOpen.rules = true;
+    render();
+    return;
+  }
+  if (action === 'copy-public-link') { copyText(target.dataset.value, 'Link público copiado.'); return; }
+  if (action === 'save-championship' || action === 'generate-fixtures' || action === 'generate-next-round') {
+    const draft = championshipDraft || operationsData.championships.find(item => item.id === selectedChampionshipId);
+    if (!draft || !String(draft.name || '').trim()) { toast('Informe o nome do campeonato.'); return; }
+    const item = { ...draft, id: target.dataset.value || draft.id || selectedChampionshipId || '' };
+    postOperation('upsert-championship', { item }).then(ok => {
+      if (!ok) return;
+      const saved = operationsData.championships.find(entry => entry.id === item.id) || operationsData.championships.find(entry => entry.name === item.name);
+      selectedChampionshipId = saved?.id || selectedChampionshipId;
+      championshipDraft = saved ? structuredClone(saved) : null;
+      if (action === 'save-championship') { toast('Campeonato salvo.'); render(); return; }
+      const payload = { championshipId: saved.id, ...fixtureOptions, mode: fixtureOptions.mode || saved.format, teamIds: saved.teamIds, groups: Number(fixtureOptions.groups) || 2, advance: Number(fixtureOptions.advance) || 2, intervalDays: Number(fixtureOptions.intervalDays) || 7 };
+      return postOperation(action, payload).then(done => {
+        if (!done) return;
+        championshipDraft = structuredClone(operationsData.championships.find(entry => entry.id === saved.id) || saved);
+        fixtureOptions.replace = false;
+        toast(action === 'generate-fixtures' ? 'Partidas geradas. Veja na Agenda de partidas.' : 'Próxima fase gerada.');
+        render();
+      });
+    });
     return;
   }
   if (action === 'delete-championship') {
@@ -3897,8 +4317,22 @@ function handleAction(action, target) {
   if (action === 'new-operation-match') { selectedMatchId = ''; matchDraft = { championshipId: '', homeTeamId: '', awayTeamId: '', kickoffAt: '', status: 'scheduled', round: '', venue: '', room: '' }; render(); return; }
   if (action === 'select-match') { selectedMatchId = target.dataset.value; matchDraft = structuredClone(operationsData.matches.find(item => item.id === selectedMatchId) || null); render(); return; }
   if (action === 'save-operation-match') {
-    const item = { id: target.dataset.value || '', championshipId: document.getElementById('match-championship')?.value || '', homeTeamId: document.getElementById('operation-home')?.value || '', awayTeamId: document.getElementById('operation-away')?.value || '', kickoffAt: document.getElementById('match-kickoff')?.value || '', status: document.getElementById('match-status')?.value || 'scheduled', round: document.getElementById('match-round')?.value || '', venue: document.getElementById('match-venue')?.value || '', registrationDeadline: document.getElementById('match-deadline')?.value || '', room: document.getElementById('match-room')?.value || '' };
+    const item = { homeScore: document.getElementById('match-home-score')?.value ?? '', awayScore: document.getElementById('match-away-score')?.value ?? '', homePenalties: document.getElementById('match-home-pen')?.value ?? '', awayPenalties: document.getElementById('match-away-pen')?.value ?? '', id: target.dataset.value || '', championshipId: document.getElementById('match-championship')?.value || '', homeTeamId: document.getElementById('operation-home')?.value || '', awayTeamId: document.getElementById('operation-away')?.value || '', kickoffAt: document.getElementById('match-kickoff')?.value || '', status: document.getElementById('match-status')?.value || 'scheduled', round: document.getElementById('match-round')?.value || '', venue: document.getElementById('match-venue')?.value || '', registrationDeadline: document.getElementById('match-deadline')?.value || '', room: document.getElementById('match-room')?.value || '' };
     postOperation('upsert-match', { item }).then(ok => { if (!ok) return; const saved = operationsData.matches.find(entry => entry.id === item.id) || operationsData.matches[0]; selectedMatchId = saved?.id || ''; matchDraft = null; toast('Partida salva com uma sala própria de overlays.'); render(); });
+    return;
+  }
+  if (action === 'match-import-score') {
+    fetch(`/api/state?room=${encodeURIComponent(target.dataset.value)}&ts=${Date.now()}`, { cache: 'no-store' })
+      .then(response => response.json())
+      .then(remote => {
+        if (!remote?.updatedAt) throw new Error('vazio');
+        document.getElementById('match-home-score').value = Number(remote.home?.score || 0);
+        document.getElementById('match-away-score').value = Number(remote.away?.score || 0);
+        const status = document.getElementById('match-status');
+        if (status) { status.value = 'finished'; status.dispatchEvent(new Event('input', { bubbles: true })); }
+        toast('Placar importado. Revise e clique em Salvar partida.');
+      })
+      .catch(() => toast('Esta sala ainda não tem placar registrado.'));
     return;
   }
   if (action === 'delete-operation-match') {
@@ -4201,6 +4635,10 @@ function handleAction(action, target) {
   if (action === 'test-sponsor-animation') {
     commit(draft => { putSponsorOnAir(draft); }, { immediate: true });
     toast(`Patrocinador exibido por ${clampNumber(state.appearance.sponsorDuration, 3, 60, 10)} segundos.`);
+    return;
+  }
+  if (action === 'teams-template') {
+    downloadTextFile('modelo-times-e-atletas.csv', 'text/csv;charset=utf-8', csvText([['Equipe', 'Sigla', 'Cor', 'Número', 'Atleta', 'Posição', 'Altura', 'Função'], ['Juventude E.C.', 'JUV', '#8253cd', '1', 'Gabriel Martins', 'GOL', '1.85', 'Titular'], ['Juventude E.C.', '', '', '12', 'Pedro Henrique', 'GOL', '1.82', 'Reserva'], ['Atlético Ilha', 'ATL', '#4588b5', '1', 'Rafael Souza', 'GOL', '1.80', 'Titular']]));
     return;
   }
   if (action === 'add-team') {
@@ -4868,6 +5306,8 @@ function handleAction(action, target) {
 }
 
 app.addEventListener('toggle', event => {
+  const champSection = event.target.closest?.('[data-champ-section]');
+  if (champSection) championshipSectionsOpen[champSection.dataset.champSection] = champSection.open;
   const sidebarGroup = event.target.closest?.('[data-sidebar-group]');
   if (sidebarGroup) {
     sidebarGroupsOpen[sidebarGroup.dataset.sidebarGroup] = sidebarGroup.open;
@@ -5040,6 +5480,13 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-public-search]')) {
+    publicData.query = target.value;
+    clearTimeout(publicSearchTimer);
+    publicSearchTimer = setTimeout(loadPublicData, 250);
+    return;
+  }
+  if (target.matches('[data-public-team]')) { publicData.team = target.value; render(); return; }
   if (target.matches('[data-sidebar-search]')) { sidebarSearch = target.value; render(); return; }
   if (target.matches('[data-access-search]')) { accessSearch = target.value; render(); return; }
   if (target.matches('[data-stats-possession]')) {
@@ -5059,6 +5506,36 @@ app.addEventListener('input', event => {
     const meter = target.closest('.field')?.querySelector('.pw-meter');
     const level = passwordStrength(target.value);
     if (meter) { meter.dataset.level = String(level); meter.querySelector('span').textContent = target.value ? PASSWORD_LEVELS[level] : 'Mínimo de 8 caracteres'; }
+    return;
+  }
+  if (target.matches('[data-ch-field]')) {
+    championshipDraft ||= structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || blankChampionship());
+    const path = target.dataset.chField.split('.');
+    const value = target.dataset.chType === 'bool' ? target.checked : target.dataset.chType === 'number' ? Number(target.value) : target.value;
+    let holder = championshipDraft;
+    for (const key of path.slice(0, -1)) holder = holder[key] ||= {};
+    holder[path[path.length - 1]] = value;
+    if (['format', 'sport'].includes(path[0]) && target.matches('select')) { if (path[0] === 'format') fixtureOptions.mode = ''; render(); }
+    return;
+  }
+  if (target.matches('[data-ch-team]')) {
+    championshipDraft ||= structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || blankChampionship());
+    const teams = new Set(championshipDraft.teamIds || []);
+    if (target.checked) teams.add(target.dataset.chTeam); else teams.delete(target.dataset.chTeam);
+    championshipDraft.teamIds = [...teams];
+    document.querySelector('[data-champ-section="teams"] summary small')?.replaceChildren(`${championshipDraft.teamIds.length} selecionada(s)`);
+    return;
+  }
+  if (target.matches('[data-ch-mod]')) {
+    championshipDraft ||= structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || blankChampionship());
+    const moderators = new Set(championshipDraft.moderators || []);
+    if (target.checked) moderators.add(target.dataset.chMod); else moderators.delete(target.dataset.chMod);
+    championshipDraft.moderators = [...moderators];
+    return;
+  }
+  if (target.matches('[data-fx]')) {
+    fixtureOptions[target.dataset.fx] = target.matches('[data-fx-bool]') ? target.checked : target.value;
+    if (target.dataset.fx === 'mode') render();
     return;
   }
   const championshipFields = { 'championship-name': 'name', 'championship-season': 'season', 'championship-start': 'startDate', 'championship-end': 'endDate', 'championship-status': 'status' };
@@ -5288,7 +5765,7 @@ app.addEventListener('change', event => {
     if (width && height) commitOverlay(item => { item.width = clampNumber(width, 200, 3840, item.width); item.height = clampNumber(height, 100, 2160, item.height); });
     return;
   }
-  if (target.matches('#standings-championship')) { standingsChampionshipId = target.value; standingsSummaryId = ''; standingsLoadedAt = 0; render(); return; }
+  if (target.matches('#standings-championship')) { standingsChampionshipId = target.value; standingsSummaryId = ''; standingsLoadedAt = 0; standingsBundle = null; render(); return; }
   if (target.matches('[data-admin-role]')) {
     const id = target.dataset.adminRole;
     fetch('/api/auth/admin/accounts', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, role: target.value }) })
@@ -5310,6 +5787,47 @@ app.addEventListener('change', event => {
     return;
   }
   if (target.matches('[data-portal-team-logo], [data-portal-athlete-photo], [data-portal-staff-photo], [data-portal-coach-photo], [data-portal-formation]') && teamDelegation.status === 'completed') teamDelegation = { ...teamDelegation, status: 'needs-review' };
+  if (target.matches('[data-teams-import]') && target.files?.[0]) {
+    const file = target.files[0];
+    if (file.size > 2_000_000) { toast('Planilha grande demais (máximo de 2 MB).'); return; }
+    file.text().then(text => {
+      const parsed = parseTeamsSpreadsheet(text);
+      if (!parsed.length) { toast('Nenhuma equipe encontrada. Use o modelo de planilha.'); return; }
+      const total = parsed.reduce((sum, team) => sum + team.athletes.length, 0);
+      if (!confirm(`Importar ${parsed.length} equipe(s) e ${total} atleta(s)? Equipes com o mesmo nome são atualizadas; atletas com o mesmo número são sobrescritos.`)) return;
+      let created = 0;
+      let updated = 0;
+      commitTeamCatalog(catalog => {
+        for (const entry of parsed) {
+          let team = catalog.find(item => item.name.toLocaleLowerCase('pt-BR') === entry.name.toLocaleLowerCase('pt-BR'));
+          if (!team) {
+            team = { id: `team-${Date.now().toString(36)}${created}`, name: entry.name, short: entry.short || entry.name.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase() || 'TIM', color: entry.color || '#8253cd', logo: '', roster: '', athletes: [], formation: '4-3-3', coach: { name: 'Treinador', photo: '' }, accessToken: accessToken() };
+            catalog.push(team); created += 1;
+          } else { updated += 1; if (entry.short) team.short = entry.short; if (entry.color) team.color = entry.color; }
+          team.athletes ||= [];
+          for (const athlete of entry.athletes) {
+            const existing = team.athletes.find(item => String(item.number).trim() === athlete.number);
+            if (existing) Object.assign(existing, athlete);
+            else if (team.athletes.length < 100) team.athletes.push({ id: `atleta-${Date.now().toString(36)}${team.athletes.length}${Math.random().toString(36).slice(2, 4)}`, photo: '', ...athlete });
+          }
+          team.roster = team.athletes.filter(item => item.squadRole !== 'reserve').map(item => `${item.number} ${item.name}`).join('\n');
+        }
+      }, { immediate: true });
+      toast(`Planilha importada: ${created} equipe(s) nova(s), ${updated} atualizada(s) e ${total} atleta(s).`);
+    }).catch(() => toast('Não foi possível ler a planilha.'));
+    target.value = '';
+    return;
+  }
+  if (target.matches('[data-post-media]') && target.files?.[0]) {
+    const file = target.files[0];
+    const championshipId = document.getElementById('post-championship')?.value || 'geral';
+    if (!file.type.startsWith('image/') || file.size > 5_000_000) { toast('Escolha uma imagem de até 5 MB.'); return; }
+    fetch(`/api/assets/${encodeURIComponent(`feed-${championshipId}`.slice(0, 48))}/post-${Date.now().toString(36)}`, { method: 'PUT', headers: { 'content-type': file.type }, body: file })
+      .then(response => { if (!response.ok) throw new Error(); return response.json(); })
+      .then(result => { postMediaUrl = result.url; toast('Imagem enviada.'); render(); })
+      .catch(() => toast('Não foi possível enviar a imagem.'));
+    return;
+  }
   if (target.matches('[data-builder-import]') && target.files?.[0]) {
     const file = target.files[0];
     if (file.size > 1_000_000) { toast('Arquivo grande demais para um overlay exportado.'); return; }
@@ -5645,8 +6163,11 @@ document.addEventListener('keydown', event => {
 if (isOutput) { document.body.classList.add('overlay-output', 'obs-render-mode'); document.body.dataset.outputLayer = outputLayer; }
 else if (isPreview) document.body.classList.add('preview-output');
 else if (isTeamPortal) document.body.classList.add('team-portal-output');
+if (isPublicPage) document.body.classList.add('public-page', new URLSearchParams(location.search).get('theme') === 'light' ? 'public-light' : 'public-dark');
 render();
-if (isTeamPortal) checkTeamSession();
+if ((isPublicPage || isTeamPortal) && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if (isPublicPage) initializePublicPage();
+else if (isTeamPortal) checkTeamSession();
 else {
   if (isAdminPanel) checkAdminSession();
   if (!isOutput) loadAppVersion();
@@ -5662,7 +6183,7 @@ else {
   if (isAdminPanel) { loadPlatformOverlays(); setInterval(() => loadPlatformOverlays(), 10000); }
 }
 setInterval(() => {
-  if (isTeamPortal) return;
+  if (isTeamPortal || isPublicPage) return;
   if (isOutput) pruneSeenMotionStarts();
   const nextClock = clockText();
   if (nextClock !== lastClock) {
@@ -5804,6 +6325,7 @@ setInterval(() => {
     else commit(() => {}, { backup: false });
   }
   if ((state.customOverlays || []).length) {
+    if (state.customOverlays.some(item => item.elements.some(el => el.type === 'text' && el.text.includes('{table.') || el.text.includes('{champ.')))) loadOverlayTable();
     const values = builderTokenValues();
     document.querySelectorAll('[data-cel-text]').forEach(node => {
       const next = resolveBuilderText(node.dataset.celText, values);

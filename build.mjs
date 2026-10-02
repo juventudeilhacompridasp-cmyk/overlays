@@ -33,7 +33,7 @@ const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
 const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const worker = `${authModule}
 ${competitionModule}
-const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic };
+const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
 const assets = ${JSON.stringify(assetMap)};
 const APP_VERSION = ${JSON.stringify(appVersion)};
 const fallbackStates = new Map();
@@ -671,6 +671,13 @@ export default {
         const viewer = championship && !championship.isPublic ? await getAdminSession(request, secret, env) : null;
         if (!championship || (!championship.isPublic && !viewer)) return sendPublic(404, { ok: false, error: 'Campeonato não encontrado.' });
         return sendPublic(200, await competition.buildChampionshipBundle(publicOps, championship, publicCatalog, room => readState(env, room)), !championship.isPublic);
+      }
+      if (url.pathname === '/api/public/room-table') {
+        const roomId = safeId(url.searchParams.get('room') || '');
+        const match = publicOps.matches.find(item => item.room === roomId);
+        const championship = match && publicOps.championships.find(item => item.id === match.championshipId);
+        if (!championship) return sendPublic(404, { ok: false, error: 'Partida sem campeonato.' });
+        return sendPublic(200, competition.roomTable(await competition.buildChampionshipBundle(publicOps, championship, publicCatalog, room => readState(env, room)), match));
       }
       return sendPublic(404, { ok: false, error: 'Rota não encontrada.' });
     }

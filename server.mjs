@@ -612,6 +612,14 @@ const server = http.createServer(async (request, response) => {
       sendPublic(200, await competition.buildChampionshipBundle(store, championship, catalog, async room => sharedStates[room] || {}), !championship.isPublic);
       return;
     }
+    if (url.pathname === '/api/public/room-table') {
+      const roomId = safeId(url.searchParams.get('room') || '');
+      const match = store.matches.find(item => item.room === roomId);
+      const championship = match && store.championships.find(item => item.id === match.championshipId);
+      if (!championship) { sendPublic(404, { ok: false, error: 'Partida sem campeonato.' }); return; }
+      sendPublic(200, competition.roomTable(await competition.buildChampionshipBundle(store, championship, catalog, async room => sharedStates[room] || {}), match));
+      return;
+    }
     sendPublic(404, { ok: false, error: 'Rota não encontrada.' });
     return;
   }
@@ -846,6 +854,7 @@ const server = http.createServer(async (request, response) => {
       '.jpeg': 'image/jpeg',
       '.webp': 'image/webp',
       '.woff2': 'font/woff2',
+      '.webmanifest': 'application/manifest+json',
     }[extension] || 'application/octet-stream';
     response.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-store' });
     response.end(data);

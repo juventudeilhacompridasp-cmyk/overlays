@@ -75,6 +75,13 @@ No Docker, estado e mídias ficam no volume `/app/.data`. Na versão hospedada p
 | `/manage/delegations` | Pendências, revisão, prazos e histórico das delegações |
 | `/manage/dashboard` | Visão geral da plataforma (sem partida selecionada) |
 | `/manage/appearance` | Aparência global dos overlays |
+| `/manage/championships` | Campeonatos: regras, equipes, geração de partidas, divulgação e moderadores |
+| `/manage/standings` | Classificação, artilharia, cartões, súmulas e artes para redes |
+| `/manage/feed` | Notícias, fotos e vídeos por campeonato |
+| `/campeonatos` | Página pública: busca de campeonatos e organizadores (sem login) |
+| `/c/<slug>` | Página pública de um campeonato (classificação, jogos, artilharia, disciplina, notícias) |
+| `/o/<slug>` | Página pública de um organizador |
+| `/embed/standings\|matches\|scorers?c=<slug>[&theme=light]` | Widgets para incorporar em outros sites (iframe) |
 | `/preview` | Visualização completa em 1920×1080 |
 | `/overlay` | Saída transparente para o OBS |
 | `/team?token=...` | Portal restrito de uma equipe |
@@ -125,6 +132,29 @@ atômica do `updated_at` no D1.
 O navegador guarda a última `room` escolhida e a reutiliza em todas as telas administrativas. O
 código da sala de uma partida é imutável após a criação para manter o vínculo com o estado e com
 as URLs do OBS.
+
+### Competição: formatos, resultados e API pública
+
+A lógica de competição fica em `competition.mjs` (funções puras compartilhadas; o Worker a inlina
+em `build.mjs`). Campeonatos ganham `slug`, `sport`, `format` (`league|groups|knockout`), `rules`
+(pontos, ordem de `tiebreakers`, `yellowLimit`, `redGames`), `teamIds`, `groups`, `knockout`,
+`isPublic`, `organizer`/`organizerName` e `moderators`. Partidas ganham `stage`, `group`,
+`roundNumber`, `leg`, `homeScore`/`awayScore`, `homePenalties`/`awayPenalties` e `generated`.
+
+Ações em `POST /api/operations` (administrador/operador): `generate-fixtures` (todos contra todos,
+grupos com sorteio ou mata-mata, ida e volta opcionais, calendário a partir de data e horário),
+`generate-next-round` (grupos para mata-mata e rodadas seguintes; exige a fase anterior finalizada
+e vencedor definido, empates exigem pênaltis; fecha o campeonato com `championId`), `set-result`,
+`upsert-post` e `delete-post`. Operadores só alteram campeonatos que os listam em `moderators`
+(lista vazia = qualquer operador). O placar de uma partida finalizada vem do próprio registro ou,
+na falta dele, do estado da sala de transmissão.
+
+API pública (somente leitura, sem login, `access-control-allow-origin: *`, cache de 5 s):
+`GET /api/public/championships?q=&organizer=`, `GET /api/public/championship?slug=` (ou `?id=`
+para administradores, inclusive privados), `GET /api/public/organizer?slug=` e
+`GET /api/public/room-table?room=` (tabela do campeonato da partida, usada pelos overlays).
+Campeonatos só aparecem se `isPublic` e com `slug`. O pacote do campeonato traz classificação
+(ou grupos), jogos, artilharia, cartões, suspensos e publicações.
 
 ### Aparência global
 

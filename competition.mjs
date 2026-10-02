@@ -650,3 +650,10 @@ export function searchPublic(store, query = '', organizer = '') {
   const organizers = [...organizersMap.values()].filter(entry => !term || fold(`${entry.name} ${entry.slug}`).includes(term));
   return { championships, organizers };
 }
+
+// Tabela compacta para overlays: a do grupo da partida (ou a geral) com sigla de cada equipe.
+export function roomTable(bundle, match) {
+  const rows = bundle.groups.length ? (bundle.groups.find(group => group.table.some(row => row.teamId === match.homeTeamId))?.table || bundle.groups[0].table) : bundle.standings;
+  const shortOf = id => bundle.teams.find(team => team.id === id)?.short || '';
+  return { championship: { name: bundle.championship.name, season: bundle.championship.season }, rows: rows.map(row => ({ position: row.position, teamId: row.teamId, name: row.name, short: shortOf(row.teamId), points: row.points, played: row.played, won: row.won, drawn: row.drawn, lost: row.lost, gf: row.gf, ga: row.ga, gd: row.gd })) };
+}

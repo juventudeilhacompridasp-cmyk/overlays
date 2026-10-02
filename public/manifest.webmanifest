@@ -1,0 +1,13 @@
+{
+  "name": "Juventude Esporte Clube",
+  "short_name": "Juventude",
+  "description": "Campeonatos, classificação ao vivo, jogos e notícias do Juventude Esporte Clube.",
+  "start_url": "/campeonatos",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#08090d",
+  "theme_color": "#08090d",
+  "icons": [
+    { "src": "/brand-logo.png", "sizes": "512x441", "type": "image/png", "purpose": "any" }
+  ]
+}
