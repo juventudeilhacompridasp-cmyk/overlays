@@ -24,11 +24,16 @@ for (const filename of await fs.readdir(path.join(root, 'public'))) {
   await fs.cp(path.join(root, 'public', filename), path.join(assets, filename), { recursive: true });
 }
 
+// competition.mjs só tem funções puras; inlinado no Worker sem a palavra "export" (a interpolação é literal).
+const competitionModule = (await fs.readFile(path.join(root, 'competition.mjs'), 'utf8'))
+  .replace(/^export (?=(async function|function|const))/gm, '');
 const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
   .replace(/^export \{[^}]*\};\s*/gm, '');
 
 const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const worker = `${authModule}
+${competitionModule}
+const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic };
 const assets = ${JSON.stringify(assetMap)};
 const APP_VERSION = ${JSON.stringify(appVersion)};
 const fallbackStates = new Map();
@@ -127,6 +132,7 @@ function normalizeOperations(candidate) {
   store.delegationStatus = store.delegationStatus && typeof store.delegationStatus === 'object' ? store.delegationStatus : {};
   store.teamHistory = store.teamHistory && typeof store.teamHistory === 'object' ? store.teamHistory : {};
   store.announcements = Array.isArray(store.announcements) ? store.announcements : [];
+  store.posts = Array.isArray(store.posts) ? store.posts : [];
   return store;
 }
 
@@ -535,6 +541,7 @@ export default {
         if (baseUpdatedAt !== Number(current.updatedAt || 0)) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: publicOperations(current) }, { status: 409 });
         store = structuredClone(current);
         const action = String(candidate.action || '');
+        let actionResult = null;
         const workerCatalog = (await readState(env, 'team-catalog')) || { teams: [] };
         if (action === 'upsert-championship') {
           const item = candidate.item || {};
@@ -542,13 +549,23 @@ export default {
           const championship = { id, name: String(item.name || '').trim().slice(0, 100), season: String(item.season || '').trim().slice(0, 40), startDate: String(item.startDate || '').slice(0, 10), endDate: String(item.endDate || '').slice(0, 10), status: ['planned', 'active', 'finished'].includes(item.status) ? item.status : 'planned', updatedAt: Date.now() };
           if (!championship.name) return Response.json({ ok: false, error: 'Informe o nome do campeonato.' }, { status: 400 });
           const index = store.championships.findIndex(entry => entry.id === id);
+          const previousChampionship = index >= 0 ? store.championships[index] : null;
+          if (previousChampionship && !competition.canManageChampionship(admin, previousChampionship)) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
+          Object.assign(championship, competition.championshipExtras(item, previousChampionship || {}, safeId));
+          if (admin.role && admin.role !== 'admin' && previousChampionship) championship.moderators = previousChampionship.moderators || [];
+          const slugBase = championship.slug || competition.slugify(championship.name, id);
+          let slug = slugBase; let slugCounter = 2;
+          while (store.championships.some(entry => entry.slug === slug && entry.id !== id)) { slug = slugBase.slice(0, 44) + '-' + slugCounter; slugCounter += 1; }
+          championship.slug = slug;
           if (index >= 0) store.championships[index] = championship; else store.championships.unshift(championship);
           addAudit(store, index >= 0 ? 'championship.updated' : 'championship.created', admin.username, championship.name, championship.season);
         } else if (action === 'delete-championship') {
           const id = safeId(candidate.id);
           if (store.matches.some(match => match.championshipId === id)) return Response.json({ ok: false, error: 'O campeonato possui partidas vinculadas.' }, { status: 409 });
           const existing = store.championships.find(entry => entry.id === id);
+          if (existing && !competition.canManageChampionship(admin, existing)) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
           store.championships = store.championships.filter(entry => entry.id !== id);
+          store.posts = store.posts.filter(post => post.championshipId !== id);
           if (existing) addAudit(store, 'championship.deleted', admin.username, existing.name);
         } else if (action === 'upsert-match') {
           const item = candidate.item || {};
@@ -559,11 +576,14 @@ export default {
           const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room: roomId, updatedAt: Date.now() };
           if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) return Response.json({ ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }, { status: 400 });
           const index = store.matches.findIndex(entry => entry.id === id);
+          if (!competition.canManageChampionship(admin, store.championships.find(entry => entry.id === match.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
+          Object.assign(match, competition.matchExtras(item, previous || {}));
           if (index >= 0) store.matches[index] = match; else store.matches.unshift(match);
           addAudit(store, index >= 0 ? 'match.updated' : 'match.created', admin.username, roomId, match.homeTeamId + ' x ' + match.awayTeamId);
         } else if (action === 'delete-match') {
           const id = safeId(candidate.id);
           const existing = store.matches.find(entry => entry.id === id);
+          if (existing && !competition.canManageChampionship(admin, store.championships.find(entry => entry.id === existing.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
           store.matches = store.matches.filter(entry => entry.id !== id);
           if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
         } else if (action === 'upsert-announcement') {
@@ -604,6 +624,22 @@ export default {
         } else if (action === 'mark-notification-read') {
           const notification = store.notifications.find(entry => entry.id === candidate.id);
           if (notification) notification.read = true;
+        } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post'].includes(action)) {
+          const context = { safeId, now: () => Date.now(), addAudit };
+          let outcome;
+          if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
+          else if (action === 'generate-next-round') {
+            const target = store.championships.find(entry => entry.id === safeId(candidate.championshipId));
+            const list = target ? store.matches.filter(match => match.championshipId === target.id) : [];
+            const names = Object.fromEntries(((workerCatalog && workerCatalog.teams) || []).map(team => [team.id, team.name]));
+            const { resultsByMatch, eventsByMatch } = await competition.collectResults(list, room => readState(env, room));
+            const stats = competition.aggregateStats(list, eventsByMatch, target && target.rules, names);
+            outcome = competition.generateNextRound(store, candidate, admin, { ...context, resultsByMatch, names, cardsByTeam: stats.cardsByTeam });
+          } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
+          else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
+          else outcome = competition.deletePost(store, candidate, admin, context);
+          if (outcome.error) return Response.json({ ok: false, error: outcome.error }, { status: outcome.status || 400 });
+          actionResult = outcome;
         } else if (action === 'mark-all-notifications-read') {
           store.notifications.forEach(entry => { entry.read = true; });
         } else {
@@ -612,8 +648,31 @@ export default {
         store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
         const persisted = await persistStateIfCurrent(env, '__operations__', store, baseUpdatedAt);
         if (!persisted.ok) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: publicOperations(normalizeOperations(persisted.state)) }, { status: 409 });
-        return Response.json({ ok: true, operations: publicOperations(store) }, { headers: { 'cache-control': 'no-store' } });
+        return Response.json({ ok: true, operations: publicOperations(store), result: actionResult }, { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
+    }
+    if (url.pathname.startsWith('/api/public/')) {
+      if (request.method !== 'GET') return new Response('Method not allowed', { status: 405 });
+      const publicOps = await getOperations(env);
+      const publicCatalog = (await readState(env, 'team-catalog')) || { teams: [] };
+      const sendPublic = (status, body, isPrivate) => Response.json(body, { status, headers: { 'cache-control': isPrivate ? 'private, no-store' : 'public, max-age=5', 'access-control-allow-origin': '*' } });
+      if (url.pathname === '/api/public/championships') return sendPublic(200, competition.searchPublic(publicOps, url.searchParams.get('q') || '', competition.slugify(url.searchParams.get('organizer') || '')));
+      if (url.pathname === '/api/public/organizer') {
+        const slug = competition.slugify(url.searchParams.get('slug') || '');
+        const found = competition.searchPublic(publicOps, '', slug);
+        if (!slug || !found.championships.length) return sendPublic(404, { ok: false, error: 'Organizador não encontrado.' });
+        return sendPublic(200, { organizer: { slug, name: found.championships[0].organizerName || slug }, championships: found.championships });
+      }
+      if (url.pathname === '/api/public/championship') {
+        const slug = competition.slugify(url.searchParams.get('slug') || '');
+        const id = safeId(url.searchParams.get('id') || '');
+        const championship = publicOps.championships.find(item => (slug && item.slug === slug) || (id && item.id === id));
+        const secret = await getAuthSecret(env);
+        const viewer = championship && !championship.isPublic ? await getAdminSession(request, secret, env) : null;
+        if (!championship || (!championship.isPublic && !viewer)) return sendPublic(404, { ok: false, error: 'Campeonato não encontrado.' });
+        return sendPublic(200, await competition.buildChampionshipBundle(publicOps, championship, publicCatalog, room => readState(env, room)), !championship.isPublic);
+      }
+      return sendPublic(404, { ok: false, error: 'Rota não encontrada.' });
     }
 
     if (url.pathname === '/api/team-delegation/complete') {
@@ -804,7 +863,7 @@ export default {
         return Response.json({ ok: false, error: error.message }, { status: 500, headers: { 'cache-control': 'no-store' } });
       }
     }
-    const name = ['/', '/overlay', '/preview', '/team'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') ? '/index.html' : url.pathname;
+    const name = ['/', '/overlay', '/preview', '/team', '/campeonatos'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') || /^\\/(c|o|embed)\\//.test(url.pathname) ? '/index.html' : url.pathname;
     if (Object.hasOwn(assets, name)) {
       return new Response(assets[name], { headers: { 'content-type': types[name], 'cache-control': 'no-store' } });
     }

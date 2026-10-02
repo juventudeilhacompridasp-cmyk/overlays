@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import * as auth from './auth.mjs';
+import * as competition from './competition.mjs';
 
 const root = path.join(import.meta.dirname, 'public');
 const APP_VERSION = JSON.parse(await fs.readFile(path.join(import.meta.dirname, 'package.json'), 'utf8')).version;
@@ -59,6 +60,7 @@ function operationsStore() {
   store.delegationStatus = store.delegationStatus && typeof store.delegationStatus === 'object' ? store.delegationStatus : {};
   store.teamHistory = store.teamHistory && typeof store.teamHistory === 'object' ? store.teamHistory : {};
   store.announcements = Array.isArray(store.announcements) ? store.announcements : [];
+  store.posts = Array.isArray(store.posts) ? store.posts : [];
   return store;
 }
 
@@ -474,19 +476,30 @@ const server = http.createServer(async (request, response) => {
       }
       store = structuredClone(current);
       const action = String(candidate.action || '');
+      let actionResult = null;
       if (action === 'upsert-championship') {
         const item = candidate.item || {};
         const id = safeId(item.id || item.name, `campeonato-${Date.now().toString(36)}`);
         const championship = { id, name: String(item.name || '').trim().slice(0, 100), season: String(item.season || '').trim().slice(0, 40), startDate: String(item.startDate || '').slice(0, 10), endDate: String(item.endDate || '').slice(0, 10), status: ['planned', 'active', 'finished'].includes(item.status) ? item.status : 'planned', updatedAt: Date.now() };
         if (!championship.name) { sendJson(response, 400, { ok: false, error: 'Informe o nome do campeonato.' }); return; }
         const index = store.championships.findIndex(entry => entry.id === id);
+        const previousChampionship = index >= 0 ? store.championships[index] : null;
+        if (previousChampionship && !competition.canManageChampionship(admin, previousChampionship)) { sendJson(response, 403, { ok: false, error: 'Você não administra este campeonato.' }); return; }
+        Object.assign(championship, competition.championshipExtras(item, previousChampionship || {}, safeId));
+        if (admin.role && admin.role !== 'admin' && previousChampionship) championship.moderators = previousChampionship.moderators || [];
+        let slugBase = championship.slug || competition.slugify(championship.name, id);
+        let slug = slugBase; let slugCounter = 2;
+        while (store.championships.some(entry => entry.slug === slug && entry.id !== id)) { slug = `${slugBase.slice(0, 44)}-${slugCounter}`; slugCounter += 1; }
+        championship.slug = slug;
         if (index >= 0) store.championships[index] = championship; else store.championships.unshift(championship);
         addAudit(store, index >= 0 ? 'championship.updated' : 'championship.created', admin.username, championship.name, championship.season);
       } else if (action === 'delete-championship') {
         const id = safeId(candidate.id);
         if (store.matches.some(match => match.championshipId === id)) { sendJson(response, 409, { ok: false, error: 'O campeonato possui partidas vinculadas.' }); return; }
         const existing = store.championships.find(entry => entry.id === id);
+        if (existing && !competition.canManageChampionship(admin, existing)) { sendJson(response, 403, { ok: false, error: 'Você não administra este campeonato.' }); return; }
         store.championships = store.championships.filter(entry => entry.id !== id);
+        store.posts = store.posts.filter(post => post.championshipId !== id);
         if (existing) addAudit(store, 'championship.deleted', admin.username, existing.name);
       } else if (action === 'upsert-match') {
         const item = candidate.item || {};
@@ -497,11 +510,14 @@ const server = http.createServer(async (request, response) => {
         const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room, updatedAt: Date.now() };
         if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) { sendJson(response, 400, { ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }); return; }
         const index = store.matches.findIndex(entry => entry.id === id);
+        if (!competition.canManageChampionship(admin, store.championships.find(entry => entry.id === match.championshipId))) { sendJson(response, 403, { ok: false, error: 'Você não administra este campeonato.' }); return; }
+        Object.assign(match, competition.matchExtras(item, previous || {}));
         if (index >= 0) store.matches[index] = match; else store.matches.unshift(match);
         addAudit(store, index >= 0 ? 'match.updated' : 'match.created', admin.username, room, `${match.homeTeamId} x ${match.awayTeamId}`);
       } else if (action === 'delete-match') {
         const id = safeId(candidate.id);
         const existing = store.matches.find(entry => entry.id === id);
+        if (existing && !competition.canManageChampionship(admin, store.championships.find(entry => entry.id === existing.championshipId))) { sendJson(response, 403, { ok: false, error: 'Você não administra este campeonato.' }); return; }
         store.matches = store.matches.filter(entry => entry.id !== id);
         if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
       } else if (action === 'upsert-announcement') {
@@ -541,6 +557,22 @@ const server = http.createServer(async (request, response) => {
       } else if (action === 'mark-notification-read') {
         const notification = store.notifications.find(entry => entry.id === candidate.id);
         if (notification) notification.read = true;
+      } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post'].includes(action)) {
+        const context = { safeId, now: () => Date.now(), addAudit };
+        let outcome;
+        if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
+        else if (action === 'generate-next-round') {
+          const target = store.championships.find(entry => entry.id === safeId(candidate.championshipId));
+          const list = target ? store.matches.filter(match => match.championshipId === target.id) : [];
+          const names = Object.fromEntries(((sharedStates.__team_catalog__ || {}).teams || []).map(team => [team.id, team.name]));
+          const { resultsByMatch, eventsByMatch } = await competition.collectResults(list, async room => sharedStates[room] || {});
+          const stats = competition.aggregateStats(list, eventsByMatch, target?.rules, names);
+          outcome = competition.generateNextRound(store, candidate, admin, { ...context, resultsByMatch, names, cardsByTeam: stats.cardsByTeam });
+        } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
+        else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
+        else outcome = competition.deletePost(store, candidate, admin, context);
+        if (outcome.error) { sendJson(response, outcome.status || 400, { ok: false, error: outcome.error }); return; }
+        actionResult = outcome;
       } else if (action === 'mark-all-notifications-read') {
         store.notifications.forEach(entry => { entry.read = true; });
       } else {
@@ -550,8 +582,37 @@ const server = http.createServer(async (request, response) => {
       store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
       sharedStates.__operations__ = store;
       await persist();
-      sendJson(response, 200, { ok: true, operations: publicOperations(store) });
+      sendJson(response, 200, { ok: true, operations: publicOperations(store), result: actionResult });
     } catch { sendJson(response, 400, { ok: false, error: 'JSON inválido' }); }
+    return;
+  }
+
+  if (url.pathname.startsWith('/api/public/')) {
+    if (request.method !== 'GET') { response.writeHead(405).end('Method not allowed'); return; }
+    const store = operationsStore();
+    const catalog = sharedStates.__team_catalog__ || { teams: [] };
+    const sendPublic = (status, body, isPrivate = false) => {
+      response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': isPrivate ? 'private, no-store' : 'public, max-age=5', 'access-control-allow-origin': '*' });
+      response.end(JSON.stringify(body));
+    };
+    if (url.pathname === '/api/public/championships') { sendPublic(200, competition.searchPublic(store, url.searchParams.get('q') || '', competition.slugify(url.searchParams.get('organizer') || ''))); return; }
+    if (url.pathname === '/api/public/organizer') {
+      const slug = competition.slugify(url.searchParams.get('slug') || '');
+      const found = competition.searchPublic(store, '', slug);
+      if (!slug || !found.championships.length) { sendPublic(404, { ok: false, error: 'Organizador não encontrado.' }); return; }
+      sendPublic(200, { organizer: { slug, name: found.championships[0].organizerName || slug }, championships: found.championships });
+      return;
+    }
+    if (url.pathname === '/api/public/championship') {
+      const slug = competition.slugify(url.searchParams.get('slug') || '');
+      const id = safeId(url.searchParams.get('id') || '');
+      const championship = store.championships.find(item => (slug && item.slug === slug) || (id && item.id === id));
+      const admin = championship && !championship.isPublic ? await getAdminSession(request) : null;
+      if (!championship || (!championship.isPublic && !admin)) { sendPublic(404, { ok: false, error: 'Campeonato não encontrado.' }); return; }
+      sendPublic(200, await competition.buildChampionshipBundle(store, championship, catalog, async room => sharedStates[room] || {}), !championship.isPublic);
+      return;
+    }
+    sendPublic(404, { ok: false, error: 'Rota não encontrada.' });
     return;
   }
 
@@ -765,7 +826,7 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  const relative = ['/', '/overlay', '/preview', '/team'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') ? 'index.html' : url.pathname.slice(1);
+  const relative = ['/', '/overlay', '/preview', '/team', '/campeonatos'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') || /^\/(c|o|embed)\//.test(url.pathname) ? 'index.html' : url.pathname.slice(1);
   const filename = path.resolve(root, relative);
   if (!filename.startsWith(root + path.sep)) {
     response.writeHead(403).end('Forbidden');
