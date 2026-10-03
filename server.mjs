@@ -834,7 +834,7 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  const relative = ['/', '/overlay', '/preview', '/team', '/campeonatos'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') || /^\/(c|o|embed)\//.test(url.pathname) ? 'index.html' : url.pathname.slice(1);
+  const relative = ['/', '/overlay', '/preview', '/team', '/campeonatos'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') || /^\/(c|o|embed|obs)\//.test(url.pathname) ? 'index.html' : url.pathname.slice(1);
   const filename = path.resolve(root, relative);
   if (!filename.startsWith(root + path.sep)) {
     response.writeHead(403).end('Forbidden');

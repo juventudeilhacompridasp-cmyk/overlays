@@ -870,7 +870,7 @@ export default {
         return Response.json({ ok: false, error: error.message }, { status: 500, headers: { 'cache-control': 'no-store' } });
       }
     }
-    const name = ['/', '/overlay', '/preview', '/team', '/campeonatos'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') || /^\\/(c|o|embed)\\//.test(url.pathname) ? '/index.html' : url.pathname;
+    const name = ['/', '/overlay', '/preview', '/team', '/campeonatos'].includes(url.pathname) || url.pathname === '/manage' || url.pathname.startsWith('/manage/') || /^\\/(c|o|embed|obs)\\//.test(url.pathname) ? '/index.html' : url.pathname;
     if (Object.hasOwn(assets, name)) {
       return new Response(assets[name], { headers: { 'content-type': types[name], 'cache-control': 'no-store' } });
     }

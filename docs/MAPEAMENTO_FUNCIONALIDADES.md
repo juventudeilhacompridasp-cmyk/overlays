@@ -81,3 +81,7 @@ Legenda: ✅ entregue · 🟡 parcial · ⬜ não feito (motivo ao lado).
 1. Rankings personalizáveis (assistências, defesas) com novos tipos de evento.
 2. Notificações (e-mail/WhatsApp) quando houver provedor de envio autorizado.
 3. Painel do torcedor com conta, se a organização quiser seguir campeonatos entre aparelhos.
+
+## Complemento: artes e overlays de campeonato
+- **Estúdio de artes** (`/manage/arts`): 17 tipos de arte (uma por informação da plataforma), 6 estilos, 4 formatos e personalização de cores, fonte, fundo e logo — cobre "artes para redes sociais".
+- **Overlays de campeonato** (`/obs/<visão>`, configurados em `/manage/broadcast`): tabela, próximos jogos, resultados, artilharia, cartões, jogo em destaque, faixa de placares e campeão como fontes transparentes de OBS, com animações e parâmetros por URL.

@@ -20,9 +20,10 @@ const isPreview = location.pathname === '/preview';
 const isTeamPortal = location.pathname === '/team';
 const isManagement = location.pathname === '/manage' || location.pathname.startsWith('/manage/');
 const isPublicPage = location.pathname === '/campeonatos' || /^\/(c|o|embed)\//.test(location.pathname);
-const isAdminPanel = !isOutput && !isPreview && !isTeamPortal && !isPublicPage;
+const isObsPage = /^\/obs\//.test(location.pathname);
+const isAdminPanel = !isOutput && !isPreview && !isTeamPortal && !isPublicPage && !isObsPage;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts', 'broadcast'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -59,6 +60,7 @@ const MANAGEMENT_MODULES = [
   { key: 'dashboard', label: 'Dashboard', caption: 'Visão geral de agenda, avisos, acessos e estatísticas da plataforma', layer: 'all', icon: icons.monitor },
   { key: 'live', label: 'Ao vivo agora', caption: 'Partidas em andamento, placar, o que está no ar e atalhos de emergência', layer: 'all', icon: icons.monitor },
   { key: 'standings', label: 'Classificação e súmulas', caption: 'Tabela do campeonato, artilharia, cartões e súmula de cada partida', layer: 'all', icon: icons.list },
+  { key: 'broadcast', label: 'Overlays de campeonato', caption: 'Tabela, jogos, resultados, artilharia e faixa de placares para o OBS, com animações e parâmetros', layer: 'all', icon: icons.monitor },
   { key: 'arts', label: 'Estúdio de artes', caption: 'Artes prontas para redes sociais: resultados, jogos, tabelas, artilharia, escalações e avisos', layer: 'all', icon: icons.layers },
   { key: 'feed', label: 'Notícias e mídia', caption: 'Notícias, fotos e vídeos por campeonato e rodada, exibidos na página pública', layer: 'all', icon: icons.text },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
@@ -2261,6 +2263,375 @@ function renderStandingsModule() {
     <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Súmulas das partidas</h3><p class="help-text">Abra a súmula com os lances registrados em cada jogo e gere a arte do resultado.</p></div></div><div class="dashboard-list">${matchRows}</div></section>${openMatch ? renderMatchSummary(openMatch) : ''}</div>`;
 }
 
+const POST_KIND_LABELS = { news: 'Notícia', photo: 'Foto', video: 'Vídeo' };
+
+// ===== Overlays de campeonato para OBS: /obs/<visão>?c=<slug>&... (fundo transparente, parametrizados por URL) =====
+const OBS_VIEWS = [
+  ['standings', 'Tabela de classificação', 'Posição, pontos, jogos e saldo', 8],
+  ['fixtures', 'Próximos jogos', 'Agenda com horário e local', 5],
+  ['results', 'Últimos resultados', 'Placares finalizados e ao vivo', 5],
+  ['scorers', 'Artilharia', 'Ranking de goleadores', 5],
+  ['discipline', 'Cartões e suspensos', 'Disciplina do campeonato', 6],
+  ['matchcard', 'Jogo em destaque', 'Confronto, placar e horário', 1],
+  ['ticker', 'Faixa de placares', 'Faixa rolante de resultados e jogos', 12],
+  ['champion', 'Campeão', 'Apresentação do título', 1],
+];
+const OBS_STYLES = [['broadcast', 'Painel TV'], ['glass', 'Vidro'], ['neon', 'Neon'], ['light', 'Claro'], ['minimal', 'Minimal'], ['gradient', 'Gradiente'], ['stripe', 'Esportivo']];
+const OBS_ANIMATIONS = [['rise', 'Subida'], ['slide', 'Deslize'], ['zoom', 'Zoom'], ['wipe', 'Cortina'], ['fade', 'Fade'], ['flip', 'Virada 3D'], ['cascade', 'Cascata de linhas'], ['bounce', 'Salto elástico'], ['drop', 'Queda do topo']];
+const OBS_POSITIONS = [['tl', 'Topo esq.'], ['tc', 'Topo centro'], ['tr', 'Topo dir.'], ['cl', 'Meio esq.'], ['cc', 'Centro'], ['cr', 'Meio dir.'], ['bl', 'Base esq.'], ['bc', 'Base centro'], ['br', 'Base dir.']];
+const OBS_VIEW_DEFAULTS = { standings: { pos: 'cl', width: 760 }, fixtures: { pos: 'bl', width: 860 }, results: { pos: 'bl', width: 860 }, scorers: { pos: 'cr', width: 640 }, discipline: { pos: 'cr', width: 720 }, matchcard: { pos: 'bc', width: 1060 }, ticker: { pos: 'bc', width: 1920 }, champion: { pos: 'cc', width: 760 } };
+const OBS_DEFAULTS = { style: 'broadcast', anim: 'rise', dx: 0, dy: 0, scale: 100, surface: 94, radius: 10, logos: 1, hold: 0, gap: 20, rotate: 8, refresh: 15, cols: 'std', speed: 90 };
+
+function obsConfig(search = location.search, viewName = '') {
+  const params = new URLSearchParams(search);
+  const view = OBS_VIEWS.some(([key]) => key === viewName) ? viewName : 'standings';
+  const info = OBS_VIEWS.find(([key]) => key === view);
+  const pick = (key, list, fallback) => list.some(([value]) => value === params.get(key)) ? params.get(key) : fallback;
+  const number = (key, min, max, fallback) => (params.get(key) === null || params.get(key) === '' ? fallback : clampNumber(params.get(key), min, max, fallback));
+  const color = key => /^#?[0-9a-f]{6}$/i.test(params.get(key) || '') ? `#${params.get(key).replace('#', '')}` : '';
+  const defaults = OBS_VIEW_DEFAULTS[view];
+  const colsValue = ['min', 'std', 'full'].includes(params.get('cols')) ? params.get('cols') : 'std';
+  const baseWidth = defaults.width + (view === 'standings' && colsValue === 'full' ? 160 : 0);
+  return {
+    view, slug: String(params.get('c') || '').slice(0, 80), id: String(params.get('id') || '').slice(0, 80), match: String(params.get('match') || '').slice(0, 80),
+    style: pick('style', OBS_STYLES, OBS_DEFAULTS.style), anim: pick('anim', OBS_ANIMATIONS, OBS_DEFAULTS.anim), pos: pick('pos', OBS_POSITIONS, defaults.pos),
+    dx: number('dx', -1000, 1000, 0), dy: number('dy', -600, 600, 0), scale: number('scale', 50, 200, 100), width: number('width', 360, 1920, baseWidth),
+    rows: number('rows', 1, 30, info[3]), font: params.get('font') && TYPEFACES[params.get('font')] ? params.get('font') : 'global',
+    accent: color('accent'), bg: color('bg'), text: color('text'), surface: number('surface', 30, 100, OBS_DEFAULTS.surface), radius: number('radius', 0, 28, OBS_DEFAULTS.radius),
+    logos: params.get('logos') === '0' ? 0 : 1, title: String(params.get('title') || '').slice(0, 60), subtitle: String(params.get('subtitle') || '').slice(0, 60),
+    group: String(params.get('group') || '').slice(0, 40), round: String(params.get('round') || '').slice(0, 60),
+    hold: number('hold', 0, 600, 0), gap: number('gap', 3, 900, OBS_DEFAULTS.gap), rotate: number('rotate', 3, 120, OBS_DEFAULTS.rotate), refresh: number('refresh', 5, 300, OBS_DEFAULTS.refresh),
+    cols: pick('cols', [['min', ''], ['std', ''], ['full', '']], 'std'), speed: number('speed', 20, 400, OBS_DEFAULTS.speed),
+  };
+}
+
+function obsUrl(cfg, absolute = false) {
+  const defaults = OBS_VIEW_DEFAULTS[cfg.view] || OBS_VIEW_DEFAULTS.standings;
+  const info = OBS_VIEWS.find(([key]) => key === cfg.view) || OBS_VIEWS[0];
+  const params = new URLSearchParams();
+  if (cfg.slug) params.set('c', cfg.slug); else if (cfg.id) params.set('id', cfg.id);
+  if (cfg.match && cfg.view === 'matchcard') params.set('match', cfg.match);
+  const plain = { style: OBS_DEFAULTS.style, anim: OBS_DEFAULTS.anim, dx: 0, dy: 0, scale: 100, surface: OBS_DEFAULTS.surface, radius: OBS_DEFAULTS.radius, logos: 1, hold: 0, gap: OBS_DEFAULTS.gap, rotate: OBS_DEFAULTS.rotate, refresh: OBS_DEFAULTS.refresh, cols: 'std', speed: OBS_DEFAULTS.speed, font: 'global', accent: '', bg: '', text: '', title: '', subtitle: '', group: '', round: '', pos: defaults.pos, width: defaults.width + (cfg.view === 'standings' && cfg.cols === 'full' ? 160 : 0), rows: info[3] };
+  for (const [key, fallback] of Object.entries(plain)) {
+    if (cfg[key] !== undefined && cfg[key] !== fallback && cfg[key] !== '') params.set(key, String(cfg[key]).replace(/^#/, ''));
+  }
+  const query = params.toString();
+  return `${absolute ? location.origin : ''}/obs/${cfg.view}${query ? `?${query}` : ''}`;
+}
+
+function obsRgba(hex, alpha) {
+  const value = safeColor(hex, '#0b0d13').slice(1);
+  return `rgba(${parseInt(value.slice(0, 2), 16)},${parseInt(value.slice(2, 4), 16)},${parseInt(value.slice(4, 6), 16)},${alpha})`;
+}
+
+function obsBadge(team) {
+  return team?.logo && cfgLogos() ? `<span class="obs-badge"><img src="${escapeHtml(team.logo)}" alt=""></span>` : `<span class="obs-badge" style="background:${safeColor(team?.color)}">${escapeHtml(team?.short || '')}</span>`;
+}
+let obsLogosOn = true;
+function cfgLogos() { return obsLogosOn; }
+
+function obsTeam(bundle, id, fallbackName) {
+  return bundle.teams.find(team => team.id === id) || { id, name: fallbackName || id, short: String(fallbackName || id || '').slice(0, 3).toUpperCase(), color: '#8253cd', logo: '' };
+}
+
+function obsKickoff(match) {
+  const when = artWhen(match);
+  return { day: when.short || 'A DEFINIR', time: when.time || '--:--' };
+}
+
+// Seleciona os itens e o texto de cabeçalho de cada visão a partir do bundle público do campeonato.
+function obsItems(bundle, cfg) {
+  const matches = bundle.matches.filter(match => match.status !== 'cancelled' && (!cfg.round || match.round === cfg.round));
+  const time = match => (match.kickoffAt ? new Date(match.kickoffAt).getTime() : Number.MAX_SAFE_INTEGER);
+  if (cfg.view === 'standings') {
+    const group = cfg.group ? bundle.groups.find(item => item.group === cfg.group) : null;
+    return group ? group.table : bundle.standings.length ? bundle.standings : bundle.groups.flatMap(item => item.table);
+  }
+  if (cfg.view === 'fixtures') return matches.filter(match => match.status !== 'finished').sort((a, b) => (b.status === 'live') - (a.status === 'live') || time(a) - time(b));
+  if (cfg.view === 'results') return matches.filter(match => match.status === 'finished' || match.status === 'live').sort((a, b) => cfg.round ? time(a) - time(b) : time(b) - time(a));
+  if (cfg.view === 'scorers') return bundle.scorers;
+  if (cfg.view === 'discipline') return bundle.cards;
+  if (cfg.view === 'ticker') {
+    const done = matches.filter(match => match.status === 'finished' || match.status === 'live').sort((a, b) => time(b) - time(a)).slice(0, Math.ceil(cfg.rows / 2));
+    const next = matches.filter(match => match.status === 'scheduled').sort((a, b) => time(a) - time(b)).slice(0, Math.floor(cfg.rows / 2));
+    return [...done.reverse(), ...next];
+  }
+  return [];
+}
+
+const OBS_TITLES = { standings: 'Classificação', fixtures: 'Próximos jogos', results: 'Últimos resultados', scorers: 'Artilharia', discipline: 'Cartões', matchcard: '', champion: 'Campeão', ticker: '' };
+
+function obsRowMarkup(bundle, cfg, item, index) {
+  const style = `style="--i:${index}"`;
+  if (cfg.view === 'standings') {
+    const cells = cfg.cols === 'min' ? [item.points] : cfg.cols === 'full' ? [item.played, item.won, item.drawn, item.lost, item.gd, item.points] : [item.played, item.gd, item.points];
+    return `<div class="obs-row ${item.position === 1 ? 'is-first' : ''}" ${style}><b class="obs-pos">${item.position}</b>${obsBadge(obsTeam(bundle, item.teamId, item.name))}<span class="obs-name">${escapeHtml(item.name)}</span>${cells.map((cell, cellIndex) => `<em class="obs-num ${cellIndex === cells.length - 1 ? 'is-points' : ''}">${escapeHtml(cell)}</em>`).join('')}</div>`;
+  }
+  if (cfg.view === 'fixtures' || cfg.view === 'results') {
+    const home = obsTeam(bundle, item.homeTeamId, item.homeName);
+    const away = obsTeam(bundle, item.awayTeamId, item.awayName);
+    const score = item.homeScore === null || item.awayScore === null ? null : `${item.homeScore} × ${item.awayScore}`;
+    const kick = obsKickoff(item);
+    const centre = cfg.view === 'results' ? `<strong class="obs-score ${item.status === 'live' ? 'is-live' : ''}">${score || '– × –'}</strong>` : `<span class="obs-when"><strong>${escapeHtml(item.status === 'live' ? 'AO VIVO' : kick.time)}</strong><small>${escapeHtml(kick.day)}</small></span>`;
+    return `<div class="obs-row obs-match" ${style}><span class="obs-name is-home">${escapeHtml(home.name)}</span>${obsBadge(home)}${centre}${obsBadge(away)}<span class="obs-name">${escapeHtml(away.name)}</span></div>`;
+  }
+  if (cfg.view === 'scorers') return `<div class="obs-row ${index === 0 ? 'is-first' : ''}" ${style}><b class="obs-pos">${index + 1}</b>${obsBadge(obsTeam(bundle, item.teamId, item.teamName))}<span class="obs-name">${escapeHtml(item.name)}<small>${escapeHtml(item.teamName)}</small></span><em class="obs-num is-points">${item.goals}</em></div>`;
+  if (cfg.view === 'discipline') return `<div class="obs-row" ${style}>${obsBadge(obsTeam(bundle, item.teamId, item.teamName))}<span class="obs-name">${escapeHtml(item.name)}<small>${escapeHtml(item.teamName)}</small></span><em class="obs-num"><i class="obs-card is-yellow"></i>${item.yellow}</em><em class="obs-num"><i class="obs-card is-red"></i>${item.red}</em></div>`;
+  return '';
+}
+
+function obsBodyMarkup(bundle, cfg, pageItems) {
+  if (cfg.view === 'matchcard') {
+    const matches = bundle.matches.filter(match => match.status !== 'cancelled');
+    const match = matches.find(item => item.id === cfg.match) || matches.find(item => item.status === 'live') || matches.filter(item => item.status === 'scheduled').sort((a, b) => String(a.kickoffAt).localeCompare(String(b.kickoffAt)))[0] || matches.filter(item => item.status === 'finished').pop();
+    if (!match) return '<div class="obs-empty">Nenhuma partida</div>';
+    const home = obsTeam(bundle, match.homeTeamId, match.homeName);
+    const away = obsTeam(bundle, match.awayTeamId, match.awayName);
+    const done = match.homeScore !== null && match.awayScore !== null;
+    const kick = obsKickoff(match);
+    return `<div class="obs-card-match"><div class="obs-side">${obsBadge(home)}<strong>${escapeHtml(home.name)}</strong></div><div class="obs-centre"><small>${escapeHtml(match.status === 'live' ? 'AO VIVO' : done ? 'FIM DE JOGO' : kick.day)}</small><b>${done ? `${match.homeScore} × ${match.awayScore}` : escapeHtml(kick.time)}</b><small>${escapeHtml([match.round, match.venue].filter(Boolean).join(' · '))}</small></div><div class="obs-side">${obsBadge(away)}<strong>${escapeHtml(away.name)}</strong></div></div>`;
+  }
+  if (cfg.view === 'champion') {
+    const team = bundle.teams.find(item => item.id === bundle.championship.championId);
+    if (!team) return '<div class="obs-empty">O campeão aparece quando a final termina</div>';
+    return `<div class="obs-champion"><div class="obs-trophy" aria-hidden="true"></div>${obsBadge(team)}<strong>${escapeHtml(team.name)}</strong><small>${escapeHtml([bundle.championship.name, bundle.championship.season].filter(Boolean).join(' · '))}</small></div>`;
+  }
+  if (!pageItems.length) return '<div class="obs-empty">Sem dados para exibir ainda</div>';
+  return pageItems.map((item, index) => obsRowMarkup(bundle, cfg, item, index)).join('');
+}
+
+function obsTickerMarkup(bundle, cfg, items) {
+  if (!items.length) return '<div class="obs-empty">Sem jogos para exibir</div>';
+  const chip = match => {
+    const home = obsTeam(bundle, match.homeTeamId, match.homeName);
+    const away = obsTeam(bundle, match.awayTeamId, match.awayName);
+    const done = match.homeScore !== null && match.awayScore !== null;
+    return `<span class="obs-chip"><small>${escapeHtml(match.status === 'live' ? 'AO VIVO' : done ? 'FIM' : obsKickoff(match).day)}</small>${obsBadge(home)}<b>${escapeHtml(home.short || home.name)}</b><strong>${done ? `${match.homeScore} × ${match.awayScore}` : escapeHtml(obsKickoff(match).time)}</strong><b>${escapeHtml(away.short || away.name)}</b>${obsBadge(away)}</span>`;
+  };
+  const track = items.map(chip).join('');
+  return `<div class="obs-track" data-obs-track><div>${track}</div><div aria-hidden="true">${track}</div></div>`;
+}
+
+const OBS_KEYFRAMES = {
+  rise: () => [{ opacity: 0, transform: 'translateY(48px)' }, { opacity: 1, transform: 'none' }],
+  drop: () => [{ opacity: 0, transform: 'translateY(-48px)' }, { opacity: 1, transform: 'none' }],
+  slide: pos => [{ opacity: 0, transform: `translateX(${pos.endsWith('r') ? '' : '-'}110%)` }, { opacity: 1, transform: 'none' }],
+  zoom: () => [{ opacity: 0, transform: 'scale(.82)' }, { opacity: 1, transform: 'none' }],
+  wipe: () => [{ clipPath: 'inset(0 100% 0 0)', opacity: 1 }, { clipPath: 'inset(0 0 0 0)', opacity: 1 }],
+  fade: () => [{ opacity: 0 }, { opacity: 1 }],
+  flip: () => [{ opacity: 0, transform: 'perspective(900px) rotateX(-80deg)' }, { opacity: 1, transform: 'perspective(900px) rotateX(0)' }],
+  cascade: () => [{ opacity: 0 }, { opacity: 1 }],
+  bounce: () => [{ opacity: 0, transform: 'translateY(90px) scale(.92)' }, { opacity: 1, transform: 'translateY(-14px) scale(1.02)', offset: .6 }, { opacity: 1, transform: 'none' }],
+};
+
+let obsState = { global: { typeface: 'roboto', accent: '#d8ad56' }, cfg: null, bundle: null, signature: '', page: 0, shown: false, status: 'loading', timers: [] };
+
+function obsStage(cfg) {
+  const info = OBS_VIEWS.find(([key]) => key === cfg.view) || OBS_VIEWS[0];
+  const heading = cfg.title || OBS_TITLES[cfg.view] || '';
+  const bundle = obsState.bundle;
+  const sub = cfg.subtitle || (cfg.group ? `Grupo ${cfg.group}` : cfg.round || bundle?.championship?.name || '');
+  const [vertical, horizontal] = [cfg.pos[0], cfg.pos[1]];
+  const styles = [
+    `--o-accent:${cfg.accent || obsState.global.accent}`, `--o-bg:${obsRgba(cfg.bg || (cfg.style === 'light' ? '#ffffff' : '#0b0d13'), cfg.surface / 100)}`, `--o-bg-solid:${safeColor(cfg.bg || (cfg.style === 'light' ? '#ffffff' : '#0b0d13'))}`,
+    cfg.text ? `--o-text:${cfg.text}` : '', `--o-radius:${cfg.radius}px`, `--o-scale:${cfg.scale / 100}`, `--o-width:${cfg.view === 'ticker' ? 1920 : cfg.width}px`,
+    `--o-font:${(cfg.font === 'global' ? (TYPEFACES[obsState.global.typeface] || TYPEFACES.roboto).stack : TYPEFACES[cfg.font].stack)}`, `--o-dx:${cfg.dx}px`, `--o-dy:${cfg.dy}px`,
+  ].filter(Boolean).join(';');
+  const head = cfg.view === 'ticker' ? '' : `<header class="obs-head">${cfg.logos && bundle?.championship?.logo ? `<span class="obs-badge"><img src="${escapeHtml(bundle.championship.logo)}" alt=""></span>` : ''}<div><small>${escapeHtml(sub)}</small><strong>${escapeHtml(heading || info[1])}</strong></div></header>`;
+  return `<div class="obs-stage" data-obs-stage><div class="obs-anchor is-v-${vertical} is-h-${horizontal} ${cfg.view === 'ticker' ? 'is-wide' : ''}"><div class="obs-panel obs-style-${cfg.style} obs-view-${cfg.view}" data-obs-panel style="${styles}">${head}<div class="obs-body" data-obs-body></div><div class="obs-dots" data-obs-dots></div></div></div></div>`;
+}
+
+function obsPlay(direction) {
+  const panel = document.querySelector('[data-obs-panel]');
+  if (!panel) return;
+  const cfg = obsState.cfg;
+  const frames = (OBS_KEYFRAMES[cfg.anim] || OBS_KEYFRAMES.rise)(cfg.pos);
+  const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const options = { duration: reduced ? 1 : direction === 'in' ? 750 : 500, easing: cfg.anim === 'bounce' && direction === 'in' ? 'ease-out' : 'cubic-bezier(.22,.8,.24,1)', fill: 'both', direction: direction === 'in' ? 'normal' : 'reverse' };
+  panel.animate?.(frames, options);
+  if (cfg.anim === 'cascade' && !reduced) {
+    panel.querySelectorAll?.('.obs-row, .obs-chip').forEach((row, index) => row.animate?.([{ opacity: 0, transform: 'translateX(-40px)' }, { opacity: 1, transform: 'none' }], { duration: 480, delay: (direction === 'in' ? index : 0) * 90, easing: 'cubic-bezier(.22,.8,.24,1)', fill: 'both', direction: options.direction }));
+  }
+  obsState.shown = direction === 'in';
+}
+
+function obsPaint(swap = false) {
+  const { cfg, bundle } = obsState;
+  const body = document.querySelector('[data-obs-body]');
+  const dots = document.querySelector('[data-obs-dots]');
+  if (!body || !bundle) return;
+  obsLogosOn = Boolean(cfg.logos);
+  const items = obsItems(bundle, cfg);
+  const pages = cfg.view === 'ticker' || cfg.view === 'matchcard' || cfg.view === 'champion' ? 1 : Math.max(1, Math.ceil(items.length / cfg.rows));
+  obsState.page = obsState.page % pages;
+  const slice = items.slice(obsState.page * cfg.rows, obsState.page * cfg.rows + cfg.rows);
+  body.innerHTML = cfg.view === 'ticker' ? obsTickerMarkup(bundle, cfg, items) : obsBodyMarkup(bundle, cfg, slice);
+  dots.innerHTML = pages > 1 ? Array.from({ length: pages }, (_, index) => `<i class="${index === obsState.page ? 'on' : ''}"></i>`).join('') : '';
+  const track = body.querySelector('[data-obs-track]');
+  if (track) {
+    const width = track.firstElementChild.scrollWidth || 1920;
+    track.style.setProperty('--o-track', `${width}px`);
+    track.style.setProperty('--o-duration', `${Math.max(8, width / cfg.speed)}s`);
+  }
+  if (swap && cfg.anim !== 'cascade' && body.animate) body.animate([{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }], { duration: 420, easing: 'ease-out' });
+  if (swap && cfg.anim === 'cascade') body.querySelectorAll('.obs-row').forEach((row, index) => row.animate([{ opacity: 0, transform: 'translateX(-40px)' }, { opacity: 1, transform: 'none' }], { duration: 420, delay: index * 70, fill: 'both' }));
+  return pages;
+}
+
+async function obsLoad() {
+  const { cfg } = obsState;
+  const query = cfg.slug ? `slug=${encodeURIComponent(cfg.slug)}` : cfg.id ? `id=${encodeURIComponent(cfg.id)}` : '';
+  if (!query) { obsState.status = 'missing'; return false; }
+  try {
+    const response = await fetch(`/api/public/championship?${query}&ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) { obsState.status = 'error'; return false; }
+    const bundle = await response.json();
+    const signature = JSON.stringify({ ...bundle, generatedAt: 0 });
+    const changed = signature !== obsState.signature;
+    obsState.bundle = bundle; obsState.signature = signature; obsState.status = 'ready';
+    return changed;
+  } catch { obsState.status = 'error'; return false; }
+}
+
+function startObsPage() {
+  const view = location.pathname.split('/').filter(Boolean)[1] || 'standings';
+  const cfg = obsConfig(location.search, view);
+  obsState.cfg = cfg;
+  document.body.classList.add('obs-page');
+  if (document.documentElement?.style) document.documentElement.style.background = 'transparent';
+  const fit = () => { const stage = document.querySelector('[data-obs-stage]'); if (stage && window.innerWidth) stage.style.transform = `scale(${Math.min(window.innerWidth / 1920, window.innerHeight / 1080)})`; };
+  addEventListener('resize', fit);
+  app.innerHTML = obsStage(cfg);
+  fit();
+  const panel = () => document.querySelector('[data-obs-panel]');
+  const cycle = () => {
+    obsState.timers.forEach(clearTimeout); obsState.timers = [];
+    obsPaint();
+    obsPlay('in');
+    if (cfg.hold > 0) {
+      obsState.timers.push(setTimeout(() => { obsPlay('out'); obsState.timers.push(setTimeout(() => { obsState.page = 0; cycle(); }, cfg.gap * 1000 + 500)); }, cfg.hold * 1000));
+    }
+  };
+  const rotate = () => {
+    if (!obsState.shown || obsState.status !== 'ready') return;
+    const pages = obsPaintPages();
+    if (pages > 1) { obsState.page = (obsState.page + 1) % pages; obsPaint(true); }
+  };
+  fetch('/api/teams', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null).then(async catalog => {
+    const global = catalog?.globalAppearance;
+    if (global) obsState.global = { typeface: TYPEFACES[global.typeface] ? global.typeface : 'roboto', accent: safeColor(global.customAccent, '#d8ad56') };
+    app.innerHTML = obsStage(cfg); fit();
+    await obsLoad();
+  }).then(() => {
+    if (obsState.status !== 'ready') { const holder = panel(); if (holder) holder.querySelector('[data-obs-body]').innerHTML = `<div class="obs-empty">${obsState.status === 'missing' ? 'Informe o campeonato: ?c=&lt;slug&gt;' : 'Campeonato não encontrado ou privado'}</div>`; obsPlay('in'); }
+    else cycle();
+  });
+  setInterval(async () => { const changed = await obsLoad(); if (changed && obsState.shown && obsState.status === 'ready') obsPaint(); }, cfg.refresh * 1000);
+  setInterval(rotate, cfg.rotate * 1000);
+}
+
+function obsPaintPages() {
+  const { cfg, bundle } = obsState;
+  if (!bundle || ['ticker', 'matchcard', 'champion'].includes(cfg.view)) return 1;
+  return Math.max(1, Math.ceil(obsItems(bundle, cfg).length / cfg.rows));
+}
+
+// ===== Módulo de configuração dos overlays de campeonato (gera o link do OBS e mostra a prévia ao vivo) =====
+const OBS_OPTIONS_KEY = 'juventude.obs.v1';
+let obsOptions = loadObsOptions();
+let obsBundle = null;
+let obsBundleFor = '';
+let obsFrameTimer = 0;
+let obsFrameNonce = 0;
+
+function obsQuery(cfg) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(cfg)) {
+    if (key === 'view' || value === '' || value === undefined || value === null) continue;
+    if (['width', 'rows'].includes(key) && !value) continue;
+    params.set(key === 'slug' ? 'c' : key, String(value).replace(/^#/, ''));
+  }
+  return `?${params.toString()}`;
+}
+
+function loadObsOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OBS_OPTIONS_KEY));
+    if (saved?.view) return obsConfig(obsQuery(saved), saved.view);
+  } catch {}
+  return obsConfig('', 'standings');
+}
+
+function setObsOption(field, value) {
+  const next = { ...obsOptions, [field]: value };
+  if (field === 'cols') next.width = 0;
+  if (field === 'view') { next.pos = ''; next.width = 0; next.rows = 0; next.match = ''; }
+  if (field === 'slug') { next.group = ''; next.round = ''; next.match = ''; }
+  obsOptions = obsConfig(obsQuery(next), next.view);
+  try { localStorage.setItem(OBS_OPTIONS_KEY, JSON.stringify(obsOptions)); } catch {}
+}
+
+async function loadObsBundle() {
+  if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'broadcast') return;
+  const championship = operationsData.championships.find(item => item.slug === obsOptions.slug) || operationsData.championships.find(item => item.status === 'active') || operationsData.championships[0];
+  if (!championship) return;
+  if (obsOptions.slug !== championship.slug) { setObsOption('slug', championship.slug); render(); return; }
+  if (obsBundleFor === championship.id) return;
+  obsBundleFor = championship.id;
+  try {
+    const response = await fetch(`/api/public/championship?id=${encodeURIComponent(championship.id)}&ts=${Date.now()}`, { cache: 'no-store' });
+    if (response.ok) { obsBundle = await response.json(); if (managementModule === 'broadcast') render(); }
+  } catch {}
+}
+
+addEventListener('resize', () => { if (typeof obsFitPreview === 'function') obsFitPreview(); });
+
+function obsFitPreview() {
+  const box = document.querySelector('[data-obs-box]');
+  const frame = document.querySelector('[data-obs-frame]');
+  if (box && frame) frame.style.transform = `scale(${box.clientWidth / 1920})`;
+}
+
+function obsReloadFrame(immediate = false) {
+  clearTimeout(obsFrameTimer);
+  const run = () => {
+    const frame = document.querySelector('[data-obs-frame]');
+    const field = document.querySelector('[data-obs-url]');
+    const url = obsUrl(obsOptions, true);
+    if (field) field.value = url;
+    if (frame) frame.src = `${obsUrl(obsOptions)}${obsUrl(obsOptions).includes('?') ? '&' : '?'}p=${++obsFrameNonce}`;
+  };
+  if (immediate) run(); else obsFrameTimer = setTimeout(run, 380);
+}
+
+function renderBroadcastModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato para configurar os overlays de OBS.</div>';
+  loadObsBundle();
+  const cfg = obsOptions;
+  const championship = operationsData.championships.find(item => item.slug === cfg.slug);
+  const chip = (field, value, label, active) => `<button type="button" class="access-chip ${active ? 'active' : ''}" data-action="obs-set" data-value="${field}|${escapeHtml(value)}" aria-pressed="${active}">${escapeHtml(label)}</button>`;
+  const range = (field, label, min, max, step = 1, suffix = '') => `<label class="parameter-control"><span>${label} <strong data-obs-label="${field}">${cfg[field]}${suffix}</strong></span><input type="range" min="${min}" max="${max}" step="${step}" value="${cfg[field]}" data-obs-field="${field}" data-suffix="${suffix}"></label>`;
+  const colorField = (field, label, fallback) => `<div class="builder-color-field"><label><input type="color" data-obs-field="${field}" value="${safeColor(cfg[field] || fallback, fallback)}"><span>${label}${cfg[field] ? '' : ' (padrão)'}</span></label><button class="button subtle" data-action="obs-set" data-value="${field}|" ${cfg[field] ? '' : 'disabled'}>Padrão</button></div>`;
+  const viewCards = OBS_VIEWS.map(([key, name, caption]) => `<button type="button" class="art-type ${cfg.view === key ? 'active' : ''}" data-action="obs-set" data-value="view|${key}" aria-pressed="${cfg.view === key}"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(caption)}</small></button>`).join('');
+  const groups = obsBundle?.groups?.map(item => item.group).filter(Boolean) || [];
+  const rounds = [...new Set((obsBundle?.matches || []).map(match => match.round).filter(Boolean))];
+  const matchOptions = (obsBundle?.matches || []).map(match => `<option value="${escapeHtml(match.id)}" ${match.id === cfg.match ? 'selected' : ''}>${escapeHtml(match.homeName)} × ${escapeHtml(match.awayName)} · ${escapeHtml(match.round || '')}</option>`).join('');
+  const typefaces = [['global', 'Fonte global do projeto'], ...Object.entries(TYPEFACES).map(([key, font]) => [key, font.label])].map(([key, label]) => `<option value="${key}" ${cfg.font === key ? 'selected' : ''}>${escapeHtml(label)}</option>`).join('');
+  const select = (field, label, options) => `<div class="field"><label>${label}</label><select data-obs-field="${field}">${options}</select></div>`;
+  const filters = ['standings', 'fixtures', 'results'].includes(cfg.view) ? `${cfg.view === 'standings' && groups.length ? select('group', 'Grupo', `<option value="">Todos</option>${groups.map(group => `<option value="${escapeHtml(group)}" ${group === cfg.group ? 'selected' : ''}>${escapeHtml(group)}</option>`).join('')}`) : ''}${cfg.view !== 'standings' && rounds.length ? select('round', 'Rodada ou fase', `<option value="">Todas</option>${rounds.map(round => `<option value="${escapeHtml(round)}" ${round === cfg.round ? 'selected' : ''}>${escapeHtml(round)}</option>`).join('')}`) : ''}` : '';
+  const matchPick = cfg.view === 'matchcard' ? select('match', 'Partida (vazio = automática)', `<option value="">Automática: ao vivo, próxima ou última</option>${matchOptions}`) : '';
+  const url = obsUrl(cfg, true);
+  const warning = championship && !championship.isPublic ? '<p class="help-text obs-warning">Este campeonato é privado: o OBS não tem login e não conseguirá carregar os dados. Marque-o como público em Campeonatos.</p>' : '';
+  return `<div class="arts-layout obs-layout"><aside class="arts-controls">
+    <section><h3 class="arts-step"><b>1</b> O que exibir</h3>${select('slug', 'Campeonato', operationsData.championships.map(item => `<option value="${escapeHtml(item.slug)}" ${item.slug === cfg.slug ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join(''))}<div class="art-types">${viewCards}</div>${filters}${matchPick}<div class="field"><label>Título (opcional)</label><input data-obs-field="title" maxlength="60" value="${escapeHtml(cfg.title)}" placeholder="${escapeHtml(OBS_TITLES[cfg.view] || OBS_VIEWS.find(([key]) => key === cfg.view)[1])}"></div><div class="field"><label>Subtítulo (opcional)</label><input data-obs-field="subtitle" maxlength="60" value="${escapeHtml(cfg.subtitle)}"></div>${cfg.view === 'standings' ? `<div class="field"><label>Colunas da tabela</label><div class="access-chips">${[['min', 'Só pontos'], ['std', 'J · SG · P'], ['full', 'Completa']].map(([value, label]) => chip('cols', value, label, cfg.cols === value)).join('')}</div></div>` : ''}${!['matchcard', 'champion'].includes(cfg.view) ? range('rows', cfg.view === 'ticker' ? 'Itens na faixa' : 'Linhas por página', 1, 30) : ''}</section>
+    <section><h3 class="arts-step"><b>2</b> Visual e animação</h3><div class="field"><label>Estilo</label><div class="access-chips">${OBS_STYLES.map(([key, label]) => chip('style', key, label, cfg.style === key)).join('')}</div></div><div class="field"><label>Animação de entrada e saída</label><div class="access-chips">${OBS_ANIMATIONS.map(([key, label]) => chip('anim', key, label, cfg.anim === key)).join('')}</div></div><button class="button subtle" data-action="obs-replay">▶ Reproduzir animação</button>${colorField('accent', 'Cor de destaque', '#d8ad56')}${colorField('bg', 'Cor do painel', cfg.style === 'light' ? '#ffffff' : '#0b0d13')}${colorField('text', 'Cor do texto', cfg.style === 'light' ? '#14161c' : '#ffffff')}<div class="field"><label>Tipografia</label><select data-obs-field="font">${typefaces}</select></div><label class="builder-check"><input type="checkbox" data-obs-field="logos" ${cfg.logos ? 'checked' : ''}> Mostrar escudos</label></section>
+    <section><h3 class="arts-step"><b>3</b> Posição e tamanho</h3><div class="obs-grid">${OBS_POSITIONS.map(([key, label]) => `<button type="button" class="${cfg.pos === key ? 'active' : ''}" data-action="obs-set" data-value="pos|${key}" title="${label}" aria-label="${label}" aria-pressed="${cfg.pos === key}"></button>`).join('')}</div>${range('scale', 'Escala', 50, 200, 1, '%')}${cfg.view === 'ticker' ? range('speed', 'Velocidade da faixa', 20, 400, 5, ' px/s') : range('width', 'Largura', 360, 1920, 10, ' px')}${range('dx', 'Ajuste horizontal', -1000, 1000, 5, ' px')}${range('dy', 'Ajuste vertical', -600, 600, 5, ' px')}${range('surface', 'Opacidade do painel', 30, 100, 1, '%')}${range('radius', 'Arredondamento', 0, 28, 1, ' px')}</section>
+    <section><h3 class="arts-step"><b>4</b> Ciclo e dados</h3>${range('hold', 'Tempo no ar (0 = fixo)', 0, 120, 1, ' s')}${cfg.hold ? range('gap', 'Intervalo fora do ar', 3, 300, 1, ' s') : ''}${!['ticker', 'matchcard', 'champion'].includes(cfg.view) ? range('rotate', 'Troca de página', 3, 60, 1, ' s') : ''}${range('refresh', 'Atualizar dados a cada', 5, 120, 1, ' s')}</section></aside>
+    <section class="arts-stage"><div class="obs-url-bar"><input readonly data-obs-url value="${escapeHtml(url)}" aria-label="Link para o OBS"><button class="button primary" data-action="obs-copy">Copiar link</button><a class="button subtle" href="${escapeHtml(obsUrl(cfg))}" target="_blank" rel="noopener">Abrir</a></div>${warning}<p class="help-text">No OBS: Fontes → Navegador → cole o link, largura 1920, altura 1080. Fundo transparente e atualização automática.</p><div class="obs-preview" data-obs-box><iframe class="obs-preview-frame" data-obs-frame title="Prévia do overlay" src="${escapeHtml(obsUrl(cfg))}"></iframe></div></section></div>`;
+}
+
 // ===== Estúdio de artes: peças prontas para redes sociais (canvas → PNG) =====
 const ART_FORMATS = [['feed', 'Feed 1:1', 1080, 1080], ['portrait', 'Retrato 4:5', 1080, 1350], ['stories', 'Stories 9:16', 1080, 1920], ['wide', 'Paisagem 16:9', 1920, 1080]];
 const ART_TYPES = [
@@ -2271,7 +2642,14 @@ const ART_TYPES = [
   ['standings', 'Classificação', 'Tabela dos melhores colocados', 'top'],
   ['scorers', 'Artilharia', 'Ranking de goleadores', 'top'],
   ['discipline', 'Cartões e suspensos', 'Disciplina do campeonato', 'top'],
+  ['groups', 'Tabelas dos grupos', 'Os primeiros de cada grupo', 'none'],
+  ['team-card', 'Ficha da equipe', 'Campanha, forma e artilheiro', 'team'],
   ['lineup', 'Escalação confirmada', 'Titulares e técnico de uma equipe', 'lineup'],
+  ['squad', 'Elenco completo', 'Todos os atletas de uma equipe', 'team'],
+  ['athlete', 'Cartão do atleta', 'Foto, número, posição e gols', 'athlete'],
+  ['agenda', 'Agenda do dia', 'Todos os jogos de uma data', 'date'],
+  ['sponsors', 'Parceiros e patrocinadores', 'Agradecimento com as marcas', 'none'],
+  ['news', 'Notícia do campeonato', 'Título e texto de uma publicação', 'post'],
   ['champion', 'Campeão', 'Comemoração do título', 'none'],
   ['notice', 'Aviso ou comunicado', 'Título e texto livres', 'text'],
 ];
@@ -2297,12 +2675,15 @@ const ART_THEMES = {
     paint(c, w, h, accent) { c.fillStyle = artShade(accent, -.55); c.fillRect(0, 0, w, h); c.fillStyle = 'rgba(255,255,255,.07)'; c.beginPath(); c.arc(w * .92, h * .08, Math.min(w, h) * .38, 0, Math.PI * 2); c.fill(); } },
 };
 
+const ART_FONTS = { barlow: ['Barlow Condensed', '"Barlow Condensed", "Arial Narrow", sans-serif'], oswald: ['Oswald', 'Oswald, Impact, sans-serif'], bebas: ['Bebas Neue', '"Bebas Neue", Impact, sans-serif'], montserrat: ['Montserrat', 'Montserrat, "Segoe UI", Arial, sans-serif'], roboto: ['Roboto', 'Roboto, Arial, sans-serif'] };
+let artAssets = { bgImage: '', brandLogo: '' };
 const ART_OPTIONS_KEY = 'juventude.artes.v1';
 function loadArtOptions() {
-  const defaults = { championshipId: '', type: 'result', theme: 'gold', format: 'feed', matchId: '', round: '', side: 'home', topN: 8, title: '', text: '', accent: '', logos: true, sponsors: true, brand: true };
+  const defaults = { championshipId: '', type: 'result', theme: 'gold', format: 'feed', matchId: '', round: '', side: 'home', topN: 8, title: '', text: '', accent: '', logos: true, sponsors: true, brand: true, bg: '', bg2: '', textColor: '', font: 'barlow', shade: 45, radius: 14, brandName: '', brandLogo: '', teamId: '', athleteId: '', postId: '', date: '' };
   try { return { ...defaults, ...(JSON.parse(localStorage.getItem(ART_OPTIONS_KEY)) || {}) }; } catch { return defaults; }
 }
 let artOptions = loadArtOptions();
+if (artOptions.brandLogo === 'custom') artOptions.brandLogo = '';
 let artBundle = null;
 let artBundleFor = '';
 let artBundleAt = 0;
@@ -2316,7 +2697,7 @@ function saveArtOptions() { try { localStorage.setItem(ART_OPTIONS_KEY, JSON.str
 
 function artImage(url) {
   return new Promise(resolve => {
-    if (!url || !String(url).startsWith('/')) { resolve(null); return; }
+    if (!url || !(String(url).startsWith('/') || /^data:image\//.test(String(url)))) { resolve(null); return; }
     const image = new Image();
     image.onload = () => resolve(image);
     image.onerror = () => resolve(null);
@@ -2326,7 +2707,7 @@ function artImage(url) {
 
 function artWrap(g, text, maxWidth, size, weight, body) {
   const { ctx } = g;
-  ctx.font = `${weight} ${size}px ${body ? 'Roboto, Arial, sans-serif' : '"Barlow Condensed", "Arial Narrow", sans-serif'}`;
+  ctx.font = `${weight} ${size}px ${body ? g.fontBody : g.fontDisplay}`;
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
   const lines = [];
   for (const paragraph of String(text).split(/\n/)) {
@@ -2344,7 +2725,7 @@ function artWrap(g, text, maxWidth, size, weight, body) {
 function artT(g, text, x, y, o = {}) {
   const { ctx, u, theme } = g;
   let size = (o.size || 40) * u;
-  const family = o.body ? 'Roboto, Arial, sans-serif' : '"Barlow Condensed", "Arial Narrow", sans-serif';
+  const family = o.body ? g.fontBody : g.fontDisplay;
   ctx.textAlign = o.align || 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = o.color || theme.text;
   if ('letterSpacing' in ctx) ctx.letterSpacing = `${(o.spacing || 0) * u}px`;
   const value = o.upper ? String(text).toUpperCase() : String(text);
@@ -2375,7 +2756,7 @@ function artBadge(g, team, cx, cy, r) {
 function artPanel(g, x, y, w, h, alt = false, accent = false) {
   const { ctx, u } = g;
   ctx.fillStyle = accent ? g.accent : alt ? g.theme.panelAlt : g.theme.panel;
-  const r = 14 * u;
+  const r = (g.options.radius ?? 14) * u;
   ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
 }
 
@@ -2581,9 +2962,9 @@ const ART_DRAWERS = {
   },
 };
 
-function artRoundList(g, body, results) {
-  const rounds = g.options.round ? g.bundle.matches.filter(match => match.round === g.options.round) : [];
-  if (!rounds.length) return artEmpty(g, body, 'Escolha uma rodada');
+function artRoundList(g, body, results, listOverride) {
+  const rounds = listOverride || (g.options.round ? g.bundle.matches.filter(match => match.round === g.options.round) : []);
+  if (!rounds.length) return artEmpty(g, body, listOverride ? 'Nenhum jogo nesta data' : 'Escolha uma rodada');
   const { shown, rowH, top } = artRows(g, body, rounds.length, { min: 74, max: g.h > g.w ? 150 : 116 });
   const center = g.w / 2;
   const centerW = 190 * g.u;
@@ -2598,26 +2979,245 @@ function artRoundList(g, body, results) {
     artT(g, home.name, center - badgeGap - r - 16 * g.u, y, { size: 38, upper: true, align: 'right', max: nameMax });
     artT(g, away.name, center + badgeGap + r + 16 * g.u, y, { size: 38, upper: true, align: 'left', max: nameMax });
     const score = artScore(match);
-    if (results) artT(g, score ? `${score[0]} × ${score[1]}` : '– × –', center, y, { size: 54, color: score ? g.accent : g.theme.muted, glow: Boolean(score) });
+    if (results === true || (results === null && score)) artT(g, score ? `${score[0]} × ${score[1]}` : '– × –', center, y, { size: 54, color: score ? g.accent : g.theme.muted, glow: Boolean(score) });
     else { const when = artWhen(match); artT(g, when.time || '--:--', center, y - 12 * g.u, { size: 46, color: g.accent }); artT(g, when.short, center, y + 24 * g.u, { size: 24, weight: 500, color: g.theme.muted, body: true }); }
   });
   if (shown < rounds.length) artT(g, `+ ${rounds.length - shown} jogo(s)`, center, top + rowH * shown + 24 * g.u, { size: 28, weight: 500, color: g.theme.muted, body: true });
 }
 
+function artLuminance(hex) {
+  const value = safeColor(hex, '#000000').slice(1);
+  const channel = index => parseInt(value.slice(index * 2, index * 2 + 2), 16) / 255;
+  return .2126 * channel(0) + .7152 * channel(1) + .0722 * channel(2);
+}
+
+// Aplica as escolhas de cor do usuário (fundo, segundo tom, texto) sobre o estilo base.
+function artResolveTheme(options) {
+  const hex = value => (/^#[0-9a-f]{6}$/i.test(value || '') ? value : '');
+  const base = ART_THEMES[options.theme] || ART_THEMES.gold;
+  const theme = { ...base };
+  const bg = hex(options.bg);
+  if (bg) {
+    const light = artLuminance(bg) > .6;
+    const second = hex(options.bg2) || artShade(bg, light ? -.18 : -.45);
+    Object.assign(theme, { light, glow: false, text: light ? '#17140d' : '#ffffff', muted: light ? '#5b564a' : 'rgba(255,255,255,.72)', panel: light ? 'rgba(0,0,0,.07)' : 'rgba(255,255,255,.1)', panelAlt: light ? 'rgba(0,0,0,.03)' : 'rgba(255,255,255,.04)',
+      paint(c, w, h, accent) { const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, bg); g.addColorStop(1, second); c.fillStyle = g; c.fillRect(0, 0, w, h); c.fillStyle = accent; c.fillRect(0, 0, w, 14); } });
+  }
+  const text = hex(options.textColor);
+  if (text) { theme.text = text; theme.muted = `${text}b3`; }
+  return theme;
+}
+
+
+function artTeamById(g, id) { return g.bundle.teams.find(team => team.id === id) || g.bundle.teams[0]; }
+function artMatchDate(match) {
+  const date = match.kickoffAt ? new Date(match.kickoffAt) : null;
+  return date && !Number.isNaN(date.getTime()) ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}` : '';
+}
+
+Object.assign(ART_DRAWERS, {
+  groups(g, body) {
+    const groups = g.bundle.groups.filter(item => item.table?.length).slice(0, 6);
+    if (!groups.length) return artEmpty(g, body, 'Este campeonato não tem fase de grupos');
+    const columns = groups.length === 1 ? 1 : g.w > g.h ? Math.min(3, groups.length) : 2;
+    const rows = Math.ceil(groups.length / columns);
+    const gap = 22 * g.u;
+    const cellW = (body.w - gap * (columns - 1)) / columns;
+    const cellH = (body.h - gap * (rows - 1)) / rows;
+    groups.forEach((group, index) => {
+      const x = body.x + (index % columns) * (cellW + gap);
+      const y = body.y + Math.floor(index / columns) * (cellH + gap);
+      artPanel(g, x, y, cellW, cellH, true);
+      artT(g, `GRUPO ${group.group}`, x + 24 * g.u, y + 40 * g.u, { size: 38, align: 'left', color: g.accent, spacing: 4, glow: true });
+      const lines = Math.max(1, Math.min(group.table.length, Math.floor((cellH - 84 * g.u) / (54 * g.u))));
+      const rowH = Math.min(62 * g.u, (cellH - 84 * g.u) / lines);
+      group.table.slice(0, lines).forEach((row, line) => {
+        const cy = y + 84 * g.u + rowH * line + rowH / 2;
+        artT(g, row.position, x + 34 * g.u, cy, { size: 32, color: line < 2 ? g.accent : g.theme.text });
+        artT(g, row.name, x + 64 * g.u, cy, { size: 32, upper: true, align: 'left', max: cellW - 150 * g.u });
+        artT(g, row.points, x + cellW - 30 * g.u, cy, { size: 36, align: 'right', color: g.accent });
+      });
+    });
+  },
+  'team-card'(g, body) {
+    const team = artTeamById(g, g.options.teamId);
+    if (!team) return artEmpty(g, body, 'Escolha uma equipe');
+    const table = g.bundle.standings.length ? g.bundle.standings : g.bundle.groups.flatMap(group => group.table);
+    const row = table.find(item => item.teamId === team.id);
+    const scorer = g.bundle.scorers.find(item => item.teamId === team.id);
+    const wide = g.w > g.h * 1.3;
+    const cx = wide ? body.x + body.w * .22 : g.w / 2;
+    const top = body.y + (wide ? body.h * .12 : 20 * g.u);
+    const radius = Math.min(body.h * (wide ? .26 : .14), body.w * .16, 130 * g.u);
+    artBadge(g, team, cx, top + radius, radius);
+    artT(g, team.name, cx, top + radius * 2 + 60 * g.u, { size: 62, upper: true, max: wide ? body.w * .4 : body.w, glow: true });
+    if (!row) return artT(g, 'Sem jogos disputados', cx, top + radius * 2 + 130 * g.u, { size: 36, weight: 500, body: true, color: g.theme.muted });
+    artT(g, `${row.position}º COLOCADO`, cx, top + radius * 2 + 118 * g.u, { size: 40, color: g.accent, spacing: 5 });
+    const stats = [['PTS', row.points], ['J', row.played], ['V', row.won], ['E', row.drawn], ['D', row.lost], ['GP', row.gf], ['GC', row.ga], ['SG', row.gd]];
+    const area = wide ? { x: body.x + body.w * .46, y: body.y + 20 * g.u, w: body.w * .54, h: body.h - 40 * g.u } : { x: body.x, y: top + radius * 2 + 170 * g.u, w: body.w, h: body.h - (radius * 2 + 190 * g.u) };
+    const cols = 4;
+    const cellW = area.w / cols;
+    const cellH = Math.min(120 * g.u, (area.h - 160 * g.u) / 2);
+    stats.forEach(([label, value], index) => {
+      const x = area.x + (index % cols) * cellW;
+      const y = area.y + Math.floor(index / cols) * (cellH + 14 * g.u);
+      artPanel(g, x + 6 * g.u, y, cellW - 12 * g.u, cellH, index === 0, index === 0);
+      artT(g, value, x + cellW / 2, y + cellH * .4, { size: 46, color: index === 0 ? g.theme.onAccent : g.theme.text });
+      artT(g, label, x + cellW / 2, y + cellH * .78, { size: 22, weight: 500, body: true, color: index === 0 ? g.theme.onAccent : g.theme.muted });
+    });
+    const below = area.y + 2 * (cellH + 14 * g.u) + 20 * g.u;
+    (row.form || []).slice(-5).forEach((result, index, list) => {
+      const x = area.x + area.w / 2 + (index - (list.length - 1) / 2) * 62 * g.u;
+      g.ctx.fillStyle = result === 'V' ? '#38d996' : result === 'D' ? '#fa626e' : '#f1bf52';
+      g.ctx.beginPath(); g.ctx.arc(x, below + 28 * g.u, 25 * g.u, 0, Math.PI * 2); g.ctx.fill();
+      artT(g, result, x, below + 28 * g.u, { size: 26, color: '#10130f' });
+    });
+    if (scorer) artT(g, `ARTILHEIRO: ${scorer.name} (${scorer.goals})`, area.x + area.w / 2, below + 100 * g.u, { size: 34, weight: 500, body: true, upper: true, color: g.accent, max: area.w });
+  },
+  squad(g, body) {
+    const team = artTeamById(g, g.options.teamId);
+    const entry = (g.catalog || []).find(item => item.id === team?.id);
+    const athletes = [...(Array.isArray(entry?.athletes) ? entry.athletes : [])].sort((a, b) => Number(a.number || 999) - Number(b.number || 999)).slice(0, 30);
+    if (!team) return artEmpty(g, body, 'Escolha uma equipe');
+    artBadge(g, team, g.w / 2, body.y + 70 * g.u, 58 * g.u);
+    artT(g, team.name, g.w / 2, body.y + 170 * g.u, { size: 58, upper: true, glow: true, max: body.w });
+    if (!athletes.length) return artEmpty(g, { ...body, y: body.y + 230 * g.u, h: body.h - 230 * g.u }, 'Elenco ainda não cadastrado');
+    const columns = g.w > g.h ? 3 : athletes.length > 14 ? 2 : 1;
+    const per = Math.ceil(athletes.length / columns);
+    const area = { x: body.x, y: body.y + 215 * g.u, w: body.w, h: body.h - 215 * g.u };
+    const rowH = Math.min(80 * g.u, area.h / per);
+    const columnW = area.w / columns;
+    athletes.forEach((athlete, index) => {
+      const x = area.x + columnW * Math.floor(index / per);
+      const y = area.y + rowH * (index % per) + rowH / 2;
+      artPanel(g, x + 5 * g.u, y - rowH / 2 + 3 * g.u, columnW - 10 * g.u, rowH - 6 * g.u, index % 2 === 1);
+      artT(g, athlete.number || '', x + 46 * g.u, y, { size: 38, color: g.accent });
+      artT(g, athlete.name, x + 90 * g.u, y, { size: 34, upper: true, align: 'left', max: columnW - (athlete.position ? 270 : 120) * g.u });
+      if (athlete.position) artT(g, athlete.position, x + columnW - 24 * g.u, y, { size: 22, weight: 500, align: 'right', body: true, color: g.theme.muted });
+    });
+  },
+  athlete(g, body) {
+    const team = artTeamById(g, g.options.teamId);
+    const entry = (g.catalog || []).find(item => item.id === team?.id);
+    const athlete = (Array.isArray(entry?.athletes) ? entry.athletes : []).find(item => item.id === g.options.athleteId);
+    if (!athlete) return artEmpty(g, body, 'Escolha um atleta');
+    const goals = g.bundle.scorers.find(item => item.teamId === team.id && item.name === athlete.name)?.goals || 0;
+    const cards = g.bundle.cards.find(item => item.teamId === team.id && item.name === athlete.name);
+    const wide = g.w > g.h * 1.3;
+    const { ctx, u } = g;
+    const box = wide ? { x: body.x, y: body.y, w: body.w * .4, h: body.h } : { x: body.x + body.w * .12, y: body.y, w: body.w * .76, h: body.h * .56 };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(box.x, box.y, box.w, box.h); ctx.clip();
+    ctx.fillStyle = g.theme.panel; ctx.fillRect(box.x, box.y, box.w, box.h);
+    if (g.photo) { const cover = Math.max(box.w / g.photo.width, box.h / g.photo.height); ctx.drawImage(g.photo, box.x + (box.w - g.photo.width * cover) / 2, box.y + (box.h - g.photo.height * cover) / 2, g.photo.width * cover, g.photo.height * cover); }
+    else artT(g, athlete.number || '—', box.x + box.w / 2, box.y + box.h / 2, { size: 280, color: g.accent, glow: true });
+    ctx.restore();
+    ctx.strokeStyle = g.accent; ctx.lineWidth = 8 * u; ctx.strokeRect(box.x, box.y, box.w, box.h);
+    const textX = wide ? box.x + box.w + 70 * u : g.w / 2;
+    const align = wide ? 'left' : 'center';
+    const maxW = wide ? body.w * .55 : body.w;
+    const ty = wide ? body.y + body.h * .16 : box.y + box.h + 80 * u;
+    artT(g, `#${athlete.number || '—'}`, textX, ty, { size: 96, align, color: g.accent, glow: true });
+    artT(g, athlete.name, textX, ty + 100 * u, { size: 64, align, upper: true, max: maxW, glow: true });
+    artT(g, [team.name, athlete.position].filter(Boolean).join(' · '), textX, ty + 170 * u, { size: 34, weight: 500, align, body: true, upper: true, color: g.theme.muted, max: maxW });
+    const chips = [['GOLS', goals], ['AMARELOS', cards?.yellow || 0], ['VERMELHOS', cards?.red || 0]];
+    const chipW = Math.min(190 * u, maxW / 3 - 12 * u);
+    chips.forEach(([label, value], index) => {
+      const cx = (wide ? textX : textX - (chips.length - 1) * (chipW + 12 * u) / 2) + index * (chipW + 12 * u) + (wide ? chipW / 2 : 0);
+      artPanel(g, cx - chipW / 2, ty + 230 * u, chipW, 120 * u, false, index === 0);
+      artT(g, value, cx, ty + 276 * u, { size: 58, color: index === 0 ? g.theme.onAccent : g.theme.text });
+      artT(g, label, cx, ty + 326 * u, { size: 21, weight: 500, body: true, color: index === 0 ? g.theme.onAccent : g.theme.muted, spacing: 2 });
+    });
+  },
+  agenda(g, body) {
+    const day = g.options.date;
+    const list = g.bundle.matches.filter(match => match.status !== 'cancelled' && artMatchDate(match) === day).sort((a, b) => String(a.kickoffAt).localeCompare(String(b.kickoffAt)));
+    artRoundList(g, body, null, list);
+  },
+  sponsors(g, body) {
+    const items = (g.sponsorLogos || []).filter(item => item.image);
+    if (!items.length) return artEmpty(g, body, 'Cadastre patrocinadores com logo na biblioteca');
+    artT(g, 'OBRIGADO AOS PARCEIROS', g.w / 2, body.y + 40 * g.u, { size: 54, color: g.accent, glow: true, spacing: 5, max: body.w });
+    const columns = items.length <= 2 ? items.length : g.w > g.h ? Math.min(4, items.length) : items.length <= 4 ? 2 : 3;
+    const rows = Math.ceil(items.length / columns);
+    const area = { x: body.x, y: body.y + 110 * g.u, w: body.w, h: body.h - 110 * g.u };
+    const gap = 22 * g.u;
+    const cellW = (area.w - gap * (columns - 1)) / columns;
+    const cellH = Math.min(260 * g.u, (area.h - gap * (rows - 1)) / rows);
+    const startY = area.y + Math.max(0, (area.h - (cellH * rows + gap * (rows - 1))) / 2);
+    items.forEach(({ image, name }, index) => {
+      const row = Math.floor(index / columns);
+      const inRow = Math.min(columns, items.length - row * columns);
+      const offset = (columns - inRow) * (cellW + gap) / 2;
+      const x = area.x + offset + (index % columns) * (cellW + gap);
+      const y = startY + row * (cellH + gap);
+      g.ctx.fillStyle = '#ffffff'; g.ctx.beginPath(); g.ctx.roundRect ? g.ctx.roundRect(x, y, cellW, cellH, 18 * g.u) : g.ctx.rect(x, y, cellW, cellH); g.ctx.fill();
+      const scale = Math.min((cellW - 40 * g.u) / image.width, (cellH - (name ? 76 : 40) * g.u) / image.height);
+      g.ctx.drawImage(image, x + (cellW - image.width * scale) / 2, y + 20 * g.u, image.width * scale, image.height * scale);
+      if (name) { g.ctx.fillStyle = '#17140d'; g.ctx.font = `700 ${26 * g.u}px ${g.fontBody}`; g.ctx.textAlign = 'center'; g.ctx.textBaseline = 'middle'; g.ctx.fillText(String(name).slice(0, 26), x + cellW / 2, y + cellH - 30 * g.u, cellW - 24 * g.u); }
+    });
+  },
+  news(g, body) {
+    const post = g.bundle.posts.find(item => item.id === g.options.postId);
+    if (!post) return artEmpty(g, body, 'Publique uma notícia para gerar a arte');
+    const { ctx, u } = g;
+    let y = body.y;
+    const wide = g.w > g.h * 1.3;
+    const textW = wide && g.postImage ? body.w * .52 : body.w;
+    const textX = body.x;
+    if (g.postImage) {
+      const box = wide ? { x: body.x + body.w * .56, y: body.y, w: body.w * .44, h: body.h } : { x: body.x, y: body.y, w: body.w, h: body.h * .4 };
+      ctx.save(); ctx.beginPath(); ctx.rect(box.x, box.y, box.w, box.h); ctx.clip();
+      const cover = Math.max(box.w / g.postImage.width, box.h / g.postImage.height);
+      ctx.drawImage(g.postImage, box.x + (box.w - g.postImage.width * cover) / 2, box.y + (box.h - g.postImage.height * cover) / 2, g.postImage.width * cover, g.postImage.height * cover);
+      ctx.restore();
+      if (!wide) y += box.h + 36 * u;
+    }
+    ctx.fillStyle = g.accent; ctx.fillRect(textX, y, 120 * u, 9 * u); y += 44 * u;
+    artT(g, `${POST_KIND_LABELS[post.kind] || 'NOTÍCIA'}${post.round ? ` · ${post.round}` : ''}`.toUpperCase(), textX, y, { size: 28, align: 'left', spacing: 5, color: g.accent, body: true });
+    y += 62 * u;
+    for (const line of artWrap(g, String(post.title).toUpperCase(), textW, 70 * u, 700, false).slice(0, 4)) { artT(g, line, textX, y, { size: 70, align: 'left', glow: true }); y += 76 * u; }
+    y += 14 * u;
+    const bodyLines = artWrap(g, post.body || '', textW, 36 * u, 500, true);
+    const room = Math.max(1, Math.floor((body.y + body.h - y) / (50 * u)));
+    bodyLines.slice(0, room).forEach((line, index, list) => { artT(g, index === list.length - 1 && bodyLines.length > room ? `${line.slice(0, -1)}…` : line, textX, y, { size: 36, weight: 500, align: 'left', body: true }); y += 50 * u; });
+  },
+});
+
+async function artPrepare(g, extras) {
+  const { options, bundle, catalog } = g;
+  if (options.type === 'athlete') {
+    const team = artTeamById(g, options.teamId);
+    const entry = (catalog || []).find(item => item.id === team?.id);
+    const athlete = (Array.isArray(entry?.athletes) ? entry.athletes : []).find(item => item.id === options.athleteId);
+    g.photo = athlete?.photo ? await artImage(athlete.photo) : null;
+  }
+  if (options.type === 'news') g.postImage = await artImage(bundle.posts.find(item => item.id === options.postId)?.media);
+  if (options.type === 'sponsors') g.sponsorLogos = await Promise.all((extras.sponsors || []).slice(0, 12).map(async item => ({ name: item.name, image: await artImage(item.logo || item.wideAsset || item.banner) })));
+}
+
 async function renderArt(bundle, options, extras = {}) {
   const format = ART_FORMATS.find(([key]) => key === options.format) || ART_FORMATS[0];
   const [, , width, height] = format;
-  const theme = ART_THEMES[options.theme] || ART_THEMES.gold;
+  const theme = artResolveTheme(options);
+  const fontInfo = ART_FONTS[options.font] || ART_FONTS.barlow;
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d');
-  try { await Promise.all([document.fonts.load('700 60px "Barlow Condensed"'), document.fonts.load('500 40px "Barlow Condensed"'), document.fonts.load('500 30px "Roboto"'), document.fonts.load('700 30px "Roboto"')]); } catch {}
+  try { await Promise.all([document.fonts.load(`700 60px "${fontInfo[0]}"`), document.fonts.load(`500 40px "${fontInfo[0]}"`), document.fonts.load('500 30px "Roboto"'), document.fonts.load('700 30px "Roboto"')]); } catch {}
   const accent = options.accent && /^#[0-9a-f]{6}$/i.test(options.accent) ? options.accent : theme.accent;
   const u = Math.min(width, height) / 1080;
   theme.paint(ctx, width, height, accent);
+  const backdrop = artAssets.bgImage ? await artImage(artAssets.bgImage) : null;
+  if (backdrop) {
+    const cover = Math.max(width / backdrop.width, height / backdrop.height);
+    ctx.drawImage(backdrop, (width - backdrop.width * cover) / 2, (height - backdrop.height * cover) / 2, backdrop.width * cover, backdrop.height * cover);
+    ctx.fillStyle = `rgba(0,0,0,${Math.max(0, Math.min(90, Number(options.shade) || 0)) / 100})`; ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = accent; ctx.fillRect(0, 0, width, 14 * u);
+  }
   const images = {};
   await Promise.all(bundle.teams.map(async team => { const image = await artImage(team.logo); if (image) images[team.id] = image; }));
-  const g = { ctx, w: width, h: height, u, theme, accent, bundle, options, images, catalog: extras.catalog || [] };
+  const g = { ctx, w: width, h: height, u, theme, accent, bundle, options, images, catalog: extras.catalog || [], fontDisplay: fontInfo[1], fontBody: ART_FONTS.roboto[1], sponsorImages: extras.sponsors || [] };
   const pad = 64 * u;
   const typeInfo = ART_TYPES.find(([key]) => key === options.type) || ART_TYPES[0];
   const sponsors = options.sponsors ? (extras.sponsors || []).slice(0, 5) : [];
@@ -2625,7 +3225,11 @@ async function renderArt(bundle, options, extras = {}) {
   const headerH = (width > height * 1.3 ? 190 : 230) * u;
   artT(g, bundle.championship.name, width / 2, 96 * u, { size: 56, color: accent, spacing: 4, upper: true, max: width - pad * 2, glow: true });
   artT(g, options.title && options.type !== 'notice' ? options.title : typeInfo[1], width / 2, 164 * u, { size: 38, weight: 500, color: theme.muted, spacing: 7, upper: true, body: true, max: width - pad * 2 });
+  const markUrl = options.brandLogo === 'platform' ? '/brand-logo.png' : options.brandLogo === 'custom' ? artAssets.brandLogo : '';
+  const mark = markUrl ? await artImage(markUrl) : null;
+  if (mark) { const size = 92 * u; const scale = Math.min(size / mark.width, size / mark.height); ctx.drawImage(mark, pad, 34 * u + (size - mark.height * scale) / 2, mark.width * scale, mark.height * scale); }
   const body = { x: pad, y: headerH, w: width - pad * 2, h: height - headerH - footerH };
+  await artPrepare(g, extras);
   (ART_DRAWERS[options.type] || ART_DRAWERS.result)(g, body);
   let footerY = height - footerH;
   if (sponsors.length) {
@@ -2644,7 +3248,7 @@ async function renderArt(bundle, options, extras = {}) {
     footerY += 120 * u;
   }
   if (options.brand) {
-    artT(g, 'JUVENTUDE ESPORTE CLUBE', width / 2, height - 66 * u, { size: 32, color: accent, spacing: 8 });
+    artT(g, options.brandName || 'JUVENTUDE ESPORTE CLUBE', width / 2, height - 66 * u, { size: 32, color: accent, spacing: 8, upper: true, max: width - pad * 2 });
     artT(g, location.host, width / 2, height - 26 * u, { size: 22, weight: 500, color: theme.muted, body: true });
   }
   return canvas;
@@ -2685,12 +3289,18 @@ function artDefaults(bundle) {
     const upcoming = matches.find(match => match.status === 'scheduled' || match.status === 'live');
     artOptions.matchId = (artOptions.type === 'matchday' ? upcoming || finished : finished || upcoming)?.id || matches[0]?.id || '';
   }
+  if (!bundle.teams.some(team => team.id === artOptions.teamId)) artOptions.teamId = bundle.teams[0]?.id || '';
+  const athletes = (teamCatalog.find(team => team.id === artOptions.teamId)?.athletes) || [];
+  if (!athletes.some(athlete => athlete.id === artOptions.athleteId)) artOptions.athleteId = athletes[0]?.id || '';
+  if (!bundle.posts.some(post => post.id === artOptions.postId)) artOptions.postId = bundle.posts[0]?.id || '';
+  const dates = [...new Set(matches.map(artMatchDate).filter(Boolean))].sort();
+  if (!dates.includes(artOptions.date)) { const today = artMatchDate({ kickoffAt: new Date().toISOString() }); artOptions.date = dates.find(day => day >= today) || dates[dates.length - 1] || ''; }
   const rounds = [...new Set(matches.map(match => match.round).filter(Boolean))];
   if (!rounds.includes(artOptions.round)) artOptions.round = (artOptions.type === 'round-fixtures' ? matches.find(match => match.status !== 'finished') : [...matches].reverse().find(match => match.status === 'finished'))?.round || rounds[0] || '';
 }
 
 function scheduleArtRender(bundle) {
-  const signature = JSON.stringify([artOptions, bundle.generatedAt, artSponsorImages.length, teamCatalog.length]);
+  const signature = JSON.stringify([artOptions, bundle.generatedAt, artSponsorImages.length, teamCatalog.length, artAssets.bgImage.length, artAssets.brandLogo.length]);
   if (artStudio.sig === signature) return;
   clearTimeout(artTimer);
   artTimer = setTimeout(async () => {
@@ -2707,6 +3317,11 @@ function scheduleArtRender(bundle) {
 
 function scheduleArtRenderSoon() {
   if (artBundle && artBundleFor === artOptions.championshipId) { artDefaults(artBundle); scheduleArtRender(artBundle); }
+}
+
+function artColorField(field, label, fallback) {
+  const base = artOptions[field] || fallback;
+  return `<div class="builder-color-field"><label><input type="color" data-art-field="${field}" value="${safeColor(base, fallback)}"><span>${label}${artOptions[field] ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="${field}|" ${artOptions[field] ? '' : 'disabled'}>Padrão</button></div>`;
 }
 
 function renderArtsModule() {
@@ -2728,12 +3343,17 @@ function renderArtsModule() {
     const rounds = [...new Set(bundle.matches.map(match => match.round).filter(Boolean))];
     const match = bundle.matches.find(item => item.id === artOptions.matchId);
     const kind = typeInfo[3];
-    dataControls = `${kind === 'match' || kind === 'lineup' ? `<div class="field"><label for="art-match">Partida</label><select id="art-match" data-art-field="matchId">${matchOptions}</select></div>` : ''}${kind === 'round' ? `<div class="field"><label for="art-round">Rodada ou fase</label><select id="art-round" data-art-field="round">${rounds.map(round => `<option value="${escapeHtml(round)}" ${round === artOptions.round ? 'selected' : ''}>${escapeHtml(round)}</option>`).join('')}</select></div>` : ''}${kind === 'lineup' && match ? `<div class="field"><label for="art-side">Equipe</label><select id="art-side" data-art-field="side"><option value="home" ${artOptions.side !== 'away' ? 'selected' : ''}>${escapeHtml(match.homeName)}</option><option value="away" ${artOptions.side === 'away' ? 'selected' : ''}>${escapeHtml(match.awayName)}</option></select></div>` : ''}${kind === 'top' ? `<div class="field"><label for="art-top">Quantidade de linhas</label><input id="art-top" type="number" min="3" max="20" data-art-field="topN" value="${artOptions.topN}"></div>` : ''}${kind === 'text' ? '<div class="field"><label for="art-notice-title">Título</label><input id="art-notice-title" data-art-field="title" maxlength="80" value="' + escapeHtml(artOptions.title) + '"></div><div class="field"><label for="art-notice-text">Texto</label><textarea id="art-notice-text" data-art-field="text" maxlength="600" rows="5">' + escapeHtml(artOptions.text) + '</textarea></div>' : kind !== 'text' ? `<div class="field"><label for="art-subtitle">Subtítulo (opcional)</label><input id="art-subtitle" data-art-field="title" maxlength="60" value="${escapeHtml(artOptions.title)}" placeholder="${escapeHtml(typeInfo[1])}"></div>` : ''}`;
+    const teamOptions = bundle.teams.map(team => `<option value="${escapeHtml(team.id)}" ${team.id === artOptions.teamId ? 'selected' : ''}>${escapeHtml(team.name)}</option>`).join('');
+    const roster = (teamCatalog.find(team => team.id === artOptions.teamId)?.athletes) || [];
+    const dates = [...new Set(bundle.matches.map(artMatchDate).filter(Boolean))].sort();
+    const extraControls = `${kind === 'team' || kind === 'athlete' ? `<div class="field"><label for="art-team">Equipe</label><select id="art-team" data-art-field="teamId">${teamOptions}</select></div>` : ''}${kind === 'athlete' ? `<div class="field"><label for="art-athlete">Atleta</label><select id="art-athlete" data-art-field="athleteId">${roster.length ? roster.map(athlete => `<option value="${escapeHtml(athlete.id)}" ${athlete.id === artOptions.athleteId ? 'selected' : ''}>${escapeHtml(`${athlete.number ? `${athlete.number} · ` : ''}${athlete.name}`)}</option>`).join('') : '<option value="">Sem atletas cadastrados</option>'}</select></div>` : ''}${kind === 'date' ? `<div class="field"><label for="art-date">Data</label><select id="art-date" data-art-field="date">${dates.map(day => `<option value="${day}" ${day === artOptions.date ? 'selected' : ''}>${day.split('-').reverse().join('/')}</option>`).join('')}</select></div>` : ''}${kind === 'post' ? `<div class="field"><label for="art-post">Publicação</label><select id="art-post" data-art-field="postId">${bundle.posts.length ? bundle.posts.map(post => `<option value="${escapeHtml(post.id)}" ${post.id === artOptions.postId ? 'selected' : ''}>${escapeHtml(post.title)}</option>`).join('') : '<option value="">Nenhuma publicação</option>'}</select></div>` : ''}`;
+    dataControls = `${extraControls}${kind === 'match' || kind === 'lineup' ? `<div class="field"><label for="art-match">Partida</label><select id="art-match" data-art-field="matchId">${matchOptions}</select></div>` : ''}${kind === 'round' ? `<div class="field"><label for="art-round">Rodada ou fase</label><select id="art-round" data-art-field="round">${rounds.map(round => `<option value="${escapeHtml(round)}" ${round === artOptions.round ? 'selected' : ''}>${escapeHtml(round)}</option>`).join('')}</select></div>` : ''}${kind === 'lineup' && match ? `<div class="field"><label for="art-side">Equipe</label><select id="art-side" data-art-field="side"><option value="home" ${artOptions.side !== 'away' ? 'selected' : ''}>${escapeHtml(match.homeName)}</option><option value="away" ${artOptions.side === 'away' ? 'selected' : ''}>${escapeHtml(match.awayName)}</option></select></div>` : ''}${kind === 'top' ? `<div class="field"><label for="art-top">Quantidade de linhas</label><input id="art-top" type="number" min="3" max="20" data-art-field="topN" value="${artOptions.topN}"></div>` : ''}${kind === 'text' ? '<div class="field"><label for="art-notice-title">Título</label><input id="art-notice-title" data-art-field="title" maxlength="80" value="' + escapeHtml(artOptions.title) + '"></div><div class="field"><label for="art-notice-text">Texto</label><textarea id="art-notice-text" data-art-field="text" maxlength="600" rows="5">' + escapeHtml(artOptions.text) + '</textarea></div>' : kind !== 'text' ? `<div class="field"><label for="art-subtitle">Subtítulo (opcional)</label><input id="art-subtitle" data-art-field="title" maxlength="60" value="${escapeHtml(artOptions.title)}" placeholder="${escapeHtml(typeInfo[1])}"></div>` : ''}`;
   }
-  const batch = bundle && (artOptions.type === 'result' || artOptions.type === 'matchday') ? '<button class="button" data-action="arts-batch">Gerar de todos os jogos da rodada</button>' : '';
+  const batch = `${bundle && (artOptions.type === 'result' || artOptions.type === 'matchday') ? '<button class="button" data-action="arts-batch">Gerar de todos os jogos da rodada</button>' : ''}${bundle ? '<button class="button" data-action="arts-formats">Baixar nos 4 formatos</button>' : ''}`;
   const preview = !bundle ? '<div class="art-placeholder">Carregando dados do campeonato…</div>' : artStudio.error ? `<div class="art-placeholder">${escapeHtml(artStudio.error)}</div>` : artStudio.url ? `<img class="art-canvas" src="${escapeHtml(artStudio.url)}" alt="Prévia da arte" style="aspect-ratio:${artStudio.width}/${artStudio.height}">` : '<div class="art-placeholder">Gerando a arte…</div>';
   if (bundle) scheduleArtRender(bundle);
-  return `<div class="arts-layout"><aside class="arts-controls"><section><h3 class="arts-step"><b>1</b> Tipo de arte</h3><div class="art-types">${typeCards}</div></section><section><h3 class="arts-step"><b>2</b> Dados</h3><div class="field"><label for="art-championship">Campeonato</label><select id="art-championship" data-art-field="championshipId">${championshipOptions}</select></div>${dataControls}</section><section><h3 class="arts-step"><b>3</b> Estilo</h3><div class="art-themes">${themeCards}</div><div class="field"><label>Formato</label><div class="access-chips">${formatChips}</div></div><div class="builder-color-field"><label><input type="color" data-art-field="accent" value="${safeColor(artOptions.accent || (ART_THEMES[artOptions.theme] || ART_THEMES.gold).accent, '#d8ad56')}"><span>Cor de destaque${artOptions.accent ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="accent|" ${artOptions.accent ? '' : 'disabled'}>Padrão</button></div><label class="builder-check"><input type="checkbox" data-art-field="logos" ${artOptions.logos ? 'checked' : ''}> Mostrar escudos</label><label class="builder-check"><input type="checkbox" data-art-field="sponsors" ${artOptions.sponsors ? 'checked' : ''}> Patrocinadores no rodapé${artSponsorImages.length ? '' : ' (cadastre na biblioteca)'}</label><label class="builder-check"><input type="checkbox" data-art-field="brand" ${artOptions.brand ? 'checked' : ''}> Assinatura do clube</label></section></aside>
+  return `<div class="arts-layout"><aside class="arts-controls"><section><h3 class="arts-step"><b>1</b> Tipo de arte</h3><div class="art-types">${typeCards}</div></section><section><h3 class="arts-step"><b>2</b> Dados</h3><div class="field"><label for="art-championship">Campeonato</label><select id="art-championship" data-art-field="championshipId">${championshipOptions}</select></div>${dataControls}</section><section><h3 class="arts-step"><b>3</b> Estilo</h3><div class="art-themes">${themeCards}</div><div class="field"><label>Formato</label><div class="access-chips">${formatChips}</div></div><div class="builder-color-field"><label><input type="color" data-art-field="accent" value="${safeColor(artOptions.accent || (ART_THEMES[artOptions.theme] || ART_THEMES.gold).accent, '#d8ad56')}"><span>Cor de destaque${artOptions.accent ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="accent|" ${artOptions.accent ? '' : 'disabled'}>Padrão</button></div><label class="builder-check"><input type="checkbox" data-art-field="logos" ${artOptions.logos ? 'checked' : ''}> Mostrar escudos</label><label class="builder-check"><input type="checkbox" data-art-field="sponsors" ${artOptions.sponsors ? 'checked' : ''}> Patrocinadores no rodapé${artSponsorImages.length ? '' : ' (cadastre na biblioteca)'}</label><label class="builder-check"><input type="checkbox" data-art-field="brand" ${artOptions.brand ? 'checked' : ''}> Assinatura do clube</label></section>
+    <section><h3 class="arts-step"><b>4</b> Cores, fonte e marca</h3>${artColorField('bg', 'Cor de fundo', '#1a1233')}${artOptions.bg ? artColorField('bg2', 'Segundo tom do fundo', '#07080c') : ''}${artColorField('textColor', 'Cor do texto', '#ffffff')}<div class="field"><label for="art-font">Fonte dos títulos</label><select id="art-font" data-art-field="font">${Object.entries(ART_FONTS).map(([key, font]) => `<option value="${key}" ${artOptions.font === key ? 'selected' : ''}>${font[0]}</option>`).join('')}</select></div><label class="parameter-control"><span>Arredondamento dos blocos <strong>${artOptions.radius}px</strong></span><input type="range" min="0" max="40" value="${artOptions.radius}" data-art-field="radius"></label><div class="field"><label>Imagem de fundo</label><div class="art-upload"><label class="button subtle">${artAssets.bgImage ? 'Trocar imagem' : 'Enviar imagem'}<input type="file" accept="image/png,image/jpeg,image/webp" data-art-upload="bgImage" hidden></label>${artAssets.bgImage ? '<button class="button subtle" data-action="art-clear-upload" data-value="bgImage">Remover</button>' : ''}</div>${artAssets.bgImage ? `<label class="parameter-control"><span>Escurecer a imagem <strong>${artOptions.shade}%</strong></span><input type="range" min="0" max="90" value="${artOptions.shade}" data-art-field="shade"></label>` : ''}</div><div class="field"><label>Logo da marca (canto superior)</label><div class="art-upload"><button class="button subtle ${artOptions.brandLogo === 'platform' ? 'active' : ''}" data-action="arts-set" data-value="brandLogo|platform">Logo do clube</button><label class="button subtle ${artOptions.brandLogo === 'custom' ? 'active' : ''}">Enviar logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-art-upload="brandLogo" hidden></label>${artOptions.brandLogo ? '<button class="button subtle" data-action="arts-set" data-value="brandLogo|">Sem logo</button>' : ''}</div></div><div class="field"><label for="art-brand-name">Nome na assinatura</label><input id="art-brand-name" data-art-field="brandName" maxlength="40" value="${escapeHtml(artOptions.brandName)}" placeholder="JUVENTUDE ESPORTE CLUBE"></div><button class="button subtle" data-action="arts-reset-style">Restaurar estilo padrão</button></section></aside>
     <section class="arts-stage"><div class="arts-actions"><button class="button primary" data-action="arts-download" ${artStudio.blob ? '' : 'disabled'}>Baixar PNG</button><button class="button" data-action="arts-share" ${artStudio.blob ? '' : 'disabled'}>Compartilhar</button>${artStudio.url ? `<a class="button subtle" href="${escapeHtml(artStudio.url)}" target="_blank" rel="noopener">Abrir no tamanho real</a>` : ''}${batch}<span class="help-text">${artStudio.width ? `${artStudio.width} × ${artStudio.height} px · PNG` : ''}</span></div><div class="arts-preview">${preview}</div></section></div>`;
 }
 
@@ -2755,16 +3375,23 @@ function setArtOption(field, value) {
     type: () => ART_TYPES.some(([key]) => key === value), theme: () => Boolean(ART_THEMES[value]), format: () => ART_FORMATS.some(([key]) => key === value),
     side: () => ['home', 'away'].includes(value), accent: () => value === '' || /^#[0-9a-f]{6}$/i.test(value),
     topN: () => Number.isFinite(Number(value)), championshipId: () => true, matchId: () => true, round: () => true, title: () => true, text: () => true,
+    bg: () => value === '' || /^#[0-9a-f]{6}$/i.test(value), bg2: () => value === '' || /^#[0-9a-f]{6}$/i.test(value), textColor: () => value === '' || /^#[0-9a-f]{6}$/i.test(value),
+    font: () => Boolean(ART_FONTS[value]), shade: () => Number.isFinite(Number(value)), radius: () => Number.isFinite(Number(value)), brandName: () => true, brandLogo: () => ['', 'platform', 'custom'].includes(value),
+    teamId: () => true, athleteId: () => true, postId: () => true, date: () => true,
     logos: () => true, sponsors: () => true, brand: () => true,
   };
   if (!allowed[field]?.()) return;
   if (field === 'topN') artOptions.topN = Math.max(3, Math.min(20, Math.round(Number(value))));
   else if (['logos', 'sponsors', 'brand'].includes(field)) artOptions[field] = value === true || value === 'true';
+  else if (field === 'shade') artOptions.shade = Math.max(0, Math.min(90, Math.round(Number(value))));
+  else if (field === 'radius') artOptions.radius = Math.max(0, Math.min(40, Math.round(Number(value))));
+  else if (field === 'brandName') artOptions.brandName = String(value).slice(0, 40);
   else if (field === 'title') artOptions.title = String(value).slice(0, 80);
   else if (field === 'text') artOptions.text = String(value).slice(0, 600);
   else artOptions[field] = value;
   if (field === 'championshipId') { artOptions.matchId = ''; artOptions.round = ''; artBundle = null; artBundleFor = ''; artBundleAt = 0; }
   if (field === 'type') { artOptions.matchId = ''; artOptions.round = ''; }
+  if (field === 'teamId') artOptions.athleteId = '';
   saveArtOptions();
 }
 
@@ -3523,6 +4150,7 @@ function renderModuleControls(key) {
   if (key === 'standings') return renderStandingsModule();
   if (key === 'feed') return renderFeedModule();
   if (key === 'arts') return renderArtsModule();
+  if (key === 'broadcast') return renderBroadcastModule();
   if (key === 'backup') return renderBackupModule();
   let content = '';
   if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : key === 'stats' ? 'overlay-stats' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
@@ -3634,7 +4262,7 @@ function renderModuleHub() {
 const PLATFORM_MENU_GROUPS = [
   ['operation', 'Operação', ['live', 'championships', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
-  ['content', 'Conteúdo', ['arts', 'feed', 'sponsors', 'sponsor-bar', 'builder']],
+  ['content', 'Conteúdo', ['broadcast', 'arts', 'feed', 'sponsors', 'sponsor-bar', 'builder']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
   ['administration', 'Administração', ['access', 'backup']],
 ];
@@ -3669,7 +4297,7 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts'].includes(module?.key);
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts', 'broadcast'].includes(module?.key);
   return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements','live','standings'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${adminSession.role === 'viewer' ? '<div class="library-banner"><div><strong>Acesso somente leitura</strong><p>Seu papel é Leitor: você pode consultar dados e prévias, mas alterações não são salvas.</p></div></div>' : ''}${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
@@ -4194,7 +4822,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-obs-field','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -4359,6 +4987,7 @@ function renderPublicApp() {
 }
 
 function render() {
+  if (isObsPage) return;
   if (isOutput) { renderIsolatedOutput(); return; }
   const remembered = rememberFocusedField();
   if (isPublicPage) {
@@ -4372,6 +5001,7 @@ function render() {
   } else if (isManagement || platformMode) {
     app.innerHTML = renderModuleApp();
   } else app.innerHTML = renderApp();
+  if (isManagement || platformMode) obsFitPreview();
   if (remembered?.selector) {
     const replacement = document.querySelector(remembered.selector);
     if (replacement) {
@@ -4579,6 +5209,40 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'art-standings') { if (standingsBundle) buildQuickArt(standingsBundle, { type: 'standings', championshipId: standingsChampionshipId, format: 'portrait' }).then(canvas => openArt(canvas, `classificacao-${standingsBundle.championship.slug || 'campeonato'}`)); return; }
+  if (action === 'obs-set') {
+    const [field, ...rest] = String(target.dataset.value || '').split('|');
+    setObsOption(field, rest.join('|'));
+    render();
+    return;
+  }
+  if (action === 'obs-replay') { obsReloadFrame(true); return; }
+  if (action === 'obs-copy') {
+    const link = obsUrl(obsOptions, true);
+    (navigator.clipboard?.writeText(link) || Promise.reject()).then(() => toast('Link do OBS copiado.')).catch(() => { document.querySelector('[data-obs-url]')?.select(); toast('Copie o link selecionado (Ctrl+C).'); });
+    return;
+  }
+  if (action === 'art-clear-upload') { artAssets[target.dataset.value === 'brandLogo' ? 'brandLogo' : 'bgImage'] = ''; if (target.dataset.value === 'brandLogo') artOptions.brandLogo = ''; saveArtOptions(); render(); return; }
+  if (action === 'arts-reset-style') {
+    Object.assign(artOptions, { accent: '', bg: '', bg2: '', textColor: '', font: 'barlow', shade: 45, radius: 14, brandName: '', brandLogo: '' });
+    artAssets = { bgImage: '', brandLogo: '' };
+    saveArtOptions(); render();
+    return;
+  }
+  if (action === 'arts-formats') {
+    const bundle = artBundle;
+    if (!bundle) return;
+    toast('Gerando a arte nos 4 formatos…');
+    (async () => {
+      for (const [format] of ART_FORMATS) {
+        const canvas = await buildQuickArt(bundle, { format });
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (blob) downloadBlobFile(`arte-${artOptions.type}-${format}.png`, blob);
+        await new Promise(resolve => setTimeout(resolve, 450));
+      }
+      toast('Artes geradas.');
+    })();
+    return;
+  }
   if (action === 'arts-set') {
     const [field, value = ''] = String(target.dataset.value || '').split('|');
     setArtOption(field, value);
@@ -5908,11 +6572,24 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-obs-field]')) {
+    const field = target.dataset.obsField;
+    setObsOption(field, target.type === 'checkbox' ? (target.checked ? 1 : 0) : target.type === 'range' ? Number(target.value) : target.value);
+    if (field === 'slug') { obsBundle = null; obsBundleFor = ''; render(); return; }
+    const label = document.querySelector(`[data-obs-label="${field}"]`);
+    if (label) label.textContent = `${obsOptions[field]}${target.dataset.suffix || ''}`;
+    if (['group', 'round', 'match', 'font', 'logos'].includes(field)) obsReloadFrame(true); else obsReloadFrame();
+    return;
+  }
   if (target.matches('[data-art-field]')) {
     const field = target.dataset.artField;
     setArtOption(field, target.type === 'checkbox' ? target.checked : target.value);
     if (field === 'championshipId') loadArtBundle(true);
-    if (['title', 'text', 'topN', 'accent'].includes(field)) { clearTimeout(artTimer); scheduleArtRenderSoon(); return; }
+    if (['title', 'text', 'topN', 'accent', 'bg', 'bg2', 'textColor', 'radius', 'shade', 'brandName'].includes(field)) {
+      const output = target.closest('label')?.querySelector('strong');
+      if (output && target.type === 'range') output.textContent = `${artOptions[field]}px`.replace(/px$/, field === 'shade' ? '%' : 'px');
+      clearTimeout(artTimer); scheduleArtRenderSoon(); return;
+    }
     render();
     return;
   }
@@ -6264,6 +6941,15 @@ app.addEventListener('change', event => {
       .catch(() => toast('Não foi possível enviar a imagem.'));
     return;
   }
+  if (target.matches('[data-art-upload]') && target.files?.[0]) {
+    const file = target.files[0];
+    const field = target.dataset.artUpload === 'brandLogo' ? 'brandLogo' : 'bgImage';
+    if (!/^image\/(png|jpe?g|webp|svg\+xml)$/.test(file.type) || file.size > 6_000_000) { toast('Use uma imagem PNG, JPG, WebP ou SVG de até 6 MB.'); return; }
+    const reader = new FileReader();
+    reader.onload = () => { artAssets[field] = String(reader.result); if (field === 'brandLogo') artOptions.brandLogo = 'custom'; saveArtOptions(); render(); };
+    reader.readAsDataURL(file);
+    return;
+  }
   if (target.matches('[data-builder-import]') && target.files?.[0]) {
     const file = target.files[0];
     if (file.size > 1_000_000) { toast('Arquivo grande demais para um overlay exportado.'); return; }
@@ -6602,7 +7288,8 @@ else if (isTeamPortal) document.body.classList.add('team-portal-output');
 if (isPublicPage) document.body.classList.add('public-page', new URLSearchParams(location.search).get('theme') === 'light' ? 'public-light' : 'public-dark');
 render();
 if ((isPublicPage || isTeamPortal) && 'serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-if (isPublicPage) initializePublicPage();
+if (isObsPage) startObsPage();
+else if (isPublicPage) initializePublicPage();
 else if (isTeamPortal) checkTeamSession();
 else {
   if (isAdminPanel) checkAdminSession();
@@ -6619,7 +7306,7 @@ else {
   if (isAdminPanel) { loadPlatformOverlays(); setInterval(() => loadPlatformOverlays(), 10000); }
 }
 setInterval(() => {
-  if (isTeamPortal || isPublicPage) return;
+  if (isTeamPortal || isPublicPage || isObsPage) return;
   if (isOutput) pruneSeenMotionStarts();
   const nextClock = clockText();
   if (nextClock !== lastClock) {

@@ -78,7 +78,9 @@ No Docker, estado e mídias ficam no volume `/app/.data`. Na versão hospedada p
 | `/manage/championships` | Campeonatos: regras, equipes, geração de partidas, divulgação e moderadores |
 | `/manage/standings` | Classificação, artilharia, cartões, súmulas e artes para redes |
 | `/manage/feed` | Notícias, fotos e vídeos por campeonato |
-| `/manage/arts` | Estúdio de artes: peças PNG (10 tipos, 6 estilos, 4 formatos) geradas no navegador |
+| `/manage/arts` | Estúdio de artes: peças PNG (17 tipos, 6 estilos, 4 formatos, cores/fonte/logo/fundo personalizáveis) geradas no navegador |
+| `/manage/broadcast` | Configuração dos overlays de campeonato para OBS (gera o link `/obs/<visão>?…` com prévia) |
+| `/obs/<visão>?c=<slug>&…` | Saída transparente 1920×1080 de tabela, jogos, resultados, artilharia, cartões, jogo em destaque, faixa de placares e campeão; parâmetros por query string; campeonato público |
 | `/campeonatos` | Página pública: busca de campeonatos e organizadores (sem login) |
 | `/c/<slug>` | Página pública de um campeonato (classificação, jogos, artilharia, disciplina, notícias) |
 | `/o/<slug>` | Página pública de um organizador |
