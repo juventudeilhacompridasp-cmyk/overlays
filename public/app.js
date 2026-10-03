@@ -2541,6 +2541,7 @@ const OBS_OPTIONS_KEY = 'juventude.obs.v1';
 let obsOptions = loadObsOptions();
 let obsBundle = null;
 let obsBundleFor = '';
+let obsAutoSlug = '';
 let obsFrameTimer = 0;
 let obsFrameNonce = 0;
 
@@ -2575,7 +2576,15 @@ async function loadObsBundle() {
   if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'broadcast') return;
   const championship = operationsData.championships.find(item => item.slug === obsOptions.slug) || operationsData.championships.find(item => item.status === 'active') || operationsData.championships[0];
   if (!championship) return;
-  if (obsOptions.slug !== championship.slug) { setObsOption('slug', championship.slug); render(); return; }
+  // Campeonato sem slug (cadastros antigos) é referenciado por id; ajusta uma única vez para não re-renderizar em laço.
+  const wantedSlug = championship.slug || '';
+  if (obsOptions.slug !== wantedSlug && obsAutoSlug !== championship.id) {
+    obsAutoSlug = championship.id;
+    setObsOption('slug', wantedSlug);
+    if (!wantedSlug) setObsOption('id', championship.id);
+    render();
+    return;
+  }
   if (obsBundleFor === championship.id) return;
   obsBundleFor = championship.id;
   try {
@@ -6575,7 +6584,7 @@ app.addEventListener('input', event => {
   if (target.matches('[data-obs-field]')) {
     const field = target.dataset.obsField;
     setObsOption(field, target.type === 'checkbox' ? (target.checked ? 1 : 0) : target.type === 'range' ? Number(target.value) : target.value);
-    if (field === 'slug') { obsBundle = null; obsBundleFor = ''; render(); return; }
+    if (field === 'slug') { obsBundle = null; obsBundleFor = ''; obsAutoSlug = ''; render(); return; }
     const label = document.querySelector(`[data-obs-label="${field}"]`);
     if (label) label.textContent = `${obsOptions[field]}${target.dataset.suffix || ''}`;
     if (['group', 'round', 'match', 'font', 'logos'].includes(field)) obsReloadFrame(true); else obsReloadFrame();

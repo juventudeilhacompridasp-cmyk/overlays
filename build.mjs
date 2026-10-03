@@ -216,6 +216,22 @@ async function getOperations(env) {
   return normalizeOperations(await readState(env, '__operations__'));
 }
 
+// Lê, altera e grava o documento de operações só se ninguém gravou no meio (compare-and-swap em updated_at).
+// Em colisão relê a versão mais nova e reaplica a alteração, então edições em itens diferentes não se perdem.
+const OPERATIONS_WRITE_ATTEMPTS = 6;
+async function mutateOperations(env, apply) {
+  for (let attempt = 0; attempt < OPERATIONS_WRITE_ATTEMPTS; attempt += 1) {
+    const current = await getOperations(env);
+    const store = structuredClone(current);
+    const outcome = await apply(store, current);
+    if (outcome && outcome.abort) return outcome;
+    store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
+    const persisted = await persistStateIfCurrent(env, '__operations__', store, Number(current.updatedAt || 0));
+    if (persisted.ok) return { ok: true, store, outcome };
+  }
+  return { ok: false, conflict: true, store: await getOperations(env) };
+}
+
 // Papéis: admin (tudo), operator (transmissão e cadastros, sem usuários/acessos) e viewer (somente leitura).
 // Contas antigas sem o campo continuam com acesso total.
 const ADMIN_ROLES = ['admin', 'operator', 'viewer'];
@@ -462,13 +478,13 @@ export default {
         const credentials = (await readState(env, '__team_credentials__')) || { entries: [] };
         const team = catalog && catalog.teams ? catalog.teams.find(item => item.id === teamId) : null;
         const known = (credentials.entries || []).some(item => item.teamId === teamId && item.username === username);
-        const store = await getOperations(env);
-        const recent = store.notifications.some(item => item.type === 'password-reset' && item.teamId === teamId && !item.read && Date.now() - item.createdAt < 600000);
-        if (team && known && !recent) {
-          store.notifications.unshift({ id: crypto.randomUUID(), type: 'password-reset', teamId, title: team.name + ' pediu redefinição de senha', message: 'Usuário: ' + username + '. Gere uma nova senha em Usuários/Acessos.', read: false, createdAt: Date.now() });
-          store.notifications = store.notifications.slice(0, 200);
-          store.updatedAt = Math.max(Date.now(), Number(store.updatedAt || 0) + 1);
-          await persistState(env, '__operations__', store);
+        if (team && known) {
+          await mutateOperations(env, store => {
+            const recent = store.notifications.some(item => item.type === 'password-reset' && item.teamId === teamId && !item.read && Date.now() - item.createdAt < 600000);
+            if (recent) return { abort: true };
+            store.notifications.unshift({ id: crypto.randomUUID(), type: 'password-reset', teamId, title: team.name + ' pediu redefinição de senha', message: 'Usuário: ' + username + '. Gere uma nova senha em Usuários/Acessos.', read: false, createdAt: Date.now() });
+            store.notifications = store.notifications.slice(0, 200);
+          });
         }
         return Response.json({ ok: true }, { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
@@ -536,119 +552,122 @@ export default {
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
       try {
         const candidate = await request.json();
-        const baseUpdatedAt = Number(candidate.baseUpdatedAt || 0);
-        const current = await getOperations(env);
-        if (baseUpdatedAt !== Number(current.updatedAt || 0)) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: publicOperations(current) }, { status: 409 });
-        store = structuredClone(current);
-        const action = String(candidate.action || '');
-        let actionResult = null;
-        const workerCatalog = (await readState(env, 'team-catalog')) || { teams: [] };
-        if (action === 'upsert-championship') {
+        // As ações são intenções (não o estado inteiro): o servidor as aplica sobre a versão mais recente e, se outro
+        // administrador gravar no meio, relê e reaplica em vez de devolver erro ao usuário.
+        for (let attempt = 0; attempt < OPERATIONS_WRITE_ATTEMPTS; attempt += 1) {
+          const current = await getOperations(env);
+          store = structuredClone(current);
+          const action = String(candidate.action || '');
+          let actionResult = null;
+          const workerCatalog = (await readState(env, 'team-catalog')) || { teams: [] };
+          if (action === 'upsert-championship') {
+            const item = candidate.item || {};
+            const id = safeId(item.id || item.name, 'campeonato-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+            const championship = { id, name: String(item.name || '').trim().slice(0, 100), season: String(item.season || '').trim().slice(0, 40), startDate: String(item.startDate || '').slice(0, 10), endDate: String(item.endDate || '').slice(0, 10), status: ['planned', 'active', 'finished'].includes(item.status) ? item.status : 'planned', updatedAt: Date.now() };
+            if (!championship.name) return Response.json({ ok: false, error: 'Informe o nome do campeonato.' }, { status: 400 });
+            const index = store.championships.findIndex(entry => entry.id === id);
+            const previousChampionship = index >= 0 ? store.championships[index] : null;
+            if (previousChampionship && !competition.canManageChampionship(admin, previousChampionship)) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
+            Object.assign(championship, competition.championshipExtras(item, previousChampionship || {}, safeId));
+            if (admin.role && admin.role !== 'admin' && previousChampionship) championship.moderators = previousChampionship.moderators || [];
+            const slugBase = championship.slug || competition.slugify(championship.name, id);
+            let slug = slugBase; let slugCounter = 2;
+            while (store.championships.some(entry => entry.slug === slug && entry.id !== id)) { slug = slugBase.slice(0, 44) + '-' + slugCounter; slugCounter += 1; }
+            championship.slug = slug;
+            if (index >= 0) store.championships[index] = championship; else store.championships.unshift(championship);
+            addAudit(store, index >= 0 ? 'championship.updated' : 'championship.created', admin.username, championship.name, championship.season);
+          } else if (action === 'delete-championship') {
+            const id = safeId(candidate.id);
+            if (store.matches.some(match => match.championshipId === id)) return Response.json({ ok: false, error: 'O campeonato possui partidas vinculadas.' }, { status: 409 });
+            const existing = store.championships.find(entry => entry.id === id);
+            if (existing && !competition.canManageChampionship(admin, existing)) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
+            store.championships = store.championships.filter(entry => entry.id !== id);
+            store.posts = store.posts.filter(post => post.championshipId !== id);
+            if (existing) addAudit(store, 'championship.deleted', admin.username, existing.name);
+          } else if (action === 'upsert-match') {
+            const item = candidate.item || {};
+            const id = safeId(item.id, 'partida-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+            const previous = store.matches.find(entry => entry.id === id);
+            const roomId = safeId(previous?.room || item.room || id, id).slice(0, 48);
+            if (store.matches.some(entry => entry.room === roomId && entry.id !== id)) return Response.json({ ok: false, error: 'Já existe uma partida usando esta sala.' }, { status: 409 });
+            const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room: roomId, updatedAt: Date.now() };
+            if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) return Response.json({ ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }, { status: 400 });
+            const index = store.matches.findIndex(entry => entry.id === id);
+            if (!competition.canManageChampionship(admin, store.championships.find(entry => entry.id === match.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
+            Object.assign(match, competition.matchExtras(item, previous || {}));
+            if (index >= 0) store.matches[index] = match; else store.matches.unshift(match);
+            addAudit(store, index >= 0 ? 'match.updated' : 'match.created', admin.username, roomId, match.homeTeamId + ' x ' + match.awayTeamId);
+          } else if (action === 'delete-match') {
+            const id = safeId(candidate.id);
+            const existing = store.matches.find(entry => entry.id === id);
+            if (existing && !competition.canManageChampionship(admin, store.championships.find(entry => entry.id === existing.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
+            store.matches = store.matches.filter(entry => entry.id !== id);
+            if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
+          } else if (action === 'upsert-announcement') {
           const item = candidate.item || {};
-          const id = safeId(item.id || item.name, 'campeonato-' + Date.now().toString(36));
-          const championship = { id, name: String(item.name || '').trim().slice(0, 100), season: String(item.season || '').trim().slice(0, 40), startDate: String(item.startDate || '').slice(0, 10), endDate: String(item.endDate || '').slice(0, 10), status: ['planned', 'active', 'finished'].includes(item.status) ? item.status : 'planned', updatedAt: Date.now() };
-          if (!championship.name) return Response.json({ ok: false, error: 'Informe o nome do campeonato.' }, { status: 400 });
-          const index = store.championships.findIndex(entry => entry.id === id);
-          const previousChampionship = index >= 0 ? store.championships[index] : null;
-          if (previousChampionship && !competition.canManageChampionship(admin, previousChampionship)) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
-          Object.assign(championship, competition.championshipExtras(item, previousChampionship || {}, safeId));
-          if (admin.role && admin.role !== 'admin' && previousChampionship) championship.moderators = previousChampionship.moderators || [];
-          const slugBase = championship.slug || competition.slugify(championship.name, id);
-          let slug = slugBase; let slugCounter = 2;
-          while (store.championships.some(entry => entry.slug === slug && entry.id !== id)) { slug = slugBase.slice(0, 44) + '-' + slugCounter; slugCounter += 1; }
-          championship.slug = slug;
-          if (index >= 0) store.championships[index] = championship; else store.championships.unshift(championship);
-          addAudit(store, index >= 0 ? 'championship.updated' : 'championship.created', admin.username, championship.name, championship.season);
-        } else if (action === 'delete-championship') {
+          const title = String(item.title || '').trim().slice(0, 120);
+          const text = String(item.body || '').trim().slice(0, 2000);
+          if (!title || !text) { return Response.json({ ok: false, error: 'Informe título e mensagem.' }, { status: 400 }); }
+          const id = safeId(item.id, 'aviso-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
+          const previous = store.announcements.find(entry => entry.id === id);
+          const entry = { id, title, body: text, teamIds: (Array.isArray(item.teamIds) ? item.teamIds : []).map(safeId).filter(Boolean).slice(0, 100), pinned: Boolean(item.pinned), createdAt: previous ? previous.createdAt : Date.now(), updatedAt: Date.now(), author: admin.username };
+          store.announcements = [entry, ...store.announcements.filter(existing => existing.id !== id)].slice(0, 100);
+          addAudit(store, previous ? 'announcement.updated' : 'announcement.created', admin.username, title, entry.teamIds.length ? entry.teamIds.length + ' equipe(s)' : 'Todas as equipes');
+            } else if (action === 'delete-announcement') {
           const id = safeId(candidate.id);
-          if (store.matches.some(match => match.championshipId === id)) return Response.json({ ok: false, error: 'O campeonato possui partidas vinculadas.' }, { status: 409 });
-          const existing = store.championships.find(entry => entry.id === id);
-          if (existing && !competition.canManageChampionship(admin, existing)) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
-          store.championships = store.championships.filter(entry => entry.id !== id);
-          store.posts = store.posts.filter(post => post.championshipId !== id);
-          if (existing) addAudit(store, 'championship.deleted', admin.username, existing.name);
-        } else if (action === 'upsert-match') {
-          const item = candidate.item || {};
-          const id = safeId(item.id, 'partida-' + Date.now().toString(36));
-          const previous = store.matches.find(entry => entry.id === id);
-          const roomId = safeId(previous?.room || item.room || id, id).slice(0, 48);
-          if (store.matches.some(entry => entry.room === roomId && entry.id !== id)) return Response.json({ ok: false, error: 'Já existe uma partida usando esta sala.' }, { status: 409 });
-          const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room: roomId, updatedAt: Date.now() };
-          if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) return Response.json({ ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }, { status: 400 });
-          const index = store.matches.findIndex(entry => entry.id === id);
-          if (!competition.canManageChampionship(admin, store.championships.find(entry => entry.id === match.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
-          Object.assign(match, competition.matchExtras(item, previous || {}));
-          if (index >= 0) store.matches[index] = match; else store.matches.unshift(match);
-          addAudit(store, index >= 0 ? 'match.updated' : 'match.created', admin.username, roomId, match.homeTeamId + ' x ' + match.awayTeamId);
-        } else if (action === 'delete-match') {
-          const id = safeId(candidate.id);
-          const existing = store.matches.find(entry => entry.id === id);
-          if (existing && !competition.canManageChampionship(admin, store.championships.find(entry => entry.id === existing.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
-          store.matches = store.matches.filter(entry => entry.id !== id);
-          if (existing) addAudit(store, 'match.deleted', admin.username, existing.room);
-        } else if (action === 'upsert-announcement') {
-        const item = candidate.item || {};
-        const title = String(item.title || '').trim().slice(0, 120);
-        const text = String(item.body || '').trim().slice(0, 2000);
-        if (!title || !text) { return Response.json({ ok: false, error: 'Informe título e mensagem.' }, { status: 400 }); }
-        const id = safeId(item.id, 'aviso-' + Date.now().toString(36));
-        const previous = store.announcements.find(entry => entry.id === id);
-        const entry = { id, title, body: text, teamIds: (Array.isArray(item.teamIds) ? item.teamIds : []).map(safeId).filter(Boolean).slice(0, 100), pinned: Boolean(item.pinned), createdAt: previous ? previous.createdAt : Date.now(), updatedAt: Date.now(), author: admin.username };
-        store.announcements = [entry, ...store.announcements.filter(existing => existing.id !== id)].slice(0, 100);
-        addAudit(store, previous ? 'announcement.updated' : 'announcement.created', admin.username, title, entry.teamIds.length ? entry.teamIds.length + ' equipe(s)' : 'Todas as equipes');
-          } else if (action === 'delete-announcement') {
-        const id = safeId(candidate.id);
-        const existing = store.announcements.find(entry => entry.id === id);
-        store.announcements = store.announcements.filter(entry => entry.id !== id);
-        if (existing) addAudit(store, 'announcement.deleted', admin.username, existing.title);
-        } else if (action === 'review-delegation') {
-          const teamId = safeId(candidate.teamId);
-          const reviewedTeam = workerCatalog.teams.find(entry => entry.id === teamId);
-          if (!reviewedTeam) return Response.json({ ok: false, error: 'Equipe não encontrada.' }, { status: 404 });
-          const decision = candidate.decision === 'approved' ? 'approved' : 'returned';
-          const comment = String(candidate.comment || '').trim().slice(0, 300);
-          if (decision === 'returned' && !comment) return Response.json({ ok: false, error: 'Informe o motivo da devolução.' }, { status: 400 });
-          store.delegationStatus[teamId] = { ...(store.delegationStatus[teamId] || {}), status: decision === 'approved' ? 'approved' : 'needs-review', reviewComment: comment, reviewedAt: Date.now(), reviewedBy: admin.username };
-          addAudit(store, decision === 'approved' ? 'delegation.approved' : 'delegation.returned', admin.username, reviewedTeam.name, comment);
-        } else if (action === 'restore-team-version') {
-          const teamId = safeId(candidate.teamId);
-          const versionId = String(candidate.versionId || '').replace(/[^a-z0-9-]/gi, '');
-          const restoredTeam = workerCatalog.teams.find(entry => entry.id === teamId);
-          const version = (store.teamHistory[teamId] || []).find(entry => entry.id === versionId);
-          if (!restoredTeam || !version) return Response.json({ ok: false, error: 'Versão não encontrada.' }, { status: 404 });
-          snapshotTeam(store, restoredTeam, admin.username);
-          Object.assign(restoredTeam, structuredClone(version.team));
-          workerCatalog.updatedAt = Date.now();
-          await persistState(env, 'team-catalog', workerCatalog);
-          addAudit(store, 'team.restored', admin.username, restoredTeam.name, 'Versão de ' + new Date(version.at).toISOString().slice(0, 16).replace('T', ' '));
-        } else if (action === 'mark-notification-read') {
-          const notification = store.notifications.find(entry => entry.id === candidate.id);
-          if (notification) notification.read = true;
-        } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post'].includes(action)) {
-          const context = { safeId, now: () => Date.now(), addAudit };
-          let outcome;
-          if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
-          else if (action === 'generate-next-round') {
-            const target = store.championships.find(entry => entry.id === safeId(candidate.championshipId));
-            const list = target ? store.matches.filter(match => match.championshipId === target.id) : [];
-            const names = Object.fromEntries(((workerCatalog && workerCatalog.teams) || []).map(team => [team.id, team.name]));
-            const { resultsByMatch, eventsByMatch } = await competition.collectResults(list, room => readState(env, room));
-            const stats = competition.aggregateStats(list, eventsByMatch, target && target.rules, names);
-            outcome = competition.generateNextRound(store, candidate, admin, { ...context, resultsByMatch, names, cardsByTeam: stats.cardsByTeam });
-          } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
-          else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
-          else outcome = competition.deletePost(store, candidate, admin, context);
-          if (outcome.error) return Response.json({ ok: false, error: outcome.error }, { status: outcome.status || 400 });
-          actionResult = outcome;
-        } else if (action === 'mark-all-notifications-read') {
-          store.notifications.forEach(entry => { entry.read = true; });
-        } else {
-          return Response.json({ ok: false, error: 'Ação inválida.' }, { status: 400 });
+          const existing = store.announcements.find(entry => entry.id === id);
+          store.announcements = store.announcements.filter(entry => entry.id !== id);
+          if (existing) addAudit(store, 'announcement.deleted', admin.username, existing.title);
+          } else if (action === 'review-delegation') {
+            const teamId = safeId(candidate.teamId);
+            const reviewedTeam = workerCatalog.teams.find(entry => entry.id === teamId);
+            if (!reviewedTeam) return Response.json({ ok: false, error: 'Equipe não encontrada.' }, { status: 404 });
+            const decision = candidate.decision === 'approved' ? 'approved' : 'returned';
+            const comment = String(candidate.comment || '').trim().slice(0, 300);
+            if (decision === 'returned' && !comment) return Response.json({ ok: false, error: 'Informe o motivo da devolução.' }, { status: 400 });
+            store.delegationStatus[teamId] = { ...(store.delegationStatus[teamId] || {}), status: decision === 'approved' ? 'approved' : 'needs-review', reviewComment: comment, reviewedAt: Date.now(), reviewedBy: admin.username };
+            addAudit(store, decision === 'approved' ? 'delegation.approved' : 'delegation.returned', admin.username, reviewedTeam.name, comment);
+          } else if (action === 'restore-team-version') {
+            const teamId = safeId(candidate.teamId);
+            const versionId = String(candidate.versionId || '').replace(/[^a-z0-9-]/gi, '');
+            const restoredTeam = workerCatalog.teams.find(entry => entry.id === teamId);
+            const version = (store.teamHistory[teamId] || []).find(entry => entry.id === versionId);
+            if (!restoredTeam || !version) return Response.json({ ok: false, error: 'Versão não encontrada.' }, { status: 404 });
+            snapshotTeam(store, restoredTeam, admin.username);
+            Object.assign(restoredTeam, structuredClone(version.team));
+            workerCatalog.updatedAt = Date.now();
+            await persistState(env, 'team-catalog', workerCatalog);
+            addAudit(store, 'team.restored', admin.username, restoredTeam.name, 'Versão de ' + new Date(version.at).toISOString().slice(0, 16).replace('T', ' '));
+          } else if (action === 'mark-notification-read') {
+            const notification = store.notifications.find(entry => entry.id === candidate.id);
+            if (notification) notification.read = true;
+          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post'].includes(action)) {
+            const context = { safeId, now: () => Date.now(), addAudit };
+            let outcome;
+            if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
+            else if (action === 'generate-next-round') {
+              const target = store.championships.find(entry => entry.id === safeId(candidate.championshipId));
+              const list = target ? store.matches.filter(match => match.championshipId === target.id) : [];
+              const names = Object.fromEntries(((workerCatalog && workerCatalog.teams) || []).map(team => [team.id, team.name]));
+              const { resultsByMatch, eventsByMatch } = await competition.collectResults(list, room => readState(env, room));
+              const stats = competition.aggregateStats(list, eventsByMatch, target && target.rules, names);
+              outcome = competition.generateNextRound(store, candidate, admin, { ...context, resultsByMatch, names, cardsByTeam: stats.cardsByTeam });
+            } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
+            else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
+            else outcome = competition.deletePost(store, candidate, admin, context);
+            if (outcome.error) return Response.json({ ok: false, error: outcome.error }, { status: outcome.status || 400 });
+            actionResult = outcome;
+          } else if (action === 'mark-all-notifications-read') {
+            store.notifications.forEach(entry => { entry.read = true; });
+          } else {
+            return Response.json({ ok: false, error: 'Ação inválida.' }, { status: 400 });
+          }
+          store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
+          const persisted = await persistStateIfCurrent(env, '__operations__', store, Number(current.updatedAt || 0));
+          if (!persisted.ok) continue;
+          return Response.json({ ok: true, operations: publicOperations(store), result: actionResult }, { headers: { 'cache-control': 'no-store' } });
         }
-        store.updatedAt = Math.max(Date.now(), Number(current.updatedAt || 0) + 1);
-        const persisted = await persistStateIfCurrent(env, '__operations__', store, baseUpdatedAt);
-        if (!persisted.ok) return Response.json({ ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: publicOperations(normalizeOperations(persisted.state)) }, { status: 409 });
-        return Response.json({ ok: true, operations: publicOperations(store), result: actionResult }, { headers: { 'cache-control': 'no-store' } });
+        return Response.json({ ok: false, error: 'Muitas alterações simultâneas. Tente novamente.', operations: publicOperations(await getOperations(env)) }, { status: 409 });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }
     if (url.pathname.startsWith('/api/public/')) {
@@ -696,15 +715,16 @@ export default {
         if (!team) return Response.json({ ok: false, error: 'Equipe não encontrada.' }, { status: 404 });
         const check = delegationCheck(team);
         if (!check.complete) return Response.json({ ok: false, error: 'Complete os campos obrigatórios antes de concluir.', missing: check.missing }, { status: 409 });
-        const store = await getOperations(env);
-        const actor = admin?.username || teamSession?.username || team.name;
         const completedAt = Date.now();
-        store.delegationStatus[team.id] = { status: 'completed', completedAt, completedBy: actor };
-        store.notifications.unshift({ id: crypto.randomUUID(), type: 'delegation-completed', teamId: team.id, title: team.name + ' concluiu a delegação', message: (team.athletes?.length || 0) + ' atletas e ' + (team.staff?.length || 0) + ' membros da comissão foram confirmados.', read: false, createdAt: completedAt });
-        store.notifications = store.notifications.slice(0, 200);
-        addAudit(store, 'delegation.completed', actor, team.name, (team.athletes?.length || 0) + ' atletas; ' + (team.staff?.length || 0) + ' membros da comissão.');
-        store.updatedAt = completedAt;
-        await persistState(env, '__operations__', store);
+        const actor = admin?.username || teamSession?.username || team.name;
+        const saved = await mutateOperations(env, store => {
+          store.delegationStatus[team.id] = { status: 'completed', completedAt, completedBy: actor };
+          store.notifications.unshift({ id: crypto.randomUUID(), type: 'delegation-completed', teamId: team.id, title: team.name + ' concluiu a delegação', message: (team.athletes?.length || 0) + ' atletas e ' + (team.staff?.length || 0) + ' membros da comissão foram confirmados.', read: false, createdAt: completedAt });
+          store.notifications = store.notifications.slice(0, 200);
+          addAudit(store, 'delegation.completed', actor, team.name, (team.athletes?.length || 0) + ' atletas; ' + (team.staff?.length || 0) + ' membros da comissão.');
+        });
+        if (!saved.ok) return Response.json({ ok: false, error: 'Não foi possível salvar agora. Tente novamente.' }, { status: 409 });
+        const store = saved.store;
         return Response.json({ ok: true, delegation: store.delegationStatus[team.id] }, { headers: { 'cache-control': 'no-store' } });
       } catch (error) { return Response.json({ ok: false, error: error.message }, { status: 400 }); }
     }

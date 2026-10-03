@@ -14,7 +14,31 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 - Escreva para quem **não viu o diff nem a conversa**. Não basta dizer "atualizado app.js";
   descreva o comportamento novo, o que ele substitui, e qualquer contrato que passou a valer
   (ex.: "`PUT /api/teams` agora exige sessão de administrador; `GET` continua público").
-- Use a subseção certa dentro de `## [Não publicado]
+- Use a subseção certa dentro de `## [Não publicado]`: `Adicionado`, `Alterado`, `Corrigido`,
+  `Removido` ou `Segurança`. Crie a subseção se ela ainda não existir no ciclo atual. Não crie
+  categorias fora dessas cinco.
+- Corrija a própria entrada no mesmo commit se a mudança for revista antes do push. Não deixe
+  entradas desatualizadas ou contraditórias com o comportamento final.
+- Ao publicar (merge na main que efetivamente vai para o GPT Sites), mova o conteúdo de
+  `[Não publicado]` para uma seção `## [versão] - AAAA-MM-DD` e deixe `[Não publicado]` vazio
+  (sem títulos de subseção) para o próximo ciclo.
+- Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
+## [Não publicado]
+
+- **Compatibilidade do Builder**: overlays criados antes (campos `layout`, `title`, `subtitle`, `media`, `animation`, `background`, `accent`, `textColor`) são convertidos ao carregar em elementos equivalentes (fundo, mídia, faixa de destaque, título e texto), mantendo aparência e animação aproximadas; os campos antigos continuam no estado, mas a edição e a saída passam a usar `elements`. Os controles antigos de largura/altura/título foram substituídos pelo editor visual. O limite de upload de assets `custom-*` subiu para 25 MB no Node e no Worker (antes valia 5 MB no servidor apesar de a interface anunciar 50 MB).
+- **Refinamento visual do painel administrativo** (só CSS em `public/styles.css`, mais a classe `stat-<status>` nos cartões de status do Dashboard em app.js). Overlays, saídas do OBS e composição 1920×1080 não usam estas regras. Novos tokens: `--ui` (Roboto hospedada para o texto), `--heading` (Barlow Condensed para títulos, números e marca, estilo painel esportivo), `--radius`, `--shadow-card`, `--ring` e neutros ligeiramente reequilibrados. Mudanças: barra superior com desfoque e fio dourado; botões com hierarquia (primário em gradiente, foco visível por teclado); campos de 40 px; cartões com profundidade; títulos de página em caixa alta condensada; menu lateral mais denso, com barra dourada no item ativo e separadores de grupo; cartões da Central de módulos compactos; Dashboard com indicadores coloridos por status (Ao vivo em vermelho pulsante, Agendadas em azul, Finalizadas em verde); abas dos módulos como controle segmentado; tela de entrada compacta e centralizada. Textos de apoio que eram 9–11 px agora têm 11–12 px. `.broadcast-layer` mantém a fonte anterior para a prévia continuar idêntica à saída. Corrigido: `--font-ui`/`--ui-font` eram usados sem definição. Responsivo: o grid do Dashboard e das operações passa para uma coluna abaixo de 980 px (antes estourava a largura em celulares).
+
+- **Fonte global de verdade**: as fontes individuais de cada overlay (`*Typeface`) agora têm o valor padrão `global` e seguem `state.typeface`; ao escolher a fonte global em Aparência, todas as individuais são redefinidas para `global` (depois é possível sobrepor uma a uma; o seletor ganhou "Fonte global do projeto"). Estados antigos com valor explícito (ex.: `rajdhani`) continuam iguais até o usuário escolher uma fonte global.
+- Tela Usuários/Acessos (`/manage/access`) reconstruída: indicadores (administradores, times com acesso, usuários de
+  times, pedidos de senha), alerta de pedidos de redefinição (`password-reset`) com "Gerar nova senha", busca por equipe
+  ou usuário, filtro Todos/Com acesso/Sem acesso, cartões de administradores (selo "você", criação, último acesso,
+  redefinição de senha; a própria conta e o último administrador não podem ser removidos) e cartões por equipe com todos
+  os usuários, último acesso, redefinir/remover usuário, criação do primeiro acesso e medidor de força da senha.
+  A senha gerada (12 caracteres) é exibida uma única vez e copiada junto com o link e as instruções de acesso.
+  Continuam valendo os textos "Administradores do painel" e "Usuários dos times" e os ids dos campos de cadastro.
+- Backend (Node e Worker): as listas de administradores devolvem `createdAt` e `lastLoginAt`; o login de administrador
+  e de equipe grava `lastLoginAt` (também exposto em `GET /api/auth/team/credentials`); novo `PUT /api/auth/admin/accounts`
+  (`id`, `password`) redefine a senha de um administrador. Não altera sessões nem o formato das senhas.
 
 ### Adicionado
 - **Estúdio de artes** (`/manage/arts`, grupo Conteúdo do menu): módulo exclusivo que gera peças PNG para redes sociais no navegador (canvas), sem novas rotas ou dados no servidor. Usa o mesmo bundle público `/api/public/championship?id=` (partidas, classificação, grupos, artilharia, cartões, publicações) e o catálogo de times (atletas e escalações). Escolhas do usuário: **17 tipos de arte, uma para cada informação da plataforma** (resultado, jogo do dia, rodada·resultados, rodada·próximos jogos, classificação, artilharia, cartões e suspensos, tabelas dos grupos, ficha da equipe, escalação confirmada, elenco completo, cartão do atleta com foto, agenda do dia, parceiros e patrocinadores, notícia, campeão, aviso livre); 6 estilos (Noite dourada, Gramado, Neon, Jornal, Diagonal, Minimalista); 4 formatos (feed 1:1 1080×1080, retrato 4:5 1080×1350, stories 9:16 1080×1920, paisagem 16:9 1920×1080). **Personalização:** cor de destaque, cor de fundo (+ segundo tom), cor do texto, fonte dos títulos (Barlow Condensed, Oswald, Bebas Neue, Montserrat, Roboto), arredondamento dos blocos, imagem de fundo enviada (com escurecimento), logo da marca (logo do clube ou imagem enviada), nome na assinatura, escudos, faixa de patrocinadores. Imagens enviadas viram `data:image/…` apenas em memória (não são persistidas nem enviadas ao servidor; o canvas só aceita URLs same-origin ou `data:image/` para não ficar contaminado). Prévia ao vivo, baixar PNG, compartilhar (Web Share com arquivo), lote para todos os jogos da rodada e "Baixar nos 4 formatos". Opções de texto/cor ficam só em `localStorage` (`juventude.artes.v1`).
@@ -76,32 +100,12 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 
 ### Alterado
 - As artes de resultado e classificação do módulo de Classificação (`art-result`/`art-standings`) agora usam o renderizador do Estúdio (`renderArt`); a gaveta continua existindo e aponta para o Estúdio. Escudos externos (URL não same-origin) continuam fora das artes para não contaminar o canvas.
-`: `Adicionado`, `Alterado`, `Corrigido`,
-  `Removido` ou `Segurança`. Crie a subseção se ela ainda não existir no ciclo atual. Não crie
-  categorias fora dessas cinco.
-- Corrija a própria entrada no mesmo commit se a mudança for revista antes do push. Não deixe
-  entradas desatualizadas ou contraditórias com o comportamento final.
-- Ao publicar (merge na main que efetivamente vai para o GPT Sites), mova o conteúdo de
-  `[Não publicado]` para uma seção `## [versão] - AAAA-MM-DD` e deixe `[Não publicado]` vazio
-  (sem títulos de subseção) para o próximo ciclo.
-- Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
+- **Escritas simultâneas de administradores** (`POST /api/operations`, `POST /api/team-delegation/complete`, pedido de redefinição de senha de equipe). As ações já eram intenções (ex.: `set-result`, `upsert-match`), mas o servidor recusava com 409 qualquer cliente cujo `baseUpdatedAt` estivesse velho, mesmo quando a edição era em outro item. Agora o `baseUpdatedAt` enviado pelo cliente é aceito mas ignorado: no Worker a ação é aplicada sobre a versão mais recente de `__operations__` e gravada só se `updated_at` não mudou (compare-and-swap), com até 6 releituras/reaplicações (helper `mutateOperations` e laço em `/api/operations`); no Node a alteração é síncrona no processo. Se as tentativas se esgotarem a resposta é 409 com `operations` atualizado. Contrato mantido: formato dos dados, URLs, rooms e tokens não mudaram. Edições na mesma entidade seguem "última gravação vence". `PUT /api/teams` (catálogo inteiro) continua exigindo `baseUpdatedAt` atual.
+- **Gravação em disco do Node** (`server.mjs`): `persist()` passou a usar fila e escrita atômica (arquivo temporário + `rename`), evitando arquivo corrompido quando duas requisições gravam ao mesmo tempo.
 
-## [Não publicado]
-
-- **Compatibilidade do Builder**: overlays criados antes (campos `layout`, `title`, `subtitle`, `media`, `animation`, `background`, `accent`, `textColor`) são convertidos ao carregar em elementos equivalentes (fundo, mídia, faixa de destaque, título e texto), mantendo aparência e animação aproximadas; os campos antigos continuam no estado, mas a edição e a saída passam a usar `elements`. Os controles antigos de largura/altura/título foram substituídos pelo editor visual. O limite de upload de assets `custom-*` subiu para 25 MB no Node e no Worker (antes valia 5 MB no servidor apesar de a interface anunciar 50 MB).
-- **Refinamento visual do painel administrativo** (só CSS em `public/styles.css`, mais a classe `stat-<status>` nos cartões de status do Dashboard em app.js). Overlays, saídas do OBS e composição 1920×1080 não usam estas regras. Novos tokens: `--ui` (Roboto hospedada para o texto), `--heading` (Barlow Condensed para títulos, números e marca, estilo painel esportivo), `--radius`, `--shadow-card`, `--ring` e neutros ligeiramente reequilibrados. Mudanças: barra superior com desfoque e fio dourado; botões com hierarquia (primário em gradiente, foco visível por teclado); campos de 40 px; cartões com profundidade; títulos de página em caixa alta condensada; menu lateral mais denso, com barra dourada no item ativo e separadores de grupo; cartões da Central de módulos compactos; Dashboard com indicadores coloridos por status (Ao vivo em vermelho pulsante, Agendadas em azul, Finalizadas em verde); abas dos módulos como controle segmentado; tela de entrada compacta e centralizada. Textos de apoio que eram 9–11 px agora têm 11–12 px. `.broadcast-layer` mantém a fonte anterior para a prévia continuar idêntica à saída. Corrigido: `--font-ui`/`--ui-font` eram usados sem definição. Responsivo: o grid do Dashboard e das operações passa para uma coluna abaixo de 980 px (antes estourava a largura em celulares).
-
-- **Fonte global de verdade**: as fontes individuais de cada overlay (`*Typeface`) agora têm o valor padrão `global` e seguem `state.typeface`; ao escolher a fonte global em Aparência, todas as individuais são redefinidas para `global` (depois é possível sobrepor uma a uma; o seletor ganhou "Fonte global do projeto"). Estados antigos com valor explícito (ex.: `rajdhani`) continuam iguais até o usuário escolher uma fonte global.
-- Tela Usuários/Acessos (`/manage/access`) reconstruída: indicadores (administradores, times com acesso, usuários de
-  times, pedidos de senha), alerta de pedidos de redefinição (`password-reset`) com "Gerar nova senha", busca por equipe
-  ou usuário, filtro Todos/Com acesso/Sem acesso, cartões de administradores (selo "você", criação, último acesso,
-  redefinição de senha; a própria conta e o último administrador não podem ser removidos) e cartões por equipe com todos
-  os usuários, último acesso, redefinir/remover usuário, criação do primeiro acesso e medidor de força da senha.
-  A senha gerada (12 caracteres) é exibida uma única vez e copiada junto com o link e as instruções de acesso.
-  Continuam valendo os textos "Administradores do painel" e "Usuários dos times" e os ids dos campos de cadastro.
-- Backend (Node e Worker): as listas de administradores devolvem `createdAt` e `lastLoginAt`; o login de administrador
-  e de equipe grava `lastLoginAt` (também exposto em `GET /api/auth/team/credentials`); novo `PUT /api/auth/admin/accounts`
-  (`id`, `password`) redefine a senha de um administrador. Não altera sessões nem o formato das senhas.
+### Corrigido
+- **Tela "Overlays de campeonato" (`/manage/broadcast`) travava a aba** quando algum campeonato não tinha `slug` (cadastros antigos): `loadObsBundle` comparava `obsOptions.slug` com `undefined` e chamava `render()` em laço infinito. Agora o ajuste de alvo ocorre uma única vez por campeonato (`obsAutoSlug`) e campeonatos sem slug passam a usar `?id=<id>` no link do OBS.
+- **Ids duplicados em criações no mesmo milissegundo**: avisos, partidas e campeonatos sem nome usavam só `Date.now()` no id padrão e se sobrescreviam; agora levam sufixo aleatório (Node e Worker).
 
 ## [32] - 2026-09-29
 

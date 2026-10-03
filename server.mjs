@@ -18,9 +18,18 @@ try {
   if (error.code !== 'ENOENT') process.stderr.write(`Could not read saved overlay state: ${error.message}\n`);
 }
 
-async function persist() {
-  await fs.mkdir(path.dirname(storagePath), { recursive: true });
-  await fs.writeFile(storagePath, JSON.stringify({ __rooms: sharedStates }), 'utf8');
+// Gravações em fila e atômicas (arquivo temporário + rename): duas requisições simultâneas não intercalam bytes no mesmo arquivo.
+let persistQueue = Promise.resolve();
+function persist() {
+  const run = async () => {
+    await fs.mkdir(path.dirname(storagePath), { recursive: true });
+    const temporary = `${storagePath}.${process.pid}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify({ __rooms: sharedStates }), 'utf8');
+    await fs.rename(temporary, storagePath);
+  };
+  const result = persistQueue.then(run, run);
+  persistQueue = result.catch(() => {});
+  return result;
 }
 
 sharedStates.__admins__ ||= { accounts: [], updatedAt: 0 };
@@ -470,16 +479,13 @@ const server = http.createServer(async (request, response) => {
     try {
       const candidate = JSON.parse(await readBody(request));
       const current = operationsStore();
-      if (Number(candidate.baseUpdatedAt || 0) !== Number(current.updatedAt || 0)) {
-        sendJson(response, 409, { ok: false, error: 'Os dados foram atualizados por outro administrador.', operations: publicOperations(current) });
-        return;
-      }
+      // A ação é aplicada sobre a versão mais recente (a alteração abaixo é síncrona, sem corrida no processo).
       store = structuredClone(current);
       const action = String(candidate.action || '');
       let actionResult = null;
       if (action === 'upsert-championship') {
         const item = candidate.item || {};
-        const id = safeId(item.id || item.name, `campeonato-${Date.now().toString(36)}`);
+        const id = safeId(item.id || item.name, `campeonato-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`);
         const championship = { id, name: String(item.name || '').trim().slice(0, 100), season: String(item.season || '').trim().slice(0, 40), startDate: String(item.startDate || '').slice(0, 10), endDate: String(item.endDate || '').slice(0, 10), status: ['planned', 'active', 'finished'].includes(item.status) ? item.status : 'planned', updatedAt: Date.now() };
         if (!championship.name) { sendJson(response, 400, { ok: false, error: 'Informe o nome do campeonato.' }); return; }
         const index = store.championships.findIndex(entry => entry.id === id);
@@ -503,7 +509,7 @@ const server = http.createServer(async (request, response) => {
         if (existing) addAudit(store, 'championship.deleted', admin.username, existing.name);
       } else if (action === 'upsert-match') {
         const item = candidate.item || {};
-        const id = safeId(item.id, `partida-${Date.now().toString(36)}`);
+        const id = safeId(item.id, `partida-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`);
         const previous = store.matches.find(entry => entry.id === id);
         const room = safeId(previous?.room || item.room || id, id).slice(0, 48);
         if (store.matches.some(entry => entry.room === room && entry.id !== id)) { sendJson(response, 409, { ok: false, error: 'Já existe uma partida usando esta sala.' }); return; }
@@ -525,7 +531,7 @@ const server = http.createServer(async (request, response) => {
         const title = String(item.title || '').trim().slice(0, 120);
         const text = String(item.body || '').trim().slice(0, 2000);
         if (!title || !text) { sendJson(response, 400, { ok: false, error: 'Informe título e mensagem.' }); return; }
-        const id = safeId(item.id, 'aviso-' + Date.now().toString(36));
+        const id = safeId(item.id, 'aviso-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5));
         const previous = store.announcements.find(entry => entry.id === id);
         const entry = { id, title, body: text, teamIds: (Array.isArray(item.teamIds) ? item.teamIds : []).map(safeId).filter(Boolean).slice(0, 100), pinned: Boolean(item.pinned), createdAt: previous ? previous.createdAt : Date.now(), updatedAt: Date.now(), author: admin.username };
         store.announcements = [entry, ...store.announcements.filter(existing => existing.id !== id)].slice(0, 100);
