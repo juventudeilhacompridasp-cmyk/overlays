@@ -14,19 +14,11 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
 - Escreva para quem **não viu o diff nem a conversa**. Não basta dizer "atualizado app.js";
   descreva o comportamento novo, o que ele substitui, e qualquer contrato que passou a valer
   (ex.: "`PUT /api/teams` agora exige sessão de administrador; `GET` continua público").
-- Use a subseção certa dentro de `## [Não publicado]`: `Adicionado`, `Alterado`, `Corrigido`,
-  `Removido` ou `Segurança`. Crie a subseção se ela ainda não existir no ciclo atual. Não crie
-  categorias fora dessas cinco.
-- Corrija a própria entrada no mesmo commit se a mudança for revista antes do push. Não deixe
-  entradas desatualizadas ou contraditórias com o comportamento final.
-- Ao publicar (merge na main que efetivamente vai para o GPT Sites), mova o conteúdo de
-  `[Não publicado]` para uma seção `## [versão] - AAAA-MM-DD` e deixe `[Não publicado]` vazio
-  (sem títulos de subseção) para o próximo ciclo.
-- Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
-
-## [Não publicado]
+- Use a subseção certa dentro de `## [Não publicado]
 
 ### Adicionado
+- **Estúdio de artes** (`/manage/arts`, grupo Conteúdo do menu): módulo exclusivo que gera peças PNG para redes sociais no navegador (canvas), sem novas rotas ou dados no servidor. Usa o mesmo bundle público `/api/public/championship?id=` (partidas, classificação, artilharia, cartões) e o catálogo de times (escalações). Escolhas do usuário: 10 tipos (resultado, jogo do dia, rodada·resultados, rodada·próximos jogos, classificação, artilharia, cartões e suspensos, escalação confirmada, campeão, aviso livre), 6 estilos (Noite dourada, Gramado, Neon, Jornal, Diagonal, Minimalista), 4 formatos (feed 1080×1080, retrato 1080×1350, stories 1080×1920, paisagem 1920×1080), cor de destaque, escudos, faixa de patrocinadores (biblioteca `biblioteca-patrocinios`, só imagens same-origin) e assinatura. Prévia ao vivo, baixar PNG, compartilhar (Web Share com arquivo) e geração em lote para todos os jogos da rodada. Opções ficam só em `localStorage` (`juventude.artes.v1`).
+- O hub de módulos passa a listar 23 cartões.
 
 - **Competição completa (mapeamento em docs/MAPEAMENTO_FUNCIONALIDADES.md)**. Nova biblioteca `competition.mjs` com as regras de competição, compartilhada por `server.mjs` (import) e pelo Worker (inlinada por `build.mjs`). Campeonatos ganham `slug`, `sport`, `format` (`league|groups|knockout`), `rules` (`pointsWin/Draw/Loss`, `tiebreakers` em ordem entre `wins`, `goalDiff`, `goalsFor`, `goalsAgainst`, `headToHead`, `fewerCards`, `alphabetical`, `yellowLimit`, `redGames`), `teamIds`, `groups`, `knockout`, `isPublic`, `organizer`, `organizerName`, `description`, `moderators` e `championId`; partidas ganham `stage`, `group`, `roundNumber`, `leg`, `homeScore`, `awayScore`, `homePenalties`, `awayPenalties` e `generated` (dados antigos continuam válidos: campos ausentes valem liga, sem placar). Novas ações em `POST /api/operations`: `generate-fixtures` (todos contra todos com folga para número ímpar e turno/returno, grupos sorteados em serpentina, mata-mata com byes para os melhores quando o total não é potência de 2 e ida e volta opcional; cria uma sala de overlay por jogo com calendário a partir de data, horário, intervalo e local; recusa regerar sem `replace` e nunca substitui jogos iniciados), `generate-next-round` (grupos para mata-mata e rodadas seguintes; exige jogos finalizados e vencedor definido, empate só se resolve com pênaltis ou agregado; ao restar um vencedor encerra o campeonato e grava `championId`), `set-result`, `upsert-post`, `delete-post`. O resultado de uma partida finalizada vem do registro ou, na falta dele, do placar da sala de transmissão. Operadores só alteram campeonatos que os listam em `moderators` (lista vazia = qualquer operador; administradores sempre podem); recusas retornam 403. Respostas de `/api/operations` agora incluem `result` quando a ação produz um (ex.: `created`, `champion`).
 - **API pública e páginas sem login**: `GET /api/public/championships?q=&organizer=`, `GET /api/public/championship?slug=` (ou `?id=` para administradores, inclusive privados), `GET /api/public/organizer?slug=` e `GET /api/public/room-table?room=` (somente leitura, `access-control-allow-origin: *`, cache de 5 s). Campeonatos nascem privados; só `isPublic` com `slug` aparecem. O pacote do campeonato traz classificação (ou tabelas por grupo, com desempate configurável), jogos, artilharia, cartões, suspensos (amarelos acumulados e vermelhos cumpridos nos jogos seguintes) e publicações. Interface pública: `/campeonatos` (busca, filtros, "seguir" no aparelho), `/c/<slug>` (classificação, jogos com filtro por equipe, artilharia, disciplina, notícias e fotos, ao vivo, patrocinadores, compartilhar), `/o/<slug>` e widgets `/embed/standings|matches|scorers?c=<slug>[&theme=light]` para iframes. PWA: `manifest.webmanifest` e `sw.js` (rede primeiro, sem cache de `/api/`), registrado nas páginas públicas e no portal do time. Servidor e Worker passam a servir `index.html` para essas rotas.
@@ -82,6 +74,18 @@ contratos já existentes (rotas, formato de dados, compatibilidade, segurança).
   já enviou a escalação.
 
 ### Alterado
+- As artes de resultado e classificação do módulo de Classificação (`art-result`/`art-standings`) agora usam o renderizador do Estúdio (`renderArt`); o gaveta continua existindo e aponta para o Estúdio. Escudos externos (URL não same-origin) continuam fora das artes para não contaminar o canvas.
+`: `Adicionado`, `Alterado`, `Corrigido`,
+  `Removido` ou `Segurança`. Crie a subseção se ela ainda não existir no ciclo atual. Não crie
+  categorias fora dessas cinco.
+- Corrija a própria entrada no mesmo commit se a mudança for revista antes do push. Não deixe
+  entradas desatualizadas ou contraditórias com o comportamento final.
+- Ao publicar (merge na main que efetivamente vai para o GPT Sites), mova o conteúdo de
+  `[Não publicado]` para uma seção `## [versão] - AAAA-MM-DD` e deixe `[Não publicado]` vazio
+  (sem títulos de subseção) para o próximo ciclo.
+- Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/).
+
+## [Não publicado]
 
 - **Compatibilidade do Builder**: overlays criados antes (campos `layout`, `title`, `subtitle`, `media`, `animation`, `background`, `accent`, `textColor`) são convertidos ao carregar em elementos equivalentes (fundo, mídia, faixa de destaque, título e texto), mantendo aparência e animação aproximadas; os campos antigos continuam no estado, mas a edição e a saída passam a usar `elements`. Os controles antigos de largura/altura/título foram substituídos pelo editor visual. O limite de upload de assets `custom-*` subiu para 25 MB no Node e no Worker (antes valia 5 MB no servidor apesar de a interface anunciar 50 MB).
 - **Refinamento visual do painel administrativo** (só CSS em `public/styles.css`, mais a classe `stat-<status>` nos cartões de status do Dashboard em app.js). Overlays, saídas do OBS e composição 1920×1080 não usam estas regras. Novos tokens: `--ui` (Roboto hospedada para o texto), `--heading` (Barlow Condensed para títulos, números e marca, estilo painel esportivo), `--radius`, `--shadow-card`, `--ring` e neutros ligeiramente reequilibrados. Mudanças: barra superior com desfoque e fio dourado; botões com hierarquia (primário em gradiente, foco visível por teclado); campos de 40 px; cartões com profundidade; títulos de página em caixa alta condensada; menu lateral mais denso, com barra dourada no item ativo e separadores de grupo; cartões da Central de módulos compactos; Dashboard com indicadores coloridos por status (Ao vivo em vermelho pulsante, Agendadas em azul, Finalizadas em verde); abas dos módulos como controle segmentado; tela de entrada compacta e centralizada. Textos de apoio que eram 9–11 px agora têm 11–12 px. `.broadcast-layer` mantém a fonte anterior para a prévia continuar idêntica à saída. Corrigido: `--font-ui`/`--ui-font` eram usados sem definição. Responsivo: o grid do Dashboard e das operações passa para uma coluna abaixo de 980 px (antes estourava a largura em celulares).

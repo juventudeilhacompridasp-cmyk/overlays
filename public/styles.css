@@ -2316,3 +2316,24 @@ body.public-light .standings-table td { border-color: #eee; }
 }
 .public-followed { margin-bottom: 18px; }
 .public-followed h3 { margin: 0 0 10px; color: var(--gold); font-size: 13px; letter-spacing: .14em; text-transform: uppercase; }
+
+/* Estúdio de artes */
+.arts-layout { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.arts-controls { display: grid; gap: 18px; }
+.arts-controls section { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--line, rgba(255,255,255,.1)); border-radius: 10px; background: rgba(255,255,255,.03); }
+.arts-step { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.arts-step b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #d8ad56; color: #16120b; font-size: 12px; }
+.art-types { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.art-type, .art-theme { text-align: left; padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); color: inherit; cursor: pointer; font: inherit; }
+.art-type strong { display: block; font-size: 13px; }
+.art-type small { display: block; margin-top: 2px; font-size: 11px; opacity: .65; }
+.art-type.active, .art-theme.active { border-color: #d8ad56; background: rgba(216,173,86,.14); }
+.art-themes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.art-theme { display: grid; gap: 6px; font-size: 12px; text-align: center; }
+.art-theme span { display: block; height: 34px; border-radius: 6px; }
+.arts-stage { display: grid; gap: 12px; min-width: 0; }
+.arts-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.arts-preview { display: grid; place-items: center; padding: 16px; border-radius: 12px; background: rgba(0,0,0,.35); min-height: 320px; }
+.art-canvas { max-width: 100%; max-height: 78vh; width: auto; height: auto; border-radius: 8px; box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+.art-placeholder { opacity: .7; padding: 40px; text-align: center; }
+@media (max-width: 900px) { .arts-layout { grid-template-columns: 1fr; } }

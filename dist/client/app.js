@@ -22,7 +22,7 @@ const isManagement = location.pathname === '/manage' || location.pathname.starts
 const isPublicPage = location.pathname === '/campeonatos' || /^\/(c|o|embed)\//.test(location.pathname);
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal && !isPublicPage;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -59,6 +59,7 @@ const MANAGEMENT_MODULES = [
   { key: 'dashboard', label: 'Dashboard', caption: 'Visão geral de agenda, avisos, acessos e estatísticas da plataforma', layer: 'all', icon: icons.monitor },
   { key: 'live', label: 'Ao vivo agora', caption: 'Partidas em andamento, placar, o que está no ar e atalhos de emergência', layer: 'all', icon: icons.monitor },
   { key: 'standings', label: 'Classificação e súmulas', caption: 'Tabela do campeonato, artilharia, cartões e súmula de cada partida', layer: 'all', icon: icons.list },
+  { key: 'arts', label: 'Estúdio de artes', caption: 'Artes prontas para redes sociais: resultados, jogos, tabelas, artilharia, escalações e avisos', layer: 'all', icon: icons.layers },
   { key: 'feed', label: 'Notícias e mídia', caption: 'Notícias, fotos e vídeos por campeonato e rodada, exibidos na página pública', layer: 'all', icon: icons.text },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
   { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
@@ -2260,8 +2261,58 @@ function renderStandingsModule() {
     <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Súmulas das partidas</h3><p class="help-text">Abra a súmula com os lances registrados em cada jogo e gere a arte do resultado.</p></div></div><div class="dashboard-list">${matchRows}</div></section>${openMatch ? renderMatchSummary(openMatch) : ''}</div>`;
 }
 
-// ---------- Artes para redes sociais (canvas 1080 × 1080/1350, baixar ou compartilhar) ----------
+// ===== Estúdio de artes: peças prontas para redes sociais (canvas → PNG) =====
+const ART_FORMATS = [['feed', 'Feed 1:1', 1080, 1080], ['portrait', 'Retrato 4:5', 1080, 1350], ['stories', 'Stories 9:16', 1080, 1920], ['wide', 'Paisagem 16:9', 1920, 1080]];
+const ART_TYPES = [
+  ['result', 'Resultado do jogo', 'Placar final com escudos', 'match'],
+  ['matchday', 'Jogo do dia', 'Confronto, horário e local', 'match'],
+  ['round-results', 'Rodada · resultados', 'Todos os placares da rodada', 'round'],
+  ['round-fixtures', 'Rodada · próximos jogos', 'Agenda de uma rodada', 'round'],
+  ['standings', 'Classificação', 'Tabela dos melhores colocados', 'top'],
+  ['scorers', 'Artilharia', 'Ranking de goleadores', 'top'],
+  ['discipline', 'Cartões e suspensos', 'Disciplina do campeonato', 'top'],
+  ['lineup', 'Escalação confirmada', 'Titulares e técnico de uma equipe', 'lineup'],
+  ['champion', 'Campeão', 'Comemoração do título', 'none'],
+  ['notice', 'Aviso ou comunicado', 'Título e texto livres', 'text'],
+];
+
+function artShade(hex, amount) {
+  const value = safeColor(hex, '#8253cd').slice(1);
+  const channel = index => { const base = parseInt(value.slice(index * 2, index * 2 + 2), 16); return Math.round(amount < 0 ? base * (1 + amount) : base + (255 - base) * amount); };
+  return `rgb(${channel(0)},${channel(1)},${channel(2)})`;
+}
+
+const ART_THEMES = {
+  gold: { name: 'Noite dourada', accent: '#d8ad56', onAccent: '#16120b', text: '#ffffff', muted: '#b4b6c2', panel: 'rgba(255,255,255,.08)', panelAlt: 'rgba(255,255,255,.035)', swatch: ['#07080c', '#1a1233', '#d8ad56'],
+    paint(c, w, h, accent) { const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, '#07080c'); g.addColorStop(1, '#1a1233'); c.fillStyle = g; c.fillRect(0, 0, w, h); c.fillStyle = 'rgba(216,173,86,.13)'; c.beginPath(); c.moveTo(w * .55, 0); c.lineTo(w, 0); c.lineTo(w, h * .4); c.closePath(); c.fill(); c.fillStyle = accent; c.fillRect(0, 0, w, 14); } },
+  pitch: { name: 'Gramado', accent: '#f2cb79', onAccent: '#10261a', text: '#ffffff', muted: '#cfe6d8', panel: 'rgba(0,0,0,.28)', panelAlt: 'rgba(0,0,0,.14)', swatch: ['#0d4a2b', '#168a4f', '#f2cb79'],
+    paint(c, w, h, accent) { const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, '#0d4a2b'); g.addColorStop(1, '#146c43'); c.fillStyle = g; c.fillRect(0, 0, w, h); const stripe = w / 10; for (let i = 0; i < 10; i += 2) { c.fillStyle = 'rgba(255,255,255,.05)'; c.fillRect(i * stripe, 0, stripe, h); } c.strokeStyle = 'rgba(255,255,255,.2)'; c.lineWidth = 5; c.strokeRect(36, 36, w - 72, h - 72); c.beginPath(); c.arc(w / 2, h / 2, Math.min(w, h) * .2, 0, Math.PI * 2); c.stroke(); c.beginPath(); c.moveTo(36, h / 2); c.lineTo(w - 36, h / 2); c.stroke(); c.fillStyle = accent; c.fillRect(0, 0, w, 12); } },
+  neon: { name: 'Neon', accent: '#00e5ff', onAccent: '#001418', text: '#ffffff', muted: '#a8b3c7', panel: 'rgba(255,255,255,.06)', panelAlt: 'rgba(255,255,255,.025)', glow: true, swatch: ['#05060a', '#ff2bd6', '#00e5ff'],
+    paint(c, w, h, accent) { c.fillStyle = '#05060a'; c.fillRect(0, 0, w, h); const a = c.createRadialGradient(w * .1, h * .05, 0, w * .1, h * .05, Math.max(w, h) * .7); a.addColorStop(0, 'rgba(255,43,214,.3)'); a.addColorStop(1, 'rgba(255,43,214,0)'); c.fillStyle = a; c.fillRect(0, 0, w, h); const b = c.createRadialGradient(w * .95, h * .95, 0, w * .95, h * .95, Math.max(w, h) * .7); b.addColorStop(0, 'rgba(0,229,255,.28)'); b.addColorStop(1, 'rgba(0,229,255,0)'); c.fillStyle = b; c.fillRect(0, 0, w, h); c.strokeStyle = 'rgba(255,255,255,.045)'; c.lineWidth = 2; for (let x = 0; x < w; x += 72) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); } for (let y = 0; y < h; y += 72) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); } c.fillStyle = accent; c.shadowColor = accent; c.shadowBlur = 24; c.fillRect(0, 0, w, 8); c.shadowBlur = 0; } },
+  paper: { name: 'Jornal', accent: '#c1272d', onAccent: '#ffffff', text: '#17140d', muted: '#5b564a', panel: 'rgba(0,0,0,.06)', panelAlt: 'rgba(0,0,0,.025)', light: true, swatch: ['#f3eee2', '#ffffff', '#c1272d'],
+    paint(c, w, h, accent) { c.fillStyle = '#f3eee2'; c.fillRect(0, 0, w, h); c.strokeStyle = 'rgba(0,0,0,.035)'; c.lineWidth = 2; for (let i = -h; i < w; i += 22) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i + h, h); c.stroke(); } c.fillStyle = accent; c.fillRect(0, 0, w, 26); c.fillStyle = '#17140d'; c.fillRect(0, 26, w, 4); } },
+  diagonal: { name: 'Diagonal', accent: '#2f7df6', onAccent: '#ffffff', text: '#ffffff', muted: '#c4cada', panel: 'rgba(0,0,0,.34)', panelAlt: 'rgba(0,0,0,.18)', swatch: ['#0b0d12', '#2f7df6', '#ffffff'],
+    paint(c, w, h, accent) { c.fillStyle = '#0b0d12'; c.fillRect(0, 0, w, h); const g = c.createLinearGradient(0, 0, w, h); g.addColorStop(0, accent); g.addColorStop(1, artShade(accent, -.45)); c.fillStyle = g; c.beginPath(); c.moveTo(0, 0); c.lineTo(w * .66, 0); c.lineTo(w * .3, h); c.lineTo(0, h); c.closePath(); c.fill(); c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = 8; c.beginPath(); c.moveTo(w * .7, 0); c.lineTo(w * .34, h); c.stroke(); } },
+  mono: { name: 'Minimalista', accent: '#8253cd', onAccent: '#ffffff', text: '#ffffff', muted: 'rgba(255,255,255,.72)', panel: 'rgba(255,255,255,.12)', panelAlt: 'rgba(255,255,255,.06)', swatch: ['#3a2766', '#8253cd', '#ffffff'],
+    paint(c, w, h, accent) { c.fillStyle = artShade(accent, -.55); c.fillRect(0, 0, w, h); c.fillStyle = 'rgba(255,255,255,.07)'; c.beginPath(); c.arc(w * .92, h * .08, Math.min(w, h) * .38, 0, Math.PI * 2); c.fill(); } },
+};
+
+const ART_OPTIONS_KEY = 'juventude.artes.v1';
+function loadArtOptions() {
+  const defaults = { championshipId: '', type: 'result', theme: 'gold', format: 'feed', matchId: '', round: '', side: 'home', topN: 8, title: '', text: '', accent: '', logos: true, sponsors: true, brand: true };
+  try { return { ...defaults, ...(JSON.parse(localStorage.getItem(ART_OPTIONS_KEY)) || {}) }; } catch { return defaults; }
+}
+let artOptions = loadArtOptions();
+let artBundle = null;
+let artBundleFor = '';
+let artBundleAt = 0;
+let artSponsorImages = [];
+let artSponsorsLoaded = false;
+let artStudio = { sig: '', busy: false, url: '', blob: null, error: '', width: 0, height: 0 };
+let artTimer = 0;
 let artPreview = null;
+
+function saveArtOptions() { try { localStorage.setItem(ART_OPTIONS_KEY, JSON.stringify(artOptions)); } catch {} }
 
 function artImage(url) {
   return new Promise(resolve => {
@@ -2273,81 +2324,448 @@ function artImage(url) {
   });
 }
 
-async function artContext(width, height) {
+function artWrap(g, text, maxWidth, size, weight, body) {
+  const { ctx } = g;
+  ctx.font = `${weight} ${size}px ${body ? 'Roboto, Arial, sans-serif' : '"Barlow Condensed", "Arial Narrow", sans-serif'}`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  const lines = [];
+  for (const paragraph of String(text).split(/\n/)) {
+    let line = '';
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = word; } else line = test;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+// Texto: tamanho em unidades de 1080 (multiplicado por g.u); x, y e max em pixels absolutos.
+function artT(g, text, x, y, o = {}) {
+  const { ctx, u, theme } = g;
+  let size = (o.size || 40) * u;
+  const family = o.body ? 'Roboto, Arial, sans-serif' : '"Barlow Condensed", "Arial Narrow", sans-serif';
+  ctx.textAlign = o.align || 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = o.color || theme.text;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${(o.spacing || 0) * u}px`;
+  const value = o.upper ? String(text).toUpperCase() : String(text);
+  ctx.font = `${o.weight || 700} ${size}px ${family}`;
+  let shown = value;
+  if (o.max) {
+    while (ctx.measureText(shown).width > o.max && size > (o.size || 40) * u * .62) { size -= 2; ctx.font = `${o.weight || 700} ${size}px ${family}`; }
+    let guard = 0;
+    while (ctx.measureText(shown).width > o.max && shown.length > 3 && guard++ < 120) shown = `${shown.slice(0, -2).trimEnd()}…`;
+  }
+  if (theme.glow && o.glow) { ctx.shadowColor = o.color || g.accent; ctx.shadowBlur = 18 * u; }
+  ctx.fillText(shown, x, y);
+  ctx.shadowBlur = 0;
+}
+
+function artBadge(g, team, cx, cy, r) {
+  const { ctx, u } = g;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.closePath();
+  ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.clip();
+  const image = g.options.logos ? g.images[team?.id] : null;
+  if (image) ctx.drawImage(image, cx - r * .8, cy - r * .8, r * 1.6, r * 1.6);
+  else { ctx.fillStyle = team?.color || '#8253cd'; ctx.fillRect(cx - r, cy - r, r * 2, r * 2); artT(g, team?.short || '?', cx, cy, { size: r / u * .72, color: '#ffffff' }); }
+  ctx.restore();
+  ctx.lineWidth = Math.max(3, 6 * u); ctx.strokeStyle = g.accent; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+}
+
+function artPanel(g, x, y, w, h, alt = false, accent = false) {
+  const { ctx, u } = g;
+  ctx.fillStyle = accent ? g.accent : alt ? g.theme.panelAlt : g.theme.panel;
+  const r = 14 * u;
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
+}
+
+function artTeams(g, match) {
+  const find = id => g.bundle.teams.find(team => team.id === id) || { id, name: id, short: String(id).slice(0, 3).toUpperCase(), color: '#8253cd' };
+  return { home: { ...find(match.homeTeamId), name: match.homeName || find(match.homeTeamId).name }, away: { ...find(match.awayTeamId), name: match.awayName || find(match.awayTeamId).name } };
+}
+
+function artWhen(match, long = false) {
+  const date = match.kickoffAt ? new Date(match.kickoffAt) : null;
+  if (!date || Number.isNaN(date.getTime())) return { day: 'A DEFINIR', time: '', short: '', long: '' };
+  const sameDay = date.toDateString() === new Date().toDateString();
+  return {
+    day: sameDay ? 'HOJE' : new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).format(date).toUpperCase(),
+    time: new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(date),
+    short: new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(date).replace('.', '').toUpperCase(),
+    long: new Intl.DateTimeFormat('pt-BR', { dateStyle: 'full', timeStyle: 'short' }).format(date),
+  };
+}
+
+function artScore(match) {
+  return match.homeScore === null || match.awayScore === null ? null : [match.homeScore, match.awayScore];
+}
+
+function artRows(g, body, count, { min = 58, max = 104 } = {}) {
+  const fit = Math.max(1, Math.floor(body.h / (min * g.u)));
+  const shown = Math.min(count, fit);
+  const rowH = Math.min(max * g.u, body.h / Math.max(1, shown));
+  return { shown, rowH, top: body.y + Math.max(0, (body.h - rowH * shown) / 2) };
+}
+
+function artEmpty(g, body, message) {
+  artT(g, message, g.w / 2, body.y + body.h / 2, { size: 44, weight: 500, color: g.theme.muted, body: true, max: body.w });
+}
+
+const ART_DRAWERS = {
+  result(g, body) {
+    const match = g.bundle.matches.find(item => item.id === g.options.matchId);
+    if (!match) return artEmpty(g, body, 'Escolha uma partida');
+    const { home, away } = artTeams(g, match);
+    const wide = g.w > g.h * 1.3;
+    const r = Math.min(body.w * (wide ? .09 : .12), body.h * .2, 120 * g.u);
+    const cy = body.y + body.h * (wide ? .4 : .34);
+    const lx = body.x + body.w * .17;
+    const rx = body.x + body.w * .83;
+    artBadge(g, home, lx, cy, r); artBadge(g, away, rx, cy, r);
+    const score = artScore(match);
+    artT(g, score ? `${score[0]}  ×  ${score[1]}` : 'VS', g.w / 2, cy, { size: Math.min(body.w * .13, body.h * .2, 150 * g.u) / g.u, glow: true, max: body.w * .3 });
+    artT(g, home.name, lx, cy + r + 62 * g.u, { size: 50, upper: true, max: body.w * .34 });
+    artT(g, away.name, rx, cy + r + 62 * g.u, { size: 50, upper: true, max: body.w * .34 });
+    if (match.homePenalties !== null && match.awayPenalties !== null) artT(g, `(${match.homePenalties} × ${match.awayPenalties} nos pênaltis)`, g.w / 2, cy + r * 1.35, { size: 38, weight: 500, color: g.accent, body: true });
+    const when = artWhen(match);
+    const lineY = body.y + body.h * .78;
+    artT(g, [match.round, match.status === 'finished' ? 'FIM DE JOGO' : match.status === 'live' ? 'AO VIVO' : ''].filter(Boolean).join('  ·  '), g.w / 2, lineY, { size: 40, upper: true, spacing: 5, color: g.accent });
+    artT(g, when.long, g.w / 2, lineY + 58 * g.u, { size: 34, weight: 500, color: g.theme.muted, body: true, max: body.w });
+    if (match.venue) artT(g, match.venue, g.w / 2, lineY + 106 * g.u, { size: 32, weight: 500, color: g.theme.muted, body: true, max: body.w });
+  },
+  matchday(g, body) {
+    const match = g.bundle.matches.find(item => item.id === g.options.matchId);
+    if (!match) return artEmpty(g, body, 'Escolha uma partida');
+    const { home, away } = artTeams(g, match);
+    const when = artWhen(match);
+    const wide = g.w > g.h * 1.3;
+    artT(g, when.day === 'HOJE' ? 'JOGO DO DIA' : 'PRÓXIMO JOGO', g.w / 2, body.y + body.h * .09, { size: 52, spacing: 10, color: g.accent, glow: true });
+    const r = Math.min(body.w * (wide ? .11 : .15), body.h * .21, 150 * g.u);
+    const cy = body.y + body.h * (wide ? .42 : .36);
+    const lx = body.x + body.w * .19;
+    const rx = body.x + body.w * .81;
+    artBadge(g, home, lx, cy, r); artBadge(g, away, rx, cy, r);
+    artT(g, 'VS', g.w / 2, cy, { size: Math.min(body.w * .15, 150 * g.u) / g.u, glow: true });
+    artT(g, home.name, lx, cy + r + 60 * g.u, { size: 50, upper: true, max: body.w * .36 });
+    artT(g, away.name, rx, cy + r + 60 * g.u, { size: 50, upper: true, max: body.w * .36 });
+    const base = body.y + body.h * .76;
+    artT(g, when.time || 'A DEFINIR', g.w / 2, base, { size: Math.min(body.w * .16, 150 * g.u) / g.u, color: g.accent, glow: true });
+    artT(g, when.day === 'HOJE' ? 'HOJE' : when.day, g.w / 2, base + 84 * g.u, { size: 40, upper: true, spacing: 4, max: body.w });
+    if (match.venue) artT(g, match.venue, g.w / 2, base + 138 * g.u, { size: 34, weight: 500, color: g.theme.muted, body: true, max: body.w });
+  },
+  'round-results': (g, body) => artRoundList(g, body, true),
+  'round-fixtures': (g, body) => artRoundList(g, body, false),
+  standings(g, body) {
+    const rows = (g.bundle.standings.length ? g.bundle.standings : g.bundle.groups.flatMap(group => group.table)).slice(0, g.options.topN);
+    if (!rows.length) return artEmpty(g, body, 'Sem jogos finalizados ainda');
+    const { shown, rowH, top } = artRows(g, body, rows.length, { min: 62, max: 96 });
+    const columns = [['P', 0], ['J', 1], ['SG', 2], ['GP', 3]].slice(0, g.w > g.h ? 4 : 3);
+    const right = body.x + body.w - 50 * g.u;
+    columns.forEach(([label, index]) => artT(g, label, right - (columns.length - 1 - index) * 110 * g.u, top - 22 * g.u, { size: 28, weight: 500, color: g.theme.muted, body: true }));
+    rows.slice(0, shown).forEach((row, index) => {
+      const y = top + rowH * index + rowH / 2;
+      artPanel(g, body.x, y - rowH / 2 + 4 * g.u, body.w, rowH - 8 * g.u, index % 2 === 1, index === 0);
+      const onFirst = index === 0 ? g.theme.onAccent : g.theme.text;
+      artT(g, row.position, body.x + 46 * g.u, y, { size: 44, color: index === 0 ? onFirst : index < 3 ? g.accent : g.theme.text });
+      artT(g, row.name, body.x + 100 * g.u, y, { size: 44, upper: true, align: 'left', color: onFirst, max: body.w - 460 * g.u });
+      const values = [row.points, row.played, row.gd, row.gf];
+      columns.forEach(([, valueIndex], position) => artT(g, values[valueIndex], right - (columns.length - 1 - position) * 110 * g.u, y, { size: 44, color: position === 0 ? (index === 0 ? onFirst : g.accent) : onFirst }));
+    });
+  },
+  scorers(g, body) {
+    const rows = g.bundle.scorers.slice(0, g.options.topN);
+    if (!rows.length) return artEmpty(g, body, 'Nenhum gol com autor identificado');
+    const { shown, rowH, top } = artRows(g, body, rows.length, { min: 70, max: 104 });
+    rows.slice(0, shown).forEach((row, index) => {
+      const y = top + rowH * index + rowH / 2;
+      artPanel(g, body.x, y - rowH / 2 + 4 * g.u, body.w, rowH - 8 * g.u, index % 2 === 1, index === 0);
+      const color = index === 0 ? g.theme.onAccent : g.theme.text;
+      artT(g, index + 1, body.x + 46 * g.u, y, { size: 46, color: index === 0 ? color : index < 3 ? g.accent : g.theme.text });
+      artT(g, row.name, body.x + 100 * g.u, y - 12 * g.u, { size: 44, upper: true, align: 'left', color, max: body.w - 300 * g.u });
+      artT(g, row.teamName, body.x + 100 * g.u, y + 26 * g.u, { size: 26, weight: 500, align: 'left', color: index === 0 ? color : g.theme.muted, body: true, max: body.w - 300 * g.u });
+      artT(g, row.goals, body.x + body.w - 60 * g.u, y, { size: 62, color: index === 0 ? color : g.accent, glow: true });
+    });
+  },
+  discipline(g, body) {
+    const cards = g.bundle.cards.slice(0, g.options.topN);
+    const suspended = g.bundle.suspended.slice(0, 5);
+    if (!cards.length && !suspended.length) return artEmpty(g, body, 'Nenhum cartão registrado');
+    const total = cards.length + (suspended.length ? suspended.length + 1 : 0);
+    const { shown, rowH, top } = artRows(g, body, total, { min: 66, max: 96 });
+    let index = 0;
+    for (const row of cards.slice(0, Math.max(0, shown - (suspended.length ? suspended.length + 1 : 0)))) {
+      const y = top + rowH * index + rowH / 2;
+      artPanel(g, body.x, y - rowH / 2 + 4 * g.u, body.w, rowH - 8 * g.u, index % 2 === 1);
+      artT(g, row.name, body.x + 40 * g.u, y - 10 * g.u, { size: 42, upper: true, align: 'left', max: body.w - 330 * g.u });
+      artT(g, row.teamName, body.x + 40 * g.u, y + 26 * g.u, { size: 25, weight: 500, align: 'left', color: g.theme.muted, body: true, max: body.w - 330 * g.u });
+      g.ctx.fillStyle = '#f1bf52'; g.ctx.fillRect(body.x + body.w - 250 * g.u, y - 22 * g.u, 30 * g.u, 42 * g.u);
+      artT(g, row.yellow, body.x + body.w - 190 * g.u, y, { size: 46 });
+      g.ctx.fillStyle = '#fa626e'; g.ctx.fillRect(body.x + body.w - 130 * g.u, y - 22 * g.u, 30 * g.u, 42 * g.u);
+      artT(g, row.red, body.x + body.w - 70 * g.u, y, { size: 46 });
+      index += 1;
+    }
+    if (suspended.length) {
+      artT(g, 'SUSPENSOS PARA A PRÓXIMA', g.w / 2, top + rowH * index + rowH / 2, { size: 36, spacing: 6, color: g.accent });
+      index += 1;
+      for (const row of suspended) {
+        const y = top + rowH * index + rowH / 2;
+        artT(g, `${row.name} · ${row.teamName}`, body.x + 40 * g.u, y, { size: 38, upper: true, align: 'left', max: body.w - 220 * g.u });
+        artT(g, `${row.games} jogo(s)`, body.x + body.w - 40 * g.u, y, { size: 32, weight: 500, align: 'right', color: g.theme.muted, body: true });
+        index += 1;
+      }
+    }
+  },
+  lineup(g, body) {
+    const match = g.bundle.matches.find(item => item.id === g.options.matchId);
+    if (!match) return artEmpty(g, body, 'Escolha uma partida');
+    const { home, away } = artTeams(g, match);
+    const side = g.options.side === 'away' ? away : home;
+    const opponent = side === away ? home : away;
+    const team = (g.catalog || []).find(item => item.id === side.id);
+    const athletes = Array.isArray(team?.athletes) ? team.athletes : [];
+    const squad = team?.matchSquads?.[match.id];
+    const starters = (squad?.starters?.length ? squad.starters.map(id => athletes.find(item => item.id === id)).filter(Boolean) : athletes.filter(item => item.squadRole !== 'reserve')).slice(0, 12);
+    artBadge(g, side, g.w / 2, body.y + 74 * g.u, 62 * g.u);
+    artT(g, side.name, g.w / 2, body.y + 178 * g.u, { size: 62, upper: true, max: body.w, glow: true });
+    artT(g, `ESCALAÇÃO · ${[`x ${opponent.name}`, artWhen(match).short].filter(Boolean).join(' · ')}`.toUpperCase(), g.w / 2, body.y + 232 * g.u, { size: 30, weight: 500, spacing: 4, color: g.theme.muted, body: true, max: body.w });
+    if (!starters.length) return artEmpty(g, { ...body, y: body.y + 260 * g.u, h: body.h - 260 * g.u }, 'Escalação ainda não definida');
+    const columns = g.w > g.h ? 3 : 2;
+    const perColumn = Math.ceil(starters.length / columns);
+    const area = { x: body.x, y: body.y + 275 * g.u, w: body.w, h: body.h - 275 * g.u - 70 * g.u };
+    const rowH = Math.min(88 * g.u, area.h / perColumn);
+    const columnW = area.w / columns;
+    starters.forEach((athlete, index) => {
+      const column = Math.floor(index / perColumn);
+      const row = index % perColumn;
+      const x = area.x + columnW * column;
+      const y = area.y + rowH * row + rowH / 2;
+      artPanel(g, x + 6 * g.u, y - rowH / 2 + 4 * g.u, columnW - 12 * g.u, rowH - 8 * g.u, row % 2 === 1);
+      artT(g, athlete.number || '', x + 52 * g.u, y, { size: 46, color: g.accent, glow: true });
+      artT(g, athlete.name || '', x + 100 * g.u, y - (athlete.position ? 8 * g.u : 0), { size: 38, upper: true, align: 'left', max: columnW - 120 * g.u });
+      if (athlete.position) artT(g, athlete.position, x + 100 * g.u, y + 24 * g.u, { size: 22, weight: 500, align: 'left', color: g.theme.muted, body: true });
+    });
+    const coach = (Array.isArray(team?.staff) ? team.staff.find(member => member.role === 'Treinador') : null)?.name || team?.coach?.name || '';
+    const formation = squad?.formation || team?.formation || '';
+    artT(g, [coach ? `TÉCNICO: ${coach}` : '', formation ? `ESQUEMA ${formation}` : ''].filter(Boolean).join('   ·   ').toUpperCase(), g.w / 2, body.y + body.h - 30 * g.u, { size: 32, weight: 500, spacing: 3, color: g.accent, body: true, max: body.w });
+  },
+  champion(g, body) {
+    const info = g.bundle.championship;
+    const team = g.bundle.teams.find(item => item.id === info.championId);
+    if (!team) return artEmpty(g, body, 'O campeão aparece quando a final termina');
+    const { ctx, u } = g;
+    const cx = g.w / 2;
+    const top = body.y + body.h * .05;
+    ctx.fillStyle = g.accent;
+    ctx.beginPath(); ctx.moveTo(cx - 90 * u, top); ctx.lineTo(cx + 90 * u, top); ctx.quadraticCurveTo(cx + 90 * u, top + 150 * u, cx, top + 170 * u); ctx.quadraticCurveTo(cx - 90 * u, top + 150 * u, cx - 90 * u, top); ctx.fill();
+    ctx.fillRect(cx - 14 * u, top + 165 * u, 28 * u, 56 * u); ctx.fillRect(cx - 64 * u, top + 219 * u, 128 * u, 24 * u);
+    ctx.lineWidth = 16 * u; ctx.strokeStyle = g.accent; ctx.beginPath(); ctx.arc(cx - 96 * u, top + 62 * u, 40 * u, Math.PI * .5, Math.PI * 1.5); ctx.stroke(); ctx.beginPath(); ctx.arc(cx + 96 * u, top + 62 * u, 40 * u, Math.PI * 1.5, Math.PI * .5); ctx.stroke();
+    artT(g, 'CAMPEÃO', cx, body.y + body.h * .36, { size: Math.min(body.w * .2, 200 * u) / u, color: g.accent, glow: true, spacing: 6, max: body.w });
+    artBadge(g, team, cx, body.y + body.h * .58, Math.min(body.w * .16, body.h * .14, 130 * u));
+    artT(g, team.name, cx, body.y + body.h * .76, { size: 76, upper: true, max: body.w, glow: true });
+    artT(g, [info.name, info.season].filter(Boolean).join(' · '), cx, body.y + body.h * .86, { size: 38, weight: 500, color: g.theme.muted, body: true, upper: true, spacing: 3, max: body.w });
+  },
+  notice(g, body) {
+    const title = g.options.title || 'AVISO';
+    const lines = artWrap(g, g.options.text || 'Escreva o texto do aviso no painel ao lado.', body.w - 40 * g.u, 50 * g.u, 500, true);
+    const bodySize = lines.length > 9 ? 40 : lines.length > 6 ? 46 : 52;
+    const wrapped = artWrap(g, g.options.text || 'Escreva o texto do aviso no painel ao lado.', body.w - 40 * g.u, bodySize * g.u, 500, true);
+    const titleLines = artWrap(g, String(title).toUpperCase(), body.w, 96 * g.u, 700, false);
+    const titleH = titleLines.length * 100 * g.u;
+    const textH = wrapped.length * bodySize * 1.4 * g.u;
+    let y = body.y + Math.max(20 * g.u, (body.h - titleH - textH - 60 * g.u) / 2);
+    g.ctx.fillStyle = g.accent; g.ctx.fillRect(body.x + 20 * g.u, y, 140 * g.u, 10 * g.u);
+    y += 70 * g.u;
+    for (const line of titleLines) { artT(g, line, body.x + 20 * g.u, y, { size: 96, align: 'left', glow: true, color: g.theme.text }); y += 100 * g.u; }
+    y += 20 * g.u;
+    for (const line of wrapped) { artT(g, line, body.x + 20 * g.u, y, { size: bodySize, weight: 500, align: 'left', body: true, color: g.theme.text }); y += bodySize * 1.4 * g.u; }
+  },
+};
+
+function artRoundList(g, body, results) {
+  const rounds = g.options.round ? g.bundle.matches.filter(match => match.round === g.options.round) : [];
+  if (!rounds.length) return artEmpty(g, body, 'Escolha uma rodada');
+  const { shown, rowH, top } = artRows(g, body, rounds.length, { min: 74, max: g.h > g.w ? 150 : 116 });
+  const center = g.w / 2;
+  const centerW = 190 * g.u;
+  rounds.slice(0, shown).forEach((match, index) => {
+    const { home, away } = artTeams(g, match);
+    const y = top + rowH * index + rowH / 2;
+    artPanel(g, body.x, y - rowH / 2 + 4 * g.u, body.w, rowH - 8 * g.u, index % 2 === 1);
+    const r = Math.min(rowH * .3, 40 * g.u);
+    const badgeGap = centerW / 2 + r + 14 * g.u;
+    artBadge(g, home, center - badgeGap, y, r); artBadge(g, away, center + badgeGap, y, r);
+    const nameMax = (body.w - centerW - r * 4 - 60 * g.u) / 2;
+    artT(g, home.name, center - badgeGap - r - 16 * g.u, y, { size: 38, upper: true, align: 'right', max: nameMax });
+    artT(g, away.name, center + badgeGap + r + 16 * g.u, y, { size: 38, upper: true, align: 'left', max: nameMax });
+    const score = artScore(match);
+    if (results) artT(g, score ? `${score[0]} × ${score[1]}` : '– × –', center, y, { size: 54, color: score ? g.accent : g.theme.muted, glow: Boolean(score) });
+    else { const when = artWhen(match); artT(g, when.time || '--:--', center, y - 12 * g.u, { size: 46, color: g.accent }); artT(g, when.short, center, y + 24 * g.u, { size: 24, weight: 500, color: g.theme.muted, body: true }); }
+  });
+  if (shown < rounds.length) artT(g, `+ ${rounds.length - shown} jogo(s)`, center, top + rowH * shown + 24 * g.u, { size: 28, weight: 500, color: g.theme.muted, body: true });
+}
+
+async function renderArt(bundle, options, extras = {}) {
+  const format = ART_FORMATS.find(([key]) => key === options.format) || ART_FORMATS[0];
+  const [, , width, height] = format;
+  const theme = ART_THEMES[options.theme] || ART_THEMES.gold;
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
-  const context = canvas.getContext('2d');
-  try { await Promise.all([document.fonts.load('700 60px "Barlow Condensed"'), document.fonts.load('500 30px "Roboto"')]); } catch {}
-  const gradient = context.createLinearGradient(0, 0, width, height);
-  gradient.addColorStop(0, '#07080c'); gradient.addColorStop(1, '#1a1233');
-  context.fillStyle = gradient; context.fillRect(0, 0, width, height);
-  context.fillStyle = 'rgba(216,173,86,.14)';
-  context.beginPath(); context.moveTo(width * .55, 0); context.lineTo(width, 0); context.lineTo(width, height * .42); context.closePath(); context.fill();
-  context.fillStyle = '#d8ad56'; context.fillRect(0, 0, width, 14);
-  return { canvas, context };
-}
-
-function artText(context, text, x, y, { size = 40, weight = 700, color = '#fff', align = 'center', family = '"Barlow Condensed", Arial Narrow, sans-serif', spacing = 0, max = 0 } = {}) {
-  context.font = `${weight} ${size}px ${family}`;
-  context.textAlign = align; context.fillStyle = color; context.textBaseline = 'middle';
-  if ('letterSpacing' in context) context.letterSpacing = `${spacing}px`;
-  let value = String(text);
-  if (max) while (context.measureText(value).width > max && value.length > 3) value = `${value.slice(0, -2)}…`;
-  context.fillText(value, x, y);
-}
-
-function artBadge(context, image, label, color, cx, cy, radius) {
-  context.save();
-  context.beginPath(); context.arc(cx, cy, radius, 0, Math.PI * 2); context.closePath();
-  context.fillStyle = '#ffffff'; context.fill(); context.clip();
-  if (image) context.drawImage(image, cx - radius * .8, cy - radius * .8, radius * 1.6, radius * 1.6);
-  else { context.fillStyle = color; context.fillRect(cx - radius, cy - radius, radius * 2, radius * 2); artText(context, label, cx, cy, { size: radius * .7, color: '#fff' }); }
-  context.restore();
-  context.lineWidth = 6; context.strokeStyle = '#d8ad56'; context.beginPath(); context.arc(cx, cy, radius, 0, Math.PI * 2); context.stroke();
-}
-
-function artFooter(context, width, height) {
-  artText(context, 'JUVENTUDE ESPORTE CLUBE', width / 2, height - 70, { size: 34, color: '#d8ad56', spacing: 8 });
-  artText(context, location.host, width / 2, height - 30, { size: 24, weight: 500, color: '#8c8f9d', family: 'Roboto, Arial, sans-serif' });
-}
-
-async function buildResultArt(match, bundle) {
-  const { canvas, context } = await artContext(1080, 1080);
-  const teamOf = id => bundle.teams.find(team => team.id === id) || {};
-  const [homeImage, awayImage] = await Promise.all([artImage(teamOf(match.homeTeamId).logo), artImage(teamOf(match.awayTeamId).logo)]);
-  artText(context, bundle.championship.name.toUpperCase(), 540, 120, { size: 58, color: '#d8ad56', spacing: 4, max: 960 });
-  artText(context, [match.round, match.status === 'finished' ? 'FIM DE JOGO' : match.status === 'live' ? 'AO VIVO' : ''].filter(Boolean).join(' · ').toUpperCase(), 540, 190, { size: 36, weight: 500, color: '#b4b6c2', spacing: 6, family: 'Roboto, Arial, sans-serif' });
-  artBadge(context, homeImage, teamOf(match.homeTeamId).short || match.homeName.slice(0, 3), teamOf(match.homeTeamId).color || '#8253cd', 190, 450, 110);
-  artBadge(context, awayImage, teamOf(match.awayTeamId).short || match.awayName.slice(0, 3), teamOf(match.awayTeamId).color || '#8253cd', 890, 450, 110);
-  artText(context, match.homeScore === null ? 'VS' : `${match.homeScore}  ×  ${match.awayScore}`, 540, 450, { size: match.homeScore === null ? 130 : 170, color: '#ffffff' });
-  if (match.homePenalties !== null && match.awayPenalties !== null) artText(context, `(${match.homePenalties} × ${match.awayPenalties} nos pênaltis)`, 540, 580, { size: 38, weight: 500, color: '#d8ad56', family: 'Roboto, Arial, sans-serif' });
-  artText(context, match.homeName.toUpperCase(), 190, 640, { size: 46, max: 360 });
-  artText(context, match.awayName.toUpperCase(), 890, 640, { size: 46, max: 360 });
-  const when = match.kickoffAt ? new Date(match.kickoffAt).toLocaleString('pt-BR', { dateStyle: 'full', timeStyle: 'short' }) : '';
-  artText(context, when, 540, 800, { size: 36, weight: 500, color: '#b4b6c2', family: 'Roboto, Arial, sans-serif' });
-  if (match.venue) artText(context, match.venue, 540, 860, { size: 36, weight: 500, color: '#8c8f9d', family: 'Roboto, Arial, sans-serif', max: 900 });
-  artFooter(context, 1080, 1080);
+  const ctx = canvas.getContext('2d');
+  try { await Promise.all([document.fonts.load('700 60px "Barlow Condensed"'), document.fonts.load('500 40px "Barlow Condensed"'), document.fonts.load('500 30px "Roboto"'), document.fonts.load('700 30px "Roboto"')]); } catch {}
+  const accent = options.accent && /^#[0-9a-f]{6}$/i.test(options.accent) ? options.accent : theme.accent;
+  const u = Math.min(width, height) / 1080;
+  theme.paint(ctx, width, height, accent);
+  const images = {};
+  await Promise.all(bundle.teams.map(async team => { const image = await artImage(team.logo); if (image) images[team.id] = image; }));
+  const g = { ctx, w: width, h: height, u, theme, accent, bundle, options, images, catalog: extras.catalog || [] };
+  const pad = 64 * u;
+  const typeInfo = ART_TYPES.find(([key]) => key === options.type) || ART_TYPES[0];
+  const sponsors = options.sponsors ? (extras.sponsors || []).slice(0, 5) : [];
+  const footerH = (options.brand ? 120 : 40) * u + (sponsors.length ? 120 * u : 0);
+  const headerH = (width > height * 1.3 ? 190 : 230) * u;
+  artT(g, bundle.championship.name, width / 2, 96 * u, { size: 56, color: accent, spacing: 4, upper: true, max: width - pad * 2, glow: true });
+  artT(g, options.title && options.type !== 'notice' ? options.title : typeInfo[1], width / 2, 164 * u, { size: 38, weight: 500, color: theme.muted, spacing: 7, upper: true, body: true, max: width - pad * 2 });
+  const body = { x: pad, y: headerH, w: width - pad * 2, h: height - headerH - footerH };
+  (ART_DRAWERS[options.type] || ART_DRAWERS.result)(g, body);
+  let footerY = height - footerH;
+  if (sponsors.length) {
+    const images2 = await Promise.all(sponsors.map(item => artImage(item.wideAsset || item.banner || item.logo)));
+    const usable = images2.filter(Boolean);
+    if (usable.length) {
+      const slotW = Math.min(260 * u, (width - pad * 2) / usable.length - 16 * u);
+      const total = usable.length * (slotW + 16 * u) - 16 * u;
+      usable.forEach((image, index) => {
+        const x = width / 2 - total / 2 + index * (slotW + 16 * u);
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.roundRect?.(x, footerY + 6 * u, slotW, 88 * u, 12 * u); if (!ctx.roundRect) ctx.rect(x, footerY + 6 * u, slotW, 88 * u); ctx.fill();
+        const scale = Math.min((slotW - 20 * u) / image.width, (88 * u - 16 * u) / image.height);
+        ctx.drawImage(image, x + (slotW - image.width * scale) / 2, footerY + 6 * u + (88 * u - image.height * scale) / 2, image.width * scale, image.height * scale);
+      });
+    }
+    footerY += 120 * u;
+  }
+  if (options.brand) {
+    artT(g, 'JUVENTUDE ESPORTE CLUBE', width / 2, height - 66 * u, { size: 32, color: accent, spacing: 8 });
+    artT(g, location.host, width / 2, height - 26 * u, { size: 22, weight: 500, color: theme.muted, body: true });
+  }
   return canvas;
 }
 
-async function buildStandingsArt(bundle) {
-  const rows = (bundle.standings.length ? bundle.standings : bundle.groups.flatMap(group => group.table)).slice(0, 10);
-  const { canvas, context } = await artContext(1080, 1350);
-  artText(context, bundle.championship.name.toUpperCase(), 540, 110, { size: 62, color: '#d8ad56', spacing: 4, max: 960 });
-  artText(context, 'CLASSIFICAÇÃO', 540, 180, { size: 44, color: '#ffffff', spacing: 10 });
-  const top = 250; const step = 86;
-  artText(context, 'EQUIPE', 190, top - 20, { size: 26, weight: 500, color: '#8c8f9d', align: 'left', family: 'Roboto, Arial, sans-serif' });
-  [['P', 700], ['J', 790], ['SG', 880], ['GP', 975]].forEach(([label, x]) => artText(context, label, x, top - 20, { size: 26, weight: 500, color: '#8c8f9d', family: 'Roboto, Arial, sans-serif' }));
-  rows.forEach((row, index) => {
-    const y = top + 30 + index * step;
-    context.fillStyle = index % 2 ? 'rgba(255,255,255,.03)' : 'rgba(255,255,255,.07)';
-    context.fillRect(60, y - 36, 960, 72);
-    artText(context, row.position, 100, y, { size: 44, color: index < 3 ? '#d8ad56' : '#fff' });
-    artText(context, row.name.toUpperCase(), 160, y, { size: 42, align: 'left', max: 480 });
-    [[row.points, 700, '#d8ad56'], [row.played, 790, '#fff'], [row.gd, 880, '#fff'], [row.gf, 975, '#fff']].forEach(([value, x, color]) => artText(context, value, x, y, { size: 44, color }));
-  });
-  artFooter(context, 1080, 1350);
-  return canvas;
+async function loadArtBundle(force = false) {
+  if (!isAdminPanel || adminSession.status !== 'authenticated' || managementModule !== 'arts') return;
+  if (!artOptions.championshipId || !operationsData.championships.some(item => item.id === artOptions.championshipId)) {
+    artOptions.championshipId = (operationsData.championships.find(item => item.status === 'active') || operationsData.championships[0])?.id || '';
+    saveArtOptions();
+  }
+  if (!artOptions.championshipId) return;
+  if (!force && artBundleFor === artOptions.championshipId && Date.now() - artBundleAt < 15000) return;
+  artBundleAt = Date.now();
+  try {
+    const response = await fetch(`/api/public/championship?id=${encodeURIComponent(artOptions.championshipId)}&ts=${Date.now()}`, { cache: 'no-store' });
+    if (response.ok) { artBundle = await response.json(); artBundleFor = artOptions.championshipId; }
+  } catch {}
+  if (managementModule === 'arts') render();
+}
+
+async function loadArtSponsors() {
+  if (artSponsorsLoaded) return;
+  artSponsorsLoaded = true;
+  try {
+    const response = await fetch(`/api/state?room=${LIBRARY_ROOM}`, { cache: 'no-store' });
+    const remote = response.ok ? await response.json() : null;
+    if (remote?.updatedAt) artSponsorImages = normalizeState(remote).sponsors.filter(item => String(item.wideAsset || item.banner || item.logo || '').startsWith('/'));
+  } catch {}
+}
+
+// Escolhe padrões úteis (partida, rodada) quando o campeonato muda ou ainda não há escolha.
+function artDefaults(bundle) {
+  const matches = bundle.matches;
+  const valid = id => matches.some(match => match.id === id);
+  if (!valid(artOptions.matchId)) {
+    const finished = matches.filter(match => match.status === 'finished').pop();
+    const upcoming = matches.find(match => match.status === 'scheduled' || match.status === 'live');
+    artOptions.matchId = (artOptions.type === 'matchday' ? upcoming || finished : finished || upcoming)?.id || matches[0]?.id || '';
+  }
+  const rounds = [...new Set(matches.map(match => match.round).filter(Boolean))];
+  if (!rounds.includes(artOptions.round)) artOptions.round = (artOptions.type === 'round-fixtures' ? matches.find(match => match.status !== 'finished') : [...matches].reverse().find(match => match.status === 'finished'))?.round || rounds[0] || '';
+}
+
+function scheduleArtRender(bundle) {
+  const signature = JSON.stringify([artOptions, bundle.generatedAt, artSponsorImages.length, teamCatalog.length]);
+  if (artStudio.sig === signature) return;
+  clearTimeout(artTimer);
+  artTimer = setTimeout(async () => {
+    artStudio.sig = signature;
+    try {
+      const canvas = await renderArt(bundle, artOptions, { catalog: teamCatalog, sponsors: artSponsorImages });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (artStudio.url) URL.revokeObjectURL(artStudio.url);
+      artStudio = { ...artStudio, sig: signature, url: blob ? URL.createObjectURL(blob) : '', blob, error: blob ? '' : 'Não foi possível gerar a imagem.', width: canvas.width, height: canvas.height };
+    } catch (error) { artStudio = { ...artStudio, error: 'Falha ao desenhar a arte.' }; }
+    if (managementModule === 'arts') render();
+  }, 140);
+}
+
+function scheduleArtRenderSoon() {
+  if (artBundle && artBundleFor === artOptions.championshipId) { artDefaults(artBundle); scheduleArtRender(artBundle); }
+}
+
+function renderArtsModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato (e partidas) para gerar artes.</div>';
+  loadArtBundle();
+  loadArtSponsors();
+  const bundle = artBundleFor === artOptions.championshipId ? artBundle : null;
+  const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === artOptions.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
+  const typeInfo = ART_TYPES.find(([key]) => key === artOptions.type) || ART_TYPES[0];
+  const typeCards = ART_TYPES.map(([key, name, caption]) => `<button type="button" class="art-type ${artOptions.type === key ? 'active' : ''}" data-action="arts-set" data-value="type|${key}" aria-pressed="${artOptions.type === key}"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(caption)}</small></button>`).join('');
+  const themeCards = Object.entries(ART_THEMES).map(([key, theme]) => `<button type="button" class="art-theme ${artOptions.theme === key ? 'active' : ''}" data-action="arts-set" data-value="theme|${key}" aria-pressed="${artOptions.theme === key}"><span style="background:linear-gradient(135deg, ${theme.swatch[0]} 0 45%, ${theme.swatch[1]} 45% 75%, ${theme.swatch[2]} 75%)"></span>${escapeHtml(theme.name)}</button>`).join('');
+  const formatChips = ART_FORMATS.map(([key, label]) => `<button type="button" class="access-chip ${artOptions.format === key ? 'active' : ''}" data-action="arts-set" data-value="format|${key}" aria-pressed="${artOptions.format === key}">${escapeHtml(label)}</button>`).join('');
+  let dataControls = '';
+  if (bundle) {
+    artDefaults(bundle);
+    const matchOptions = [...bundle.matches].sort((a, b) => (b.status === 'finished') - (a.status === 'finished') || String(b.kickoffAt).localeCompare(String(a.kickoffAt))).map(match => `<option value="${escapeHtml(match.id)}" ${match.id === artOptions.matchId ? 'selected' : ''}>${escapeHtml(match.homeName)} ${match.homeScore === null ? '×' : `${match.homeScore} × ${match.awayScore}`} ${escapeHtml(match.awayName)} · ${escapeHtml(match.round || '')}</option>`).join('');
+    const rounds = [...new Set(bundle.matches.map(match => match.round).filter(Boolean))];
+    const match = bundle.matches.find(item => item.id === artOptions.matchId);
+    const kind = typeInfo[3];
+    dataControls = `${kind === 'match' || kind === 'lineup' ? `<div class="field"><label for="art-match">Partida</label><select id="art-match" data-art-field="matchId">${matchOptions}</select></div>` : ''}${kind === 'round' ? `<div class="field"><label for="art-round">Rodada ou fase</label><select id="art-round" data-art-field="round">${rounds.map(round => `<option value="${escapeHtml(round)}" ${round === artOptions.round ? 'selected' : ''}>${escapeHtml(round)}</option>`).join('')}</select></div>` : ''}${kind === 'lineup' && match ? `<div class="field"><label for="art-side">Equipe</label><select id="art-side" data-art-field="side"><option value="home" ${artOptions.side !== 'away' ? 'selected' : ''}>${escapeHtml(match.homeName)}</option><option value="away" ${artOptions.side === 'away' ? 'selected' : ''}>${escapeHtml(match.awayName)}</option></select></div>` : ''}${kind === 'top' ? `<div class="field"><label for="art-top">Quantidade de linhas</label><input id="art-top" type="number" min="3" max="20" data-art-field="topN" value="${artOptions.topN}"></div>` : ''}${kind === 'text' ? '<div class="field"><label for="art-notice-title">Título</label><input id="art-notice-title" data-art-field="title" maxlength="80" value="' + escapeHtml(artOptions.title) + '"></div><div class="field"><label for="art-notice-text">Texto</label><textarea id="art-notice-text" data-art-field="text" maxlength="600" rows="5">' + escapeHtml(artOptions.text) + '</textarea></div>' : kind !== 'text' ? `<div class="field"><label for="art-subtitle">Subtítulo (opcional)</label><input id="art-subtitle" data-art-field="title" maxlength="60" value="${escapeHtml(artOptions.title)}" placeholder="${escapeHtml(typeInfo[1])}"></div>` : ''}`;
+  }
+  const batch = bundle && (artOptions.type === 'result' || artOptions.type === 'matchday') ? '<button class="button" data-action="arts-batch">Gerar de todos os jogos da rodada</button>' : '';
+  const preview = !bundle ? '<div class="art-placeholder">Carregando dados do campeonato…</div>' : artStudio.error ? `<div class="art-placeholder">${escapeHtml(artStudio.error)}</div>` : artStudio.url ? `<img class="art-canvas" src="${escapeHtml(artStudio.url)}" alt="Prévia da arte" style="aspect-ratio:${artStudio.width}/${artStudio.height}">` : '<div class="art-placeholder">Gerando a arte…</div>';
+  if (bundle) scheduleArtRender(bundle);
+  return `<div class="arts-layout"><aside class="arts-controls"><section><h3 class="arts-step"><b>1</b> Tipo de arte</h3><div class="art-types">${typeCards}</div></section><section><h3 class="arts-step"><b>2</b> Dados</h3><div class="field"><label for="art-championship">Campeonato</label><select id="art-championship" data-art-field="championshipId">${championshipOptions}</select></div>${dataControls}</section><section><h3 class="arts-step"><b>3</b> Estilo</h3><div class="art-themes">${themeCards}</div><div class="field"><label>Formato</label><div class="access-chips">${formatChips}</div></div><div class="builder-color-field"><label><input type="color" data-art-field="accent" value="${safeColor(artOptions.accent || (ART_THEMES[artOptions.theme] || ART_THEMES.gold).accent, '#d8ad56')}"><span>Cor de destaque${artOptions.accent ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="accent|" ${artOptions.accent ? '' : 'disabled'}>Padrão</button></div><label class="builder-check"><input type="checkbox" data-art-field="logos" ${artOptions.logos ? 'checked' : ''}> Mostrar escudos</label><label class="builder-check"><input type="checkbox" data-art-field="sponsors" ${artOptions.sponsors ? 'checked' : ''}> Patrocinadores no rodapé${artSponsorImages.length ? '' : ' (cadastre na biblioteca)'}</label><label class="builder-check"><input type="checkbox" data-art-field="brand" ${artOptions.brand ? 'checked' : ''}> Assinatura do clube</label></section></aside>
+    <section class="arts-stage"><div class="arts-actions"><button class="button primary" data-action="arts-download" ${artStudio.blob ? '' : 'disabled'}>Baixar PNG</button><button class="button" data-action="arts-share" ${artStudio.blob ? '' : 'disabled'}>Compartilhar</button>${artStudio.url ? `<a class="button subtle" href="${escapeHtml(artStudio.url)}" target="_blank" rel="noopener">Abrir no tamanho real</a>` : ''}${batch}<span class="help-text">${artStudio.width ? `${artStudio.width} × ${artStudio.height} px · PNG` : ''}</span></div><div class="arts-preview">${preview}</div></section></div>`;
+}
+
+async function buildQuickArt(bundle, overrides) {
+  await loadArtSponsors();
+  return renderArt(bundle, { ...artOptions, ...overrides }, { catalog: teamCatalog, sponsors: artSponsorImages });
+}
+
+function downloadBlobFile(name, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = name;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function setArtOption(field, value) {
+  const allowed = {
+    type: () => ART_TYPES.some(([key]) => key === value), theme: () => Boolean(ART_THEMES[value]), format: () => ART_FORMATS.some(([key]) => key === value),
+    side: () => ['home', 'away'].includes(value), accent: () => value === '' || /^#[0-9a-f]{6}$/i.test(value),
+    topN: () => Number.isFinite(Number(value)), championshipId: () => true, matchId: () => true, round: () => true, title: () => true, text: () => true,
+    logos: () => true, sponsors: () => true, brand: () => true,
+  };
+  if (!allowed[field]?.()) return;
+  if (field === 'topN') artOptions.topN = Math.max(3, Math.min(20, Math.round(Number(value))));
+  else if (['logos', 'sponsors', 'brand'].includes(field)) artOptions[field] = value === true || value === 'true';
+  else if (field === 'title') artOptions.title = String(value).slice(0, 80);
+  else if (field === 'text') artOptions.text = String(value).slice(0, 600);
+  else artOptions[field] = value;
+  if (field === 'championshipId') { artOptions.matchId = ''; artOptions.round = ''; artBundle = null; artBundleFor = ''; artBundleAt = 0; }
+  if (field === 'type') { artOptions.matchId = ''; artOptions.round = ''; }
+  saveArtOptions();
 }
 
 async function openArt(canvas, name) {
@@ -2360,30 +2778,7 @@ async function openArt(canvas, name) {
 }
 
 function renderArtDrawer() {
-  return `<div class="drawer-backdrop" data-backdrop><aside class="drawer art-drawer"><div class="drawer-head"><h2>Arte pronta</h2><button class="button square" data-action="close-drawer">${icons.close}</button></div><img class="art-preview" src="${escapeHtml(artPreview?.url || '')}" alt="Prévia da arte"><div class="operations-actions"><button class="button primary" data-action="art-download">Baixar PNG</button><button class="button" data-action="art-share">Compartilhar (Instagram / WhatsApp)</button></div><p class="help-text">Envie para o celular ou compartilhe direto pelos aplicativos. Escudos só entram na arte quando estão hospedados no próprio sistema.</p></aside></div>`;
-}
-
-let selectedPostId = '';
-let postMediaUrl = '';
-const POST_KIND_LABELS = { news: 'Notícia', photo: 'Foto', video: 'Vídeo' };
-
-function renderFeedModule() {
-  const pending = renderOperationsState();
-  if (pending) return pending;
-  if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato para publicar notícias e mídia.</div>';
-  const posts = operationsData.posts || [];
-  const selected = posts.find(item => item.id === selectedPostId) || null;
-  const editor = selected || { championshipId: standingsChampionshipId || operationsData.championships[0].id, kind: 'news', title: '', body: '', round: '', link: '', media: '' };
-  const media = postMediaUrl || editor.media || '';
-  const championshipOptions = operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === editor.championshipId ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('');
-  const list = posts.map(post => `<button class="operations-item ${post.id === selected?.id ? 'active' : ''}" data-action="select-post" data-value="${escapeHtml(post.id)}"><span><strong>${escapeHtml(post.title || POST_KIND_LABELS[post.kind])}</strong><small>${escapeHtml(POST_KIND_LABELS[post.kind])} · ${escapeHtml(operationChampionshipName(post.championshipId))}${post.round ? ` · ${escapeHtml(post.round)}` : ''} · ${escapeHtml(operationDate(post.createdAt, true))}</small></span></button>`).join('') || '<div class="portal-empty">Nenhuma publicação ainda.</div>';
-  return `<div class="operations-layout"><section class="operations-list"><div class="operations-list-head"><div><strong>Publicações</strong><small>${posts.length} no total</small></div><button class="button primary" data-action="new-post">+ Nova</button></div>${list}</section><section class="operations-editor"><div class="section-header"><div><h3 class="section-title">${selected ? 'Editar publicação' : 'Nova publicação'}</h3><p class="help-text">Aparece na aba Notícias da página pública do campeonato (precisa estar publicada em Campeonatos > Divulgação).</p></div></div>
-    <div class="field-row"><div class="field"><label for="post-championship">Campeonato</label><select id="post-championship">${championshipOptions}</select></div><div class="field"><label for="post-kind">Tipo</label><select id="post-kind">${Object.entries(POST_KIND_LABELS).map(([key, label]) => `<option value="${key}" ${editor.kind === key ? 'selected' : ''}>${label}</option>`).join('')}</select></div><div class="field"><label for="post-round">Rodada (opcional)</label><input id="post-round" maxlength="60" value="${escapeHtml(editor.round || '')}" placeholder="Ex.: Rodada 3"></div></div>
-    <div class="field"><label for="post-title">Título</label><input id="post-title" maxlength="140" value="${escapeHtml(editor.title || '')}"></div>
-    <div class="field"><label for="post-body">Texto</label><textarea id="post-body" maxlength="4000" rows="6">${escapeHtml(editor.body || '')}</textarea></div>
-    <div class="field"><label for="post-link">Link externo (vídeo do YouTube, matéria...)</label><input id="post-link" type="url" maxlength="300" value="${escapeHtml(editor.link || '')}" placeholder="https://"></div>
-    <div class="field"><label>Imagem</label>${media ? `<img class="post-media-preview" src="${escapeHtml(media)}" alt="">` : ''}<label class="sponsor-upload-button">${media ? 'Trocar imagem' : 'Enviar imagem'}<input type="file" data-post-media accept="image/png,image/jpeg,image/webp"></label>${media ? '<button class="button subtle" data-action="clear-post-media">Remover imagem</button>' : ''}</div>
-    <div class="operations-actions"><button class="button primary" data-action="save-post" data-value="${escapeHtml(selected?.id || '')}">${selected ? 'Salvar alterações' : 'Publicar'}</button>${selected ? `<button class="button subtle danger" data-action="delete-post" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div></section></div>`;
+  return `<div class="drawer-backdrop" data-backdrop><aside class="drawer art-drawer"><div class="drawer-head"><h2>Arte pronta</h2><button class="button square" data-action="close-drawer">${icons.close}</button></div><img class="art-preview" src="${escapeHtml(artPreview?.url || '')}" alt="Prévia da arte"><div class="operations-actions"><button class="button primary" data-action="art-download">Baixar PNG</button><button class="button" data-action="art-share">Compartilhar (Instagram / WhatsApp)</button></div><p class="help-text">Para mais estilos e formatos (stories, paisagem), abra o <a href="${escapeHtml(platformUrl('arts'))}">Estúdio de artes</a>.</p></aside></div>`;
 }
 
 const LIVE_LAYER_LABELS = { scoreboard: 'Placar', sponsor: 'Patrocinador', sponsorBar: 'Barra de patrocinadores', lineup: 'Escalação simples', photoLineup: 'Apresentação', stats: 'Estatísticas' };
@@ -3127,6 +3522,7 @@ function renderModuleControls(key) {
   if (key === 'live') return renderLiveModule();
   if (key === 'standings') return renderStandingsModule();
   if (key === 'feed') return renderFeedModule();
+  if (key === 'arts') return renderArtsModule();
   if (key === 'backup') return renderBackupModule();
   let content = '';
   if (moduleTab === 'control') content = `<div class="module-section"><div class="inline-actions"><button class="button primary" data-action="${key === 'scoreboard' ? 'overlay-scoreboard' : key === 'lineup' ? 'overlay-photo-lineup' : key === 'sponsors' ? 'overlay-sponsor' : key === 'sponsor-bar' ? 'overlay-sponsor-bar' : key === 'stats' ? 'overlay-stats' : 'overlay-event'}">Mostrar / Ocultar</button>${key === 'scoreboard' ? '<button class="button" data-action="test-scoreboard-animation">Testar entrada</button><button class="button" data-action="test-goal">Testar gol</button>' : key === 'sponsors' ? '<button class="button" data-action="test-sponsor-animation">Testar transição</button>' : key === 'sponsor-bar' ? '<button class="button" data-action="next-sponsor-bar">Testar troca</button>' : ''}</div></div>`;
@@ -3238,7 +3634,7 @@ function renderModuleHub() {
 const PLATFORM_MENU_GROUPS = [
   ['operation', 'Operação', ['live', 'championships', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
-  ['content', 'Conteúdo', ['feed', 'sponsors', 'sponsor-bar', 'builder']],
+  ['content', 'Conteúdo', ['arts', 'feed', 'sponsors', 'sponsor-bar', 'builder']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
   ['administration', 'Administração', ['access', 'backup']],
 ];
@@ -3273,7 +3669,7 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed'].includes(module?.key);
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts'].includes(module?.key);
   return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements','live','standings'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${adminSession.role === 'viewer' ? '<div class="library-banner"><div><strong>Acesso somente leitura</strong><p>Seu papel é Leitor: você pode consultar dados e prévias, mas alterações não são salvas.</p></div></div>' : ''}${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
@@ -3798,7 +4194,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -4179,10 +4575,42 @@ function handleAction(action, target) {
   if (action === 'select-championship') { selectedChampionshipId = target.dataset.value; championshipDraft = structuredClone(operationsData.championships.find(item => item.id === selectedChampionshipId) || null); render(); return; }
   if (action === 'art-result') {
     const match = standingsBundle?.matches.find(item => item.id === target.dataset.value);
-    if (match) buildResultArt(match, standingsBundle).then(canvas => openArt(canvas, `resultado-${match.id}`));
+    if (match) buildQuickArt(standingsBundle, { type: 'result', matchId: match.id, championshipId: standingsChampionshipId }).then(canvas => openArt(canvas, `resultado-${match.id}`));
     return;
   }
-  if (action === 'art-standings') { if (standingsBundle) buildStandingsArt(standingsBundle).then(canvas => openArt(canvas, `classificacao-${standingsBundle.championship.slug || 'campeonato'}`)); return; }
+  if (action === 'art-standings') { if (standingsBundle) buildQuickArt(standingsBundle, { type: 'standings', championshipId: standingsChampionshipId, format: 'portrait' }).then(canvas => openArt(canvas, `classificacao-${standingsBundle.championship.slug || 'campeonato'}`)); return; }
+  if (action === 'arts-set') {
+    const [field, value = ''] = String(target.dataset.value || '').split('|');
+    setArtOption(field, value);
+    render();
+    return;
+  }
+  if (action === 'arts-download' || action === 'arts-share') {
+    if (!artStudio.blob) return;
+    const name = `arte-${artOptions.type}-${artOptions.format}`;
+    if (action === 'arts-download') { downloadBlobFile(`${name}.png`, artStudio.blob); return; }
+    const file = new File([artStudio.blob], `${name}.png`, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) navigator.share({ files: [file], title: 'Arte' }).catch(() => {});
+    else { toast('Seu navegador não compartilha arquivos; a imagem será baixada.'); downloadBlobFile(`${name}.png`, artStudio.blob); }
+    return;
+  }
+  if (action === 'arts-batch') {
+    const bundle = artBundle;
+    const current = bundle?.matches.find(item => item.id === artOptions.matchId);
+    const list = bundle?.matches.filter(item => item.round === current?.round && item.status !== 'cancelled') || [];
+    if (!list.length) { toast('Escolha uma partida com rodada definida.'); return; }
+    toast(`Gerando ${list.length} arte(s)… o navegador pode pedir permissão para baixar vários arquivos.`);
+    (async () => {
+      for (const match of list) {
+        const canvas = await buildQuickArt(bundle, { matchId: match.id });
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (blob) downloadBlobFile(`arte-${artOptions.type}-${match.room}.png`, blob);
+        await new Promise(resolve => setTimeout(resolve, 450));
+      }
+      toast('Artes da rodada geradas.');
+    })();
+    return;
+  }
   if (action === 'art-download') {
     if (!artPreview) return;
     const link = document.createElement('a'); link.href = artPreview.url; link.download = `${artPreview.name}.png`;
@@ -5480,6 +5908,14 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-art-field]')) {
+    const field = target.dataset.artField;
+    setArtOption(field, target.type === 'checkbox' ? target.checked : target.value);
+    if (field === 'championshipId') loadArtBundle(true);
+    if (['title', 'text', 'topN', 'accent'].includes(field)) { clearTimeout(artTimer); scheduleArtRenderSoon(); return; }
+    render();
+    return;
+  }
   if (target.matches('[data-public-search]')) {
     publicData.query = target.value;
     clearTimeout(publicSearchTimer);

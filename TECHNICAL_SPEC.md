@@ -78,6 +78,7 @@ No Docker, estado e mídias ficam no volume `/app/.data`. Na versão hospedada p
 | `/manage/championships` | Campeonatos: regras, equipes, geração de partidas, divulgação e moderadores |
 | `/manage/standings` | Classificação, artilharia, cartões, súmulas e artes para redes |
 | `/manage/feed` | Notícias, fotos e vídeos por campeonato |
+| `/manage/arts` | Estúdio de artes: peças PNG (10 tipos, 6 estilos, 4 formatos) geradas no navegador |
 | `/campeonatos` | Página pública: busca de campeonatos e organizadores (sem login) |
 | `/c/<slug>` | Página pública de um campeonato (classificação, jogos, artilharia, disciplina, notícias) |
 | `/o/<slug>` | Página pública de um organizador |
