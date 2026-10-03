@@ -2353,7 +2353,7 @@ body.obs-page #app { position: fixed; inset: 0; overflow: hidden; }
 .obs-head small { display: block; font-size: 18px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .75; }
 .obs-head strong { display: block; font-size: 40px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
 .obs-body { padding: 8px 0; }
-.obs-row { display: flex; align-items: center; gap: 16px; padding: 11px 28px; border-bottom: 1px solid var(--o-line); }
+.obs-row { display: flex; align-items: center; gap: 16px; padding: calc(11px * var(--o-pad, 1)) 28px; border-bottom: 1px solid var(--o-line); }
 .obs-row:last-child { border-bottom: 0; }
 .obs-row.is-first { background: linear-gradient(90deg, rgba(255,255,255,.1), transparent); }
 .obs-pos { width: 38px; text-align: center; font-size: 30px; font-weight: 800; color: var(--o-accent); }
@@ -2421,3 +2421,7 @@ body.obs-page #app { position: fixed; inset: 0; overflow: hidden; }
 .arts-controls .access-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .arts-controls .access-chip { white-space: nowrap; }
 .obs-url-bar input { height: 40px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.14); background: #0e1016; color: inherit; font: inherit; font-size: 13px; }
+
+.art-preset-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.art-preset-list li { display: inline-flex; gap: 2px; }
+.art-upload input[data-art-preset-name] { flex: 1 1 140px; min-width: 0; }

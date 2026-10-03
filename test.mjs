@@ -244,6 +244,9 @@ try {
   const tickerCfg = obsApi.obsConfig('?c=copa-node&rows=4', 'ticker');
   const roundTrip = obsApi.obsConfig(new URL(obsApi.obsUrl(obsCfg), 'http://x').search, 'standings');
   verify('OBS championship overlays validate URL parameters, render rows and ticker, and round-trip their link', obsStandings.app.innerHTML.includes('obs-style-neon') && obsStandings.app.innerHTML.includes('--o-accent:#00e5ff') && obsCfg.scale === 200 && obsCfg.anim === 'rise' && obsRows.includes('obs-row') && obsApi.obsTickerMarkup(obsBundle, tickerCfg, obsApi.obsItems(obsBundle, tickerCfg)).includes('obs-track') && obsTicker.app.innerHTML.includes('obs-view-ticker') && roundTrip.style === 'neon' && roundTrip.accent === '#00e5ff' && obsApi.obsConfig('', 'bogus').view === 'standings' && obsApi.obsUrl(obsApi.obsConfig('?c=a', 'fixtures')) === '/obs/fixtures?c=a');
+  const finishCfg = obsApi.obsConfig('?c=a&bw=3&bc=ff0000&sh=40&blur=99&pad=10&head=0&dots=0&accent=00e5ff', 'standings');
+  const finishStage = obsApi.obsStage(finishCfg);
+  verify('OBS finish options (border, shadow, blur, padding, header and page dots) are validated, applied to the panel and round-trip in the URL', finishCfg.bw === 3 && finishCfg.bc === '#ff0000' && finishCfg.sh === 40 && finishCfg.blur === 30 && finishCfg.pad === 50 && finishCfg.head === 0 && finishCfg.dots === 0 && finishStage.includes('border:3px solid #ff0000') && finishStage.includes('backdrop-filter:blur(30px)') && !finishStage.includes('obs-head') && !finishStage.includes('data-obs-dots') && obsApi.obsConfig(new URL(obsApi.obsUrl(finishCfg), 'http://x').search, 'standings').bw === 3 && obsApi.obsUrl(obsApi.obsConfig('?c=a', 'standings')) === '/obs/standings?c=a');
   const nodeJson = { 'content-type': 'application/json', cookie: adminCookie };
   await fetch(`${baseURL}/api/auth/admin/accounts`, { method: 'POST', headers: nodeJson, body: JSON.stringify({ username: 'leitor-node', password: 'senha-papel-123', role: 'viewer' }) });
   const nodeViewerLogin = await fetch(`${baseURL}/api/auth/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: 'leitor-node', password: 'senha-papel-123' }) });
@@ -285,6 +288,12 @@ try {
   verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 24);
   const artsModule = makeRuntime('/manage/arts?room=module-arts', { broadcast: false });
   verify('Art studio and OBS championship overlays are dedicated modules in the sidebar and hub', artsModule.app.innerHTML.includes('Estúdio de artes') && moduleHub.app.innerHTML.includes('/manage/arts') && moduleHub.app.innerHTML.includes('/manage/broadcast'));
+  const artApi = artsModule.sandbox;
+  artApi.applyArtStyle({ bgStyle: 'hex', bgIntensity: 999, layout: 'poster', frame: 'bogus', panelStyle: 'glass', tagText: 'X'.repeat(50), padding: 5, vignette: 40 });
+  const artStyle = artApi.artPresetPayload();
+  artApi.applyArtStyle({});
+  const artReset = artApi.artPresetPayload();
+  verify('Art studio layers (background pattern, layout, frame, panel, tag, padding) are validated, clamped and resettable', artStyle.bgStyle === 'hex' && artStyle.bgIntensity === 90 && artStyle.layout === 'poster' && artStyle.frame === 'none' && artStyle.panelStyle === 'glass' && artStyle.tagText.length === 24 && artStyle.padding === 70 && artStyle.vignette === 40 && artReset.bgStyle === 'theme' && artReset.layout === 'classic' && artReset.tagText === '' && artReset.padding === 100);
   const lineupModule = makeRuntime('/manage/lineup?room=module-lineup', { broadcast: false });
   verify('Dedicated routes share the same navigation and mark the selected overlay', lineupModule.app.innerHTML.includes('aria-label="Navegação dos overlays"') && /class="active" href="[^"]*\/manage\/lineup/.test(lineupModule.app.innerHTML));
   verify('Lineup module combines dedicated controls, isolated preview, and OBS URL access', lineupModule.app.innerHTML.includes('Direção da apresentação') && lineupModule.app.innerHTML.includes('Prévia isolada') && lineupModule.app.innerHTML.includes('data-value="photo-lineup"'));

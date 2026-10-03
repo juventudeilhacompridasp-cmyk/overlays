@@ -2280,7 +2280,7 @@ const OBS_STYLES = [['broadcast', 'Painel TV'], ['glass', 'Vidro'], ['neon', 'Ne
 const OBS_ANIMATIONS = [['rise', 'Subida'], ['slide', 'Deslize'], ['zoom', 'Zoom'], ['wipe', 'Cortina'], ['fade', 'Fade'], ['flip', 'Virada 3D'], ['cascade', 'Cascata de linhas'], ['bounce', 'Salto elástico'], ['drop', 'Queda do topo']];
 const OBS_POSITIONS = [['tl', 'Topo esq.'], ['tc', 'Topo centro'], ['tr', 'Topo dir.'], ['cl', 'Meio esq.'], ['cc', 'Centro'], ['cr', 'Meio dir.'], ['bl', 'Base esq.'], ['bc', 'Base centro'], ['br', 'Base dir.']];
 const OBS_VIEW_DEFAULTS = { standings: { pos: 'cl', width: 760 }, fixtures: { pos: 'bl', width: 860 }, results: { pos: 'bl', width: 860 }, scorers: { pos: 'cr', width: 640 }, discipline: { pos: 'cr', width: 720 }, matchcard: { pos: 'bc', width: 1060 }, ticker: { pos: 'bc', width: 1920 }, champion: { pos: 'cc', width: 760 } };
-const OBS_DEFAULTS = { style: 'broadcast', anim: 'rise', dx: 0, dy: 0, scale: 100, surface: 94, radius: 10, logos: 1, hold: 0, gap: 20, rotate: 8, refresh: 15, cols: 'std', speed: 90 };
+const OBS_DEFAULTS = { style: 'broadcast', anim: 'rise', dx: 0, dy: 0, scale: 100, surface: 94, radius: 10, logos: 1, hold: 0, gap: 20, rotate: 8, refresh: 15, cols: 'std', speed: 90, bw: 0, sh: 0, pad: 100, blur: 0, head: 1, dots: 1 };
 
 function obsConfig(search = location.search, viewName = '') {
   const params = new URLSearchParams(search);
@@ -2302,6 +2302,7 @@ function obsConfig(search = location.search, viewName = '') {
     group: String(params.get('group') || '').slice(0, 40), round: String(params.get('round') || '').slice(0, 60),
     hold: number('hold', 0, 600, 0), gap: number('gap', 3, 900, OBS_DEFAULTS.gap), rotate: number('rotate', 3, 120, OBS_DEFAULTS.rotate), refresh: number('refresh', 5, 300, OBS_DEFAULTS.refresh),
     cols: pick('cols', [['min', ''], ['std', ''], ['full', '']], 'std'), speed: number('speed', 20, 400, OBS_DEFAULTS.speed),
+    bw: number('bw', 0, 12, 0), bc: color('bc'), sh: number('sh', 0, 80, 0), pad: number('pad', 50, 220, 100), blur: number('blur', 0, 30, 0), head: params.get('head') === '0' ? 0 : 1, dots: params.get('dots') === '0' ? 0 : 1,
   };
 }
 
@@ -2311,7 +2312,7 @@ function obsUrl(cfg, absolute = false) {
   const params = new URLSearchParams();
   if (cfg.slug) params.set('c', cfg.slug); else if (cfg.id) params.set('id', cfg.id);
   if (cfg.match && cfg.view === 'matchcard') params.set('match', cfg.match);
-  const plain = { style: OBS_DEFAULTS.style, anim: OBS_DEFAULTS.anim, dx: 0, dy: 0, scale: 100, surface: OBS_DEFAULTS.surface, radius: OBS_DEFAULTS.radius, logos: 1, hold: 0, gap: OBS_DEFAULTS.gap, rotate: OBS_DEFAULTS.rotate, refresh: OBS_DEFAULTS.refresh, cols: 'std', speed: OBS_DEFAULTS.speed, font: 'global', accent: '', bg: '', text: '', title: '', subtitle: '', group: '', round: '', pos: defaults.pos, width: defaults.width + (cfg.view === 'standings' && cfg.cols === 'full' ? 160 : 0), rows: info[3] };
+  const plain = { style: OBS_DEFAULTS.style, anim: OBS_DEFAULTS.anim, dx: 0, dy: 0, scale: 100, surface: OBS_DEFAULTS.surface, radius: OBS_DEFAULTS.radius, logos: 1, hold: 0, gap: OBS_DEFAULTS.gap, rotate: OBS_DEFAULTS.rotate, refresh: OBS_DEFAULTS.refresh, cols: 'std', speed: OBS_DEFAULTS.speed, font: 'global', accent: '', bg: '', text: '', bw: 0, bc: '', sh: 0, pad: 100, blur: 0, head: 1, dots: 1, title: '', subtitle: '', group: '', round: '', pos: defaults.pos, width: defaults.width + (cfg.view === 'standings' && cfg.cols === 'full' ? 160 : 0), rows: info[3] };
   for (const [key, fallback] of Object.entries(plain)) {
     if (cfg[key] !== undefined && cfg[key] !== fallback && cfg[key] !== '') params.set(key, String(cfg[key]).replace(/^#/, ''));
   }
@@ -2435,10 +2436,11 @@ function obsStage(cfg) {
   const styles = [
     `--o-accent:${cfg.accent || obsState.global.accent}`, `--o-bg:${obsRgba(cfg.bg || (cfg.style === 'light' ? '#ffffff' : '#0b0d13'), cfg.surface / 100)}`, `--o-bg-solid:${safeColor(cfg.bg || (cfg.style === 'light' ? '#ffffff' : '#0b0d13'))}`,
     cfg.text ? `--o-text:${cfg.text}` : '', `--o-radius:${cfg.radius}px`, `--o-scale:${cfg.scale / 100}`, `--o-width:${cfg.view === 'ticker' ? 1920 : cfg.width}px`,
+    cfg.bw ? `border:${cfg.bw}px solid ${cfg.bc || cfg.accent || obsState.global.accent}` : '', cfg.sh ? `box-shadow:0 ${Math.round(cfg.sh / 3)}px ${cfg.sh}px rgba(0,0,0,.6)` : '', cfg.blur ? `backdrop-filter:blur(${cfg.blur}px)` : '', `--o-pad:${cfg.pad / 100}`,
     `--o-font:${(cfg.font === 'global' ? (TYPEFACES[obsState.global.typeface] || TYPEFACES.roboto).stack : TYPEFACES[cfg.font].stack)}`, `--o-dx:${cfg.dx}px`, `--o-dy:${cfg.dy}px`,
   ].filter(Boolean).join(';');
-  const head = cfg.view === 'ticker' ? '' : `<header class="obs-head">${cfg.logos && bundle?.championship?.logo ? `<span class="obs-badge"><img src="${escapeHtml(bundle.championship.logo)}" alt=""></span>` : ''}<div><small>${escapeHtml(sub)}</small><strong>${escapeHtml(heading || info[1])}</strong></div></header>`;
-  return `<div class="obs-stage" data-obs-stage><div class="obs-anchor is-v-${vertical} is-h-${horizontal} ${cfg.view === 'ticker' ? 'is-wide' : ''}"><div class="obs-panel obs-style-${cfg.style} obs-view-${cfg.view}" data-obs-panel style="${styles}">${head}<div class="obs-body" data-obs-body></div><div class="obs-dots" data-obs-dots></div></div></div></div>`;
+  const head = cfg.view === 'ticker' || !cfg.head ? '' : `<header class="obs-head">${cfg.logos && bundle?.championship?.logo ? `<span class="obs-badge"><img src="${escapeHtml(bundle.championship.logo)}" alt=""></span>` : ''}<div><small>${escapeHtml(sub)}</small><strong>${escapeHtml(heading || info[1])}</strong></div></header>`;
+  return `<div class="obs-stage" data-obs-stage><div class="obs-anchor is-v-${vertical} is-h-${horizontal} ${cfg.view === 'ticker' ? 'is-wide' : ''}"><div class="obs-panel obs-style-${cfg.style} obs-view-${cfg.view}" data-obs-panel style="${styles}">${head}<div class="obs-body" data-obs-body></div>${cfg.dots ? '<div class="obs-dots" data-obs-dots></div>' : ''}</div></div></div>`;
 }
 
 function obsPlay(direction) {
@@ -2466,7 +2468,7 @@ function obsPaint(swap = false) {
   obsState.page = obsState.page % pages;
   const slice = items.slice(obsState.page * cfg.rows, obsState.page * cfg.rows + cfg.rows);
   body.innerHTML = cfg.view === 'ticker' ? obsTickerMarkup(bundle, cfg, items) : obsBodyMarkup(bundle, cfg, slice);
-  dots.innerHTML = pages > 1 ? Array.from({ length: pages }, (_, index) => `<i class="${index === obsState.page ? 'on' : ''}"></i>`).join('') : '';
+  if (dots) dots.innerHTML = pages > 1 ? Array.from({ length: pages }, (_, index) => `<i class="${index === obsState.page ? 'on' : ''}"></i>`).join('') : '';
   const track = body.querySelector('[data-obs-track]');
   if (track) {
     const width = track.firstElementChild.scrollWidth || 1920;
@@ -2578,7 +2580,8 @@ async function loadObsBundle() {
   if (!championship) return;
   // Campeonato sem slug (cadastros antigos) é referenciado por id; ajusta uma única vez para não re-renderizar em laço.
   const wantedSlug = championship.slug || '';
-  if (obsOptions.slug !== wantedSlug && obsAutoSlug !== championship.id) {
+  const needsTarget = wantedSlug ? obsOptions.slug !== wantedSlug : Boolean(obsOptions.slug) || obsOptions.id !== championship.id;
+  if (needsTarget && obsAutoSlug !== championship.id) {
     obsAutoSlug = championship.id;
     setObsOption('slug', wantedSlug);
     if (!wantedSlug) setObsOption('id', championship.id);
@@ -2613,6 +2616,45 @@ function obsReloadFrame(immediate = false) {
   if (immediate) run(); else obsFrameTimer = setTimeout(run, 380);
 }
 
+const OBS_STYLE_KEYS = ['style', 'anim', 'accent', 'bg', 'text', 'font', 'surface', 'radius', 'scale', 'bw', 'bc', 'sh', 'pad', 'blur', 'head', 'dots', 'logos', 'pos', 'hold', 'gap', 'rotate', 'speed', 'refresh'];
+const OBS_PRESETS_KEY = 'juventude.obs.modelos.v1';
+const OBS_TEMPLATES = [
+  ['Painel TV', { style: 'broadcast', anim: 'rise', accent: '', bg: '', text: '', surface: 94, radius: 10, bw: 0, sh: 0, blur: 0, pad: 100 }],
+  ['Vidro moderno', { style: 'glass', anim: 'fade', surface: 55, radius: 18, blur: 14, bw: 2, bc: '#ffffff', sh: 40, pad: 100 }],
+  ['Neon noturno', { style: 'neon', anim: 'zoom', accent: '#00e5ff', radius: 12, bw: 2, sh: 36, blur: 0, surface: 88 }],
+  ['Jornal claro', { style: 'light', anim: 'slide', accent: '#c1272d', radius: 6, bw: 0, sh: 30, surface: 100, pad: 90 }],
+  ['Barra esportiva', { style: 'stripe', anim: 'wipe', accent: '#2f7df6', radius: 0, bw: 0, sh: 24, surface: 96, pad: 85 }],
+  ['Minimal limpo', { style: 'minimal', anim: 'fade', radius: 4, bw: 0, sh: 0, surface: 60, pad: 110, head: 1 }],
+  ['Dourado premium', { style: 'gradient', anim: 'rise', accent: '#d8ad56', radius: 14, bw: 3, bc: '#d8ad56', sh: 50, surface: 92, pad: 105 }],
+  ['Compacto', { style: 'broadcast', anim: 'slide', radius: 8, pad: 60, scale: 90, dots: 0 }],
+];
+function obsUserPresets() {
+  try { const saved = JSON.parse(localStorage.getItem(OBS_PRESETS_KEY)); return Array.isArray(saved) ? saved.filter(item => item && typeof item.name === 'string' && item.options && typeof item.options === 'object').slice(0, 30) : []; } catch { return []; }
+}
+function saveObsPresets(list) { try { localStorage.setItem(OBS_PRESETS_KEY, JSON.stringify(list.slice(0, 30))); } catch {} }
+// Mescla opções de estilo sobre a configuração atual e revalida tudo por obsConfig (mesma regra dos parâmetros da URL).
+function applyObsStyle(styles, { reset = true } = {}) {
+  const next = { ...obsOptions };
+  if (reset) Object.assign(next, { accent: '', bg: '', text: '', bc: '', bw: 0, sh: 0, pad: 100, blur: 0, head: 1, dots: 1, surface: OBS_DEFAULTS.surface, radius: OBS_DEFAULTS.radius, scale: 100 });
+  for (const [key, value] of Object.entries(styles || {})) if (OBS_STYLE_KEYS.includes(key) && ['string', 'number', 'boolean'].includes(typeof value)) next[key] = value;
+  obsOptions = obsConfig(obsQuery(next), next.view);
+  try { localStorage.setItem(OBS_OPTIONS_KEY, JSON.stringify(obsOptions)); } catch {}
+}
+function obsPresetPayload() { return Object.fromEntries(OBS_STYLE_KEYS.map(key => [key, obsOptions[key]])); }
+let obsPresetName = '';
+
+function renderObsExtras(chip, range, colorField) {
+  const cfg = obsOptions;
+  const presets = obsUserPresets();
+  const models = `<section><h3 class="arts-step"><b>★</b> Modelos</h3><p class="help-text">Aplicam estilo, animação, cores e acabamento. O campeonato e a visão escolhida não mudam.</p><div class="access-chips">${OBS_TEMPLATES.map(([name], index) => `<button type="button" class="access-chip" data-action="obs-template" data-value="${index}">${escapeHtml(name)}</button>`).join('')}</div>
+    <div class="field"><label for="obs-preset-name">Meus modelos</label><div class="art-upload"><input id="obs-preset-name" data-obs-preset-name maxlength="40" placeholder="Nome do modelo" value="${escapeHtml(obsPresetName)}"><button class="button subtle" data-action="obs-preset-save">Salvar o estilo atual</button></div></div>
+    ${presets.length ? `<ul class="art-preset-list">${presets.map((item, index) => `<li><button type="button" class="button subtle" data-action="obs-preset-apply" data-value="${index}">${escapeHtml(item.name)}</button><button type="button" class="button subtle" data-action="obs-preset-delete" data-value="${index}" aria-label="Excluir ${escapeHtml(item.name)}">✕</button></li>`).join('')}</ul>` : '<p class="help-text">Nenhum modelo salvo ainda. Os modelos ficam neste navegador.</p>'}
+    <div class="art-upload"><button class="button subtle" data-action="obs-preset-export">Exportar modelos</button><label class="button subtle">Importar modelos<input type="file" accept="application/json,.json" data-obs-import hidden></label></div></section>`;
+  const finish = `<section><h3 class="arts-step"><b>5</b> Acabamento</h3>${range('bw', 'Borda', 0, 12, 1, ' px')}${cfg.bw ? colorField('bc', 'Cor da borda', '#d8ad56') : ''}${range('sh', 'Sombra', 0, 80, 1, ' px')}${range('blur', 'Desfoque do fundo (vidro)', 0, 30, 1, ' px')}${range('pad', 'Espaçamento das linhas', 50, 220, 5, '%')}
+    <label class="builder-check"><input type="checkbox" data-obs-field="head" ${cfg.head ? 'checked' : ''}> Mostrar cabeçalho (título e escudo)</label><label class="builder-check"><input type="checkbox" data-obs-field="dots" ${cfg.dots ? 'checked' : ''}> Mostrar indicador de páginas</label></section>`;
+  return { models, finish };
+}
+
 function renderBroadcastModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
@@ -2631,13 +2673,14 @@ function renderBroadcastModule() {
   const select = (field, label, options) => `<div class="field"><label>${label}</label><select data-obs-field="${field}">${options}</select></div>`;
   const filters = ['standings', 'fixtures', 'results'].includes(cfg.view) ? `${cfg.view === 'standings' && groups.length ? select('group', 'Grupo', `<option value="">Todos</option>${groups.map(group => `<option value="${escapeHtml(group)}" ${group === cfg.group ? 'selected' : ''}>${escapeHtml(group)}</option>`).join('')}`) : ''}${cfg.view !== 'standings' && rounds.length ? select('round', 'Rodada ou fase', `<option value="">Todas</option>${rounds.map(round => `<option value="${escapeHtml(round)}" ${round === cfg.round ? 'selected' : ''}>${escapeHtml(round)}</option>`).join('')}`) : ''}` : '';
   const matchPick = cfg.view === 'matchcard' ? select('match', 'Partida (vazio = automática)', `<option value="">Automática: ao vivo, próxima ou última</option>${matchOptions}`) : '';
+  const extras = renderObsExtras(chip, range, colorField);
   const url = obsUrl(cfg, true);
   const warning = championship && !championship.isPublic ? '<p class="help-text obs-warning">Este campeonato é privado: o OBS não tem login e não conseguirá carregar os dados. Marque-o como público em Campeonatos.</p>' : '';
   return `<div class="arts-layout obs-layout"><aside class="arts-controls">
-    <section><h3 class="arts-step"><b>1</b> O que exibir</h3>${select('slug', 'Campeonato', operationsData.championships.map(item => `<option value="${escapeHtml(item.slug)}" ${item.slug === cfg.slug ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join(''))}<div class="art-types">${viewCards}</div>${filters}${matchPick}<div class="field"><label>Título (opcional)</label><input data-obs-field="title" maxlength="60" value="${escapeHtml(cfg.title)}" placeholder="${escapeHtml(OBS_TITLES[cfg.view] || OBS_VIEWS.find(([key]) => key === cfg.view)[1])}"></div><div class="field"><label>Subtítulo (opcional)</label><input data-obs-field="subtitle" maxlength="60" value="${escapeHtml(cfg.subtitle)}"></div>${cfg.view === 'standings' ? `<div class="field"><label>Colunas da tabela</label><div class="access-chips">${[['min', 'Só pontos'], ['std', 'J · SG · P'], ['full', 'Completa']].map(([value, label]) => chip('cols', value, label, cfg.cols === value)).join('')}</div></div>` : ''}${!['matchcard', 'champion'].includes(cfg.view) ? range('rows', cfg.view === 'ticker' ? 'Itens na faixa' : 'Linhas por página', 1, 30) : ''}</section>
+    ${extras.models}<section><h3 class="arts-step"><b>1</b> O que exibir</h3>${select('slug', 'Campeonato', operationsData.championships.map(item => `<option value="${escapeHtml(item.slug)}" ${item.slug === cfg.slug ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join(''))}<div class="art-types">${viewCards}</div>${filters}${matchPick}<div class="field"><label>Título (opcional)</label><input data-obs-field="title" maxlength="60" value="${escapeHtml(cfg.title)}" placeholder="${escapeHtml(OBS_TITLES[cfg.view] || OBS_VIEWS.find(([key]) => key === cfg.view)[1])}"></div><div class="field"><label>Subtítulo (opcional)</label><input data-obs-field="subtitle" maxlength="60" value="${escapeHtml(cfg.subtitle)}"></div>${cfg.view === 'standings' ? `<div class="field"><label>Colunas da tabela</label><div class="access-chips">${[['min', 'Só pontos'], ['std', 'J · SG · P'], ['full', 'Completa']].map(([value, label]) => chip('cols', value, label, cfg.cols === value)).join('')}</div></div>` : ''}${!['matchcard', 'champion'].includes(cfg.view) ? range('rows', cfg.view === 'ticker' ? 'Itens na faixa' : 'Linhas por página', 1, 30) : ''}</section>
     <section><h3 class="arts-step"><b>2</b> Visual e animação</h3><div class="field"><label>Estilo</label><div class="access-chips">${OBS_STYLES.map(([key, label]) => chip('style', key, label, cfg.style === key)).join('')}</div></div><div class="field"><label>Animação de entrada e saída</label><div class="access-chips">${OBS_ANIMATIONS.map(([key, label]) => chip('anim', key, label, cfg.anim === key)).join('')}</div></div><button class="button subtle" data-action="obs-replay">▶ Reproduzir animação</button>${colorField('accent', 'Cor de destaque', '#d8ad56')}${colorField('bg', 'Cor do painel', cfg.style === 'light' ? '#ffffff' : '#0b0d13')}${colorField('text', 'Cor do texto', cfg.style === 'light' ? '#14161c' : '#ffffff')}<div class="field"><label>Tipografia</label><select data-obs-field="font">${typefaces}</select></div><label class="builder-check"><input type="checkbox" data-obs-field="logos" ${cfg.logos ? 'checked' : ''}> Mostrar escudos</label></section>
     <section><h3 class="arts-step"><b>3</b> Posição e tamanho</h3><div class="obs-grid">${OBS_POSITIONS.map(([key, label]) => `<button type="button" class="${cfg.pos === key ? 'active' : ''}" data-action="obs-set" data-value="pos|${key}" title="${label}" aria-label="${label}" aria-pressed="${cfg.pos === key}"></button>`).join('')}</div>${range('scale', 'Escala', 50, 200, 1, '%')}${cfg.view === 'ticker' ? range('speed', 'Velocidade da faixa', 20, 400, 5, ' px/s') : range('width', 'Largura', 360, 1920, 10, ' px')}${range('dx', 'Ajuste horizontal', -1000, 1000, 5, ' px')}${range('dy', 'Ajuste vertical', -600, 600, 5, ' px')}${range('surface', 'Opacidade do painel', 30, 100, 1, '%')}${range('radius', 'Arredondamento', 0, 28, 1, ' px')}</section>
-    <section><h3 class="arts-step"><b>4</b> Ciclo e dados</h3>${range('hold', 'Tempo no ar (0 = fixo)', 0, 120, 1, ' s')}${cfg.hold ? range('gap', 'Intervalo fora do ar', 3, 300, 1, ' s') : ''}${!['ticker', 'matchcard', 'champion'].includes(cfg.view) ? range('rotate', 'Troca de página', 3, 60, 1, ' s') : ''}${range('refresh', 'Atualizar dados a cada', 5, 120, 1, ' s')}</section></aside>
+    <section><h3 class="arts-step"><b>4</b> Ciclo e dados</h3>${range('hold', 'Tempo no ar (0 = fixo)', 0, 120, 1, ' s')}${cfg.hold ? range('gap', 'Intervalo fora do ar', 3, 300, 1, ' s') : ''}${!['ticker', 'matchcard', 'champion'].includes(cfg.view) ? range('rotate', 'Troca de página', 3, 60, 1, ' s') : ''}${range('refresh', 'Atualizar dados a cada', 5, 120, 1, ' s')}</section>${extras.finish}</aside>
     <section class="arts-stage"><div class="obs-url-bar"><input readonly data-obs-url value="${escapeHtml(url)}" aria-label="Link para o OBS"><button class="button primary" data-action="obs-copy">Copiar link</button><a class="button subtle" href="${escapeHtml(obsUrl(cfg))}" target="_blank" rel="noopener">Abrir</a></div>${warning}<p class="help-text">No OBS: Fontes → Navegador → cole o link, largura 1920, altura 1080. Fundo transparente e atualização automática.</p><div class="obs-preview" data-obs-box><iframe class="obs-preview-frame" data-obs-frame title="Prévia do overlay" src="${escapeHtml(obsUrl(cfg))}"></iframe></div></section></div>`;
 }
 
@@ -2685,10 +2728,228 @@ const ART_THEMES = {
 };
 
 const ART_FONTS = { barlow: ['Barlow Condensed', '"Barlow Condensed", "Arial Narrow", sans-serif'], oswald: ['Oswald', 'Oswald, Impact, sans-serif'], bebas: ['Bebas Neue', '"Bebas Neue", Impact, sans-serif'], montserrat: ['Montserrat', 'Montserrat, "Segoe UI", Arial, sans-serif'], roboto: ['Roboto', 'Roboto, Arial, sans-serif'] };
+// ===== Estúdio de artes: fundos, layouts, molduras e modelos (camadas independentes do estilo-base) =====
+const ART_BACKGROUNDS = [
+  ['theme', 'Do estilo'], ['solid', 'Cor lisa'], ['gradient', 'Degradê'], ['radial', 'Brilho radial'], ['mesh', 'Malha de cores'], ['spotlight', 'Holofotes'],
+  ['stripes', 'Listras'], ['diagonals', 'Linhas diagonais'], ['chevrons', 'Setas'], ['burst', 'Raios'], ['rings', 'Círculos'], ['waves', 'Ondas'],
+  ['dots', 'Pontilhado'], ['grid', 'Grade'], ['hex', 'Hexágonos'], ['checker', 'Xadrez'], ['pitch', 'Linhas do campo'], ['confetti', 'Confete'],
+];
+const ART_LAYOUTS = [['classic', 'Clássico', 'Título centralizado'], ['left', 'À esquerda', 'Título alinhado com barra'], ['banner', 'Faixa', 'Cabeçalho em faixa colorida'], ['poster', 'Pôster', 'Título grande'], ['minimal', 'Compacto', 'Cabeçalho mínimo, mais espaço']];
+const ART_FRAMES = [['none', 'Sem moldura'], ['thin', 'Fina'], ['double', 'Dupla'], ['corners', 'Cantos'], ['card', 'Cartão'], ['bar', 'Barra lateral'], ['glow', 'Brilho']];
+const ART_PANELS = [['solid', 'Sólido'], ['glass', 'Vidro'], ['outline', 'Contorno'], ['shadow', 'Sombra'], ['bar', 'Marcador']];
+const ART_TAG_POSITIONS = [['tr', 'Topo direito'], ['tl', 'Topo esquerdo'], ['br', 'Base direita'], ['bl', 'Base esquerda']];
+const ART_TAG_STYLES = [['solid', 'Sólida'], ['outline', 'Contorno'], ['tilt', 'Inclinada']];
+const ART_STYLE_KEYS = ['theme', 'accent', 'bg', 'bg2', 'textColor', 'font', 'radius', 'shade', 'format', 'logos', 'sponsors', 'brand', 'brandName', 'brandLogo', 'bgStyle', 'bgPattern', 'bgIntensity', 'bgScale', 'bgAngle', 'vignette', 'grain', 'layout', 'frame', 'panelStyle', 'padding', 'titleScale', 'bgZoom', 'bgX', 'bgY', 'bgBlur', 'bgTint', 'tagText', 'tagPos', 'tagStyle', 'footerText'];
+const ART_STYLE_DEFAULTS = { theme: 'gold', accent: '', bg: '', bg2: '', textColor: '', font: 'barlow', radius: 14, shade: 45, logos: true, sponsors: true, brand: true, brandName: '', brandLogo: '', bgStyle: 'theme', bgPattern: 'accent', bgIntensity: 22, bgScale: 100, bgAngle: 45, vignette: 0, grain: 0, layout: 'classic', frame: 'none', panelStyle: 'solid', padding: 100, titleScale: 100, bgZoom: 100, bgX: 50, bgY: 50, bgBlur: 0, bgTint: '', tagText: '', tagPos: 'tr', tagStyle: 'solid', footerText: '' };
+const ART_NUMBER_RANGES = { radius: [0, 40], shade: [0, 90], bgIntensity: [3, 90], bgScale: [40, 220], bgAngle: [0, 359], vignette: [0, 90], grain: [0, 60], padding: [70, 140], titleScale: [70, 140], bgZoom: [100, 300], bgX: [0, 100], bgY: [0, 100], bgBlur: [0, 24] };
+const ART_STYLE_RESET_EXCLUDED = ['format', 'logos', 'sponsors', 'brand', 'brandName', 'brandLogo'];
+const ART_TEMPLATES = [
+  ['Clássico dourado', { theme: 'gold', bgStyle: 'theme', layout: 'classic', frame: 'none', panelStyle: 'solid', font: 'barlow', vignette: 20 }],
+  ['Noite de decisão', { theme: 'neon', bgStyle: 'spotlight', bgPattern: 'light', bgIntensity: 28, layout: 'poster', frame: 'glow', panelStyle: 'glass', font: 'bebas', vignette: 40 }],
+  ['Jornal esportivo', { theme: 'paper', bgStyle: 'dots', bgPattern: 'dark', bgIntensity: 14, layout: 'banner', frame: 'double', panelStyle: 'outline', font: 'oswald' }],
+  ['Gramado pro', { theme: 'pitch', bgStyle: 'pitch', bgPattern: 'light', bgIntensity: 22, layout: 'left', frame: 'corners', panelStyle: 'shadow', font: 'oswald', vignette: 30 }],
+  ['Moderno vibrante', { theme: 'gold', bg: '#0d2b52', bg2: '#1f5fd1', accent: '#ffd23f', bgStyle: 'burst', bgPattern: 'light', bgIntensity: 14, layout: 'banner', frame: 'thin', panelStyle: 'solid', font: 'montserrat' }],
+  ['Minimal escuro', { theme: 'mono', accent: '#f2cb79', bgStyle: 'mesh', bgIntensity: 45, layout: 'minimal', frame: 'card', panelStyle: 'glass', font: 'montserrat', vignette: 25 }],
+  ['Festa de título', { theme: 'gold', bgStyle: 'confetti', bgPattern: 'accent', bgIntensity: 60, layout: 'poster', frame: 'corners', panelStyle: 'bar', font: 'bebas', vignette: 35 }],
+  ['Tecnológico', { theme: 'neon', bgStyle: 'hex', bgPattern: 'accent', bgIntensity: 18, layout: 'left', frame: 'thin', panelStyle: 'outline', font: 'montserrat', grain: 12 }],
+  ['Estádio à noite', { theme: 'gold', bgStyle: 'rings', bgPattern: 'light', bgIntensity: 12, layout: 'classic', frame: 'bar', panelStyle: 'glass', font: 'barlow', vignette: 55, grain: 18 }],
+];
+const ART_PRESETS_KEY = 'juventude.artes.modelos.v1';
+
+function artHexRgba(hex, alpha) {
+  const value = safeColor(hex, '#ffffff').slice(1);
+  return `rgba(${parseInt(value.slice(0, 2), 16)},${parseInt(value.slice(2, 4), 16)},${parseInt(value.slice(4, 6), 16)},${alpha})`;
+}
+
+function artRandom(seed) {
+  let state = seed >>> 0;
+  return () => { state = (state + 0x6d2b79f5) >>> 0; let t = state; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+
+// Fundo base (cor lisa ou degradê escolhidos pelo usuário) que substitui o fundo do estilo.
+function artPaintBase(ctx, w, h, options, theme, accent) {
+  if (!['solid', 'gradient'].includes(options.bgStyle)) return;
+  const first = /^#[0-9a-f]{6}$/i.test(options.bg || '') ? options.bg : theme.swatch?.[0] || '#0b0d13';
+  const second = /^#[0-9a-f]{6}$/i.test(options.bg2 || '') ? options.bg2 : options.bgStyle === 'gradient' ? (theme.swatch?.[1] || accent) : first;
+  const angle = (Number(options.bgAngle) || 0) * Math.PI / 180;
+  const cx = w / 2, cy = h / 2, reach = (Math.abs(Math.cos(angle)) * w + Math.abs(Math.sin(angle)) * h) / 2;
+  const gradient = ctx.createLinearGradient(cx - Math.cos(angle) * reach, cy - Math.sin(angle) * reach, cx + Math.cos(angle) * reach, cy + Math.sin(angle) * reach);
+  gradient.addColorStop(0, first); gradient.addColorStop(1, second);
+  ctx.fillStyle = gradient; ctx.fillRect(0, 0, w, h);
+}
+
+const ART_PATTERNS = {
+  radial(c, w, h, p) { const g = c.createRadialGradient(w * .5, h * .3, 0, w * .5, h * .3, Math.max(w, h) * .75); g.addColorStop(0, p.color(p.alpha * 1.6)); g.addColorStop(1, p.color(0)); c.fillStyle = g; c.fillRect(0, 0, w, h); },
+  mesh(c, w, h, p) {
+    [p.accent, p.second, p.accent, p.second].forEach(tone => { const x = w * (.1 + p.rand() * .8), y = h * (.1 + p.rand() * .8), r = Math.max(w, h) * (.35 + p.rand() * .25) * p.scale; const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, artHexRgba(tone, Math.min(.9, p.alpha * 2.2))); g.addColorStop(1, artHexRgba(tone, 0)); c.fillStyle = g; c.fillRect(0, 0, w, h); });
+  },
+  spotlight(c, w, h, p) {
+    [[.28, 1], [.72, -1]].forEach(([fx, dir]) => { const x = w * fx; const spread = w * .22 * p.scale; const g = c.createLinearGradient(x, 0, x, h * .9); g.addColorStop(0, p.color(p.alpha * 2)); g.addColorStop(1, p.color(0)); c.fillStyle = g; c.beginPath(); c.moveTo(x - 24 * p.u, 0); c.lineTo(x + 24 * p.u, 0); c.lineTo(x + dir * spread * .6 + spread, h * .9); c.lineTo(x + dir * spread * .6 - spread, h * .9); c.closePath(); c.fill(); });
+    const glow = c.createRadialGradient(w / 2, h, 0, w / 2, h, w * .7); glow.addColorStop(0, p.color(p.alpha * 1.2)); glow.addColorStop(1, p.color(0)); c.fillStyle = glow; c.fillRect(0, 0, w, h);
+  },
+  stripes(c, w, h, p) { c.save(); c.translate(w / 2, h / 2); c.rotate(p.angle); const band = 46 * p.u * p.scale, reach = Math.hypot(w, h); c.fillStyle = p.color(p.alpha); for (let x = -reach; x < reach; x += band * 2) c.fillRect(x, -reach, band, reach * 2); c.restore(); },
+  diagonals(c, w, h, p) { c.save(); c.translate(w / 2, h / 2); c.rotate(p.angle); c.strokeStyle = p.color(p.alpha * 1.5); c.lineWidth = 3 * p.u; const gap = 26 * p.u * p.scale, reach = Math.hypot(w, h); for (let x = -reach; x < reach; x += gap) { c.beginPath(); c.moveTo(x, -reach); c.lineTo(x, reach); c.stroke(); } c.restore(); },
+  chevrons(c, w, h, p) { c.strokeStyle = p.color(p.alpha * 1.6); c.lineWidth = 5 * p.u; const step = 70 * p.u * p.scale; for (let y = -step; y < h + step; y += step) { c.beginPath(); for (let i = 0, x = -step; x <= w + step; i += 1, x += step) c.lineTo(x, y + (i % 2 ? step * .45 : 0)); c.stroke(); } },
+  burst(c, w, h, p) { const cx = w / 2, cy = h * .42, reach = Math.hypot(w, h), count = Math.round(24 * p.scale); c.fillStyle = p.color(p.alpha); for (let i = 0; i < count; i += 1) { const a0 = p.angle + (i / count) * Math.PI * 2, a1 = a0 + Math.PI / count; c.beginPath(); c.moveTo(cx, cy); c.lineTo(cx + Math.cos(a0) * reach, cy + Math.sin(a0) * reach); c.lineTo(cx + Math.cos(a1) * reach, cy + Math.sin(a1) * reach); c.closePath(); c.fill(); } },
+  rings(c, w, h, p) { c.strokeStyle = p.color(p.alpha * 1.8); c.lineWidth = 4 * p.u; const step = 90 * p.u * p.scale; for (let r = step; r < Math.hypot(w, h); r += step) { c.beginPath(); c.arc(w * .92, h * .1, r, 0, Math.PI * 2); c.stroke(); } },
+  waves(c, w, h, p) { c.fillStyle = p.color(p.alpha); for (let layer = 0; layer < 5; layer += 1) { c.beginPath(); c.moveTo(0, h); const base = h * (.55 + layer * .09), amp = 36 * p.u * p.scale * (1 + layer * .15); for (let x = 0; x <= w; x += 12) c.lineTo(x, base + Math.sin(x / (170 * p.u * p.scale) + layer * 1.3 + p.angle) * amp); c.lineTo(w, h); c.closePath(); c.fill(); } },
+  dots(c, w, h, p) { const step = 34 * p.u * p.scale; c.fillStyle = p.color(Math.min(1, p.alpha * 2.4)); for (let y = step / 2; y < h; y += step) for (let x = step / 2; x < w; x += step) { const fade = 1 - Math.hypot(x / w - .1, y / h - .05) / 1.2; const r = Math.max(0, step * .38 * fade); if (r > .8) { c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); } } },
+  grid(c, w, h, p) { c.strokeStyle = p.color(p.alpha * 1.4); c.lineWidth = 2 * p.u; const step = 64 * p.u * p.scale; for (let x = 0; x < w; x += step) { c.beginPath(); c.moveTo(x, 0); c.lineTo(x, h); c.stroke(); } for (let y = 0; y < h; y += step) { c.beginPath(); c.moveTo(0, y); c.lineTo(w, y); c.stroke(); } },
+  hex(c, w, h, p) { c.strokeStyle = p.color(p.alpha * 1.8); c.lineWidth = 3 * p.u; const r = 42 * p.u * p.scale, dx = r * Math.sqrt(3), dy = r * 1.5; for (let row = -1, y = 0; y < h + r; row += 1, y += dy) for (let x = (row % 2 ? dx / 2 : 0) - dx; x < w + dx; x += dx) { c.beginPath(); for (let k = 0; k < 6; k += 1) { const a = Math.PI / 3 * k + Math.PI / 6; c.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } c.closePath(); c.stroke(); } },
+  checker(c, w, h, p) { const step = 70 * p.u * p.scale; c.fillStyle = p.color(p.alpha); for (let y = 0, row = 0; y < h; y += step, row += 1) for (let x = (row % 2) * step; x < w; x += step * 2) c.fillRect(x, y, step, step); },
+  pitch(c, w, h, p) { c.strokeStyle = p.color(p.alpha * 2.2); c.lineWidth = 6 * p.u; const m = 40 * p.u; c.strokeRect(m, m, w - m * 2, h - m * 2); c.beginPath(); c.moveTo(m, h / 2); c.lineTo(w - m, h / 2); c.stroke(); c.beginPath(); c.arc(w / 2, h / 2, Math.min(w, h) * .14 * p.scale, 0, Math.PI * 2); c.stroke(); const bw = w * .5, bh = h * .13; c.strokeRect((w - bw) / 2, m, bw, bh); c.strokeRect((w - bw) / 2, h - m - bh, bw, bh); },
+  confetti(c, w, h, p) { const count = Math.round(130 * p.scale); const tones = [p.accent, '#ffffff', p.second]; for (let i = 0; i < count; i += 1) { const x = p.rand() * w, y = p.rand() * h, s = (8 + p.rand() * 16) * p.u; c.save(); c.translate(x, y); c.rotate(p.rand() * Math.PI); c.fillStyle = artHexRgba(tones[i % 3], Math.min(.95, p.alpha * 2.6 * (.4 + p.rand()))); if (i % 3 === 2) { c.beginPath(); c.arc(0, 0, s / 2, 0, Math.PI * 2); c.fill(); } else c.fillRect(-s / 2, -s / 4, s, s / 2); c.restore(); } },
+};
+
+function artPaintPattern(ctx, w, h, u, options, theme, accent) {
+  const painter = ART_PATTERNS[options.bgStyle];
+  if (!painter) return;
+  const mode = options.bgPattern || 'accent';
+  const base = mode === 'light' ? '#ffffff' : mode === 'dark' ? '#000000' : accent;
+  const second = /^#[0-9a-f]{6}$/i.test(options.bg2 || '') ? options.bg2 : theme.swatch?.[1] || accent;
+  const seed = [...`${options.bgStyle}${options.bgScale}${options.bgAngle}`].reduce((total, char) => (total * 31 + char.charCodeAt(0)) >>> 0, 7);
+  const alpha = Math.max(.02, Math.min(.9, (Number(options.bgIntensity) || 22) / 100));
+  ctx.save();
+  painter(ctx, w, h, { u, color: value => artHexRgba(base, Math.max(0, Math.min(1, value))), alpha, accent, second, scale: (Number(options.bgScale) || 100) / 100, angle: (Number(options.bgAngle) || 0) * Math.PI / 180, rand: artRandom(seed) });
+  ctx.restore();
+}
+
+function artPaintFinish(ctx, w, h, u, options) {
+  const vignette = Number(options.vignette) || 0;
+  if (vignette > 0) { const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * .3, w / 2, h / 2, Math.hypot(w, h) * .62); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, `rgba(0,0,0,${vignette / 100})`); ctx.fillStyle = g; ctx.fillRect(0, 0, w, h); }
+  const grain = Number(options.grain) || 0;
+  if (grain > 0) { const rand = artRandom(9157); const count = Math.round((w * h) / 90); const dot = 1.6 * u + .4; ctx.fillStyle = `rgba(255,255,255,${grain / 400})`; for (let i = 0; i < count; i += 1) ctx.fillRect(rand() * w, rand() * h, dot, dot); ctx.fillStyle = `rgba(0,0,0,${grain / 300})`; for (let i = 0; i < count; i += 1) ctx.fillRect(rand() * w, rand() * h, dot, dot); }
+}
+
+function artDrawBackdropImage(ctx, image, w, h, u, options, accent) {
+  const zoom = Math.max(1, (Number(options.bgZoom) || 100) / 100);
+  const cover = Math.max(w / image.width, h / image.height) * zoom;
+  const dw = image.width * cover, dh = image.height * cover;
+  const x = -(dw - w) * ((Number(options.bgX) || 50) / 100), y = -(dh - h) * ((Number(options.bgY) || 50) / 100);
+  const blur = Number(options.bgBlur) || 0;
+  ctx.save();
+  if (blur > 0 && 'filter' in ctx) ctx.filter = `blur(${blur * u}px)`;
+  ctx.drawImage(image, x, y, dw, dh);
+  ctx.restore();
+  const tint = /^#[0-9a-f]{6}$/i.test(options.bgTint || '') ? options.bgTint : '#000000';
+  ctx.fillStyle = artHexRgba(tint, Math.max(0, Math.min(90, Number(options.shade) || 0)) / 100); ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = accent; ctx.fillRect(0, 0, w, 14 * u);
+}
+
+function artRoundRect(ctx, x, y, w, h, r) {
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h);
+}
+
+function artDrawFrame(g) {
+  const { ctx, w, h, u, accent, theme, options } = g;
+  const frame = options.frame;
+  if (!frame || frame === 'none') return;
+  ctx.save();
+  const inset = 28 * u;
+  if (frame === 'thin') { ctx.strokeStyle = accent; ctx.lineWidth = 3 * u; ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2); }
+  else if (frame === 'double') { ctx.strokeStyle = accent; ctx.lineWidth = 5 * u; ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2); ctx.strokeStyle = artHexRgba(theme.light ? '#000000' : '#ffffff', .3); ctx.lineWidth = 2 * u; const inner = inset + 16 * u; ctx.strokeRect(inner, inner, w - inner * 2, h - inner * 2); }
+  else if (frame === 'corners') { ctx.strokeStyle = accent; ctx.lineWidth = 9 * u; const len = 110 * u; [[inset, inset, 1, 1], [w - inset, inset, -1, 1], [inset, h - inset, 1, -1], [w - inset, h - inset, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x, y + len * sy); ctx.lineTo(x, y); ctx.lineTo(x + len * sx, y); ctx.stroke(); }); }
+  else if (frame === 'card') { ctx.fillStyle = theme.panelAlt; ctx.strokeStyle = artHexRgba(theme.light ? '#000000' : '#ffffff', .14); ctx.lineWidth = 2 * u; ctx.beginPath(); artRoundRect(ctx, inset, inset, w - inset * 2, h - inset * 2, Math.max(8, (options.radius ?? 14) * 1.6) * u); ctx.fill(); ctx.stroke(); }
+  else if (frame === 'bar') { ctx.fillStyle = accent; ctx.fillRect(0, 0, 22 * u, h); ctx.fillStyle = artHexRgba(accent, .35); ctx.fillRect(22 * u, 0, 6 * u, h); }
+  else if (frame === 'glow') { ctx.shadowColor = accent; ctx.shadowBlur = 34 * u; ctx.strokeStyle = accent; ctx.lineWidth = 4 * u; ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2); ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2); }
+  ctx.restore();
+}
+
+// Cabeçalho de acordo com o layout escolhido; devolve a altura reservada.
+function artDrawHeader(g, pad, mark, titleText) {
+  const { ctx, w, h, u, theme, accent, options, bundle } = g;
+  const layout = options.layout || 'classic';
+  const scale = (Number(options.titleScale) || 100) / 100;
+  const wide = w > h * 1.3;
+  const name = bundle.championship.name;
+  const markSize = 92 * u;
+  const drawMark = (x, y) => { if (mark) { const fit = Math.min(markSize / mark.width, markSize / mark.height); ctx.drawImage(mark, x, y + (markSize - mark.height * fit) / 2, mark.width * fit, mark.height * fit); } };
+  const markRoom = mark ? markSize + 24 * u : 0;
+  if (layout === 'left') {
+    const x = pad + 22 * u;
+    ctx.fillStyle = accent; ctx.fillRect(pad, 52 * u, 8 * u, 150 * u * scale);
+    artT(g, name, x, 96 * u, { size: 58 * scale, color: accent, spacing: 3, upper: true, max: w - pad * 2 - markRoom - 30 * u, align: 'left', glow: true });
+    artT(g, titleText, x, 166 * u, { size: 38 * scale, weight: 500, color: theme.muted, spacing: 6, upper: true, body: true, max: w - pad * 2 - markRoom - 30 * u, align: 'left' });
+    drawMark(w - pad - markSize, 34 * u);
+    return (wide ? 190 : 230) * u;
+  }
+  if (layout === 'banner') {
+    const band = (wide ? 160 : 200) * u;
+    ctx.fillStyle = accent; ctx.fillRect(0, 0, w, band);
+    ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(0, band - 8 * u, w, 8 * u);
+    const room = mark ? markRoom * 2 : 0;
+    artT(g, name, w / 2, band * .4, { size: 54 * scale, color: theme.onAccent, spacing: 4, upper: true, max: w - pad * 2 - room });
+    artT(g, titleText, w / 2, band * .74, { size: 34 * scale, weight: 500, color: theme.onAccent, spacing: 7, upper: true, body: true, max: w - pad * 2 - room });
+    drawMark(pad, (band - markSize) / 2);
+    return band + (wide ? 30 : 40) * u;
+  }
+  if (layout === 'poster') {
+    artT(g, titleText, pad, 112 * u, { size: (wide ? 88 : 108) * scale, color: theme.text, spacing: 2, upper: true, max: w - pad * 2 - markRoom, align: 'left' });
+    ctx.fillStyle = accent; ctx.fillRect(pad, 188 * u, 120 * u, 8 * u);
+    artT(g, name, pad, 232 * u, { size: 40 * scale, weight: 500, color: accent, spacing: 6, upper: true, body: true, max: w - pad * 2 - markRoom, align: 'left' });
+    drawMark(w - pad - markSize, 40 * u);
+    return (wide ? 260 : 300) * u;
+  }
+  if (layout === 'minimal') {
+    artT(g, `${name}  ·  ${titleText}`, w / 2, 70 * u, { size: 32 * scale, weight: 600, color: accent, spacing: 5, upper: true, body: true, max: w - pad * 2 - markRoom * 2 });
+    ctx.fillStyle = accent; ctx.fillRect(w / 2 - 50 * u, 104 * u, 100 * u, 5 * u);
+    drawMark(pad, 28 * u);
+    return (wide ? 120 : 140) * u;
+  }
+  artT(g, name, w / 2, 96 * u, { size: 56 * scale, color: accent, spacing: 4, upper: true, max: w - pad * 2 - markRoom * 2, glow: true });
+  artT(g, titleText, w / 2, 164 * u, { size: 38 * scale, weight: 500, color: theme.muted, spacing: 7, upper: true, body: true, max: w - pad * 2 - markRoom * 2 });
+  drawMark(pad, 34 * u);
+  return (wide ? 190 : 230) * u;
+}
+
+function artDrawTag(g, pad) {
+  const { ctx, w, h, u, accent, theme, options } = g;
+  const text = String(options.tagText || '').trim();
+  if (!text) return;
+  ctx.save();
+  ctx.font = `700 ${34 * u}px ${g.fontDisplay}`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = `${4 * u}px`;
+  const width = ctx.measureText(text.toUpperCase()).width + 56 * u, height = 62 * u;
+  const margin = Math.max(pad, 44 * u);
+  const bottom = options.tagPos?.[0] === 'b', left = options.tagPos?.[1] === 'l';
+  const cx = left ? margin + width / 2 : w - margin - width / 2;
+  const cy = bottom ? h - (options.brand ? 190 : 100) * u : (options.layout === 'banner' ? 240 * u : 56 * u + height / 2);
+  ctx.translate(cx, cy);
+  if (options.tagStyle === 'tilt') ctx.rotate((left ? -1 : 1) * 0.1);
+  const filled = options.tagStyle !== 'outline';
+  ctx.beginPath(); artRoundRect(ctx, -width / 2, -height / 2, width, height, height / 2);
+  if (filled) { ctx.fillStyle = accent; ctx.fill(); } else { ctx.strokeStyle = accent; ctx.lineWidth = 4 * u; ctx.stroke(); }
+  artT(g, text, 0, 2 * u, { size: 34, color: filled ? theme.onAccent : accent, spacing: 4, upper: true });
+  ctx.restore();
+}
+
+function artUserPresets() {
+  try { const saved = JSON.parse(localStorage.getItem(ART_PRESETS_KEY)); return Array.isArray(saved) ? saved.filter(item => item && typeof item.name === 'string' && item.options && typeof item.options === 'object').slice(0, 30) : []; } catch { return []; }
+}
+function saveArtPresets(list) { try { localStorage.setItem(ART_PRESETS_KEY, JSON.stringify(list.slice(0, 30))); } catch {} }
+
+// Aplica um conjunto de opções de estilo passando por setArtOption (mesma validação das escolhas manuais).
+function applyArtStyle(styles, { reset = true } = {}) {
+  if (reset) for (const key of ART_STYLE_KEYS) if (key in ART_STYLE_DEFAULTS && !ART_STYLE_RESET_EXCLUDED.includes(key)) artOptions[key] = ART_STYLE_DEFAULTS[key];
+  for (const [key, value] of Object.entries(styles || {})) if (ART_STYLE_KEYS.includes(key)) setArtOption(key, value);
+  saveArtOptions();
+}
+
+function artPresetPayload() {
+  const picked = {};
+  for (const key of ART_STYLE_KEYS) picked[key] = key === 'brandLogo' && artOptions[key] === 'custom' ? '' : artOptions[key];
+  return picked;
+}
+
+function artRandomStyle() {
+  const pick = list => list[Math.floor(Math.random() * list.length)];
+  return { theme: pick(Object.keys(ART_THEMES)), bgStyle: pick(ART_BACKGROUNDS.map(([key]) => key)), bgPattern: pick(['accent', 'light']), bgIntensity: 14 + Math.floor(Math.random() * 30), bgScale: 70 + Math.floor(Math.random() * 90), bgAngle: Math.floor(Math.random() * 180), layout: pick(ART_LAYOUTS.map(([key]) => key)), frame: pick(ART_FRAMES.map(([key]) => key)), panelStyle: pick(ART_PANELS.map(([key]) => key)), font: pick(Object.keys(ART_FONTS)), vignette: pick([0, 20, 35, 50]), grain: pick([0, 0, 12, 20]) };
+}
+
 let artAssets = { bgImage: '', brandLogo: '' };
 const ART_OPTIONS_KEY = 'juventude.artes.v1';
 function loadArtOptions() {
-  const defaults = { championshipId: '', type: 'result', theme: 'gold', format: 'feed', matchId: '', round: '', side: 'home', topN: 8, title: '', text: '', accent: '', logos: true, sponsors: true, brand: true, bg: '', bg2: '', textColor: '', font: 'barlow', shade: 45, radius: 14, brandName: '', brandLogo: '', teamId: '', athleteId: '', postId: '', date: '' };
+  const defaults = { ...ART_STYLE_DEFAULTS, championshipId: '', type: 'result', theme: 'gold', format: 'feed', matchId: '', round: '', side: 'home', topN: 8, title: '', text: '', accent: '', logos: true, sponsors: true, brand: true, bg: '', bg2: '', textColor: '', font: 'barlow', shade: 45, radius: 14, brandName: '', brandLogo: '', teamId: '', athleteId: '', postId: '', date: '' };
   try { return { ...defaults, ...(JSON.parse(localStorage.getItem(ART_OPTIONS_KEY)) || {}) }; } catch { return defaults; }
 }
 let artOptions = loadArtOptions();
@@ -2764,9 +3025,19 @@ function artBadge(g, team, cx, cy, r) {
 
 function artPanel(g, x, y, w, h, alt = false, accent = false) {
   const { ctx, u } = g;
-  ctx.fillStyle = accent ? g.accent : alt ? g.theme.panelAlt : g.theme.panel;
+  const style = g.options.panelStyle || 'solid';
   const r = (g.options.radius ?? 14) * u;
-  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); ctx.fill();
+  const tone = g.theme.light ? '#000000' : '#ffffff';
+  const path = () => { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); };
+  ctx.save();
+  if (style === 'shadow' && !accent) { ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = 22 * u; ctx.shadowOffsetY = 8 * u; }
+  ctx.fillStyle = accent ? g.accent : style === 'outline' ? 'rgba(0,0,0,0)' : alt ? g.theme.panelAlt : g.theme.panel;
+  path(); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  if (!accent && style === 'glass') { ctx.strokeStyle = artHexRgba(tone, .2); ctx.lineWidth = 2 * u; path(); ctx.stroke(); }
+  if (!accent && style === 'outline') { ctx.strokeStyle = artHexRgba(g.accent, alt ? .35 : .65); ctx.lineWidth = 3 * u; path(); ctx.stroke(); }
+  if (!accent && style === 'bar') { ctx.fillStyle = g.accent; ctx.fillRect(x, y + r * .5, Math.max(5, 8 * u), Math.max(0, h - r)); }
+  ctx.restore();
 }
 
 function artTeams(g, match) {
@@ -3217,29 +3488,26 @@ async function renderArt(bundle, options, extras = {}) {
   const accent = options.accent && /^#[0-9a-f]{6}$/i.test(options.accent) ? options.accent : theme.accent;
   const u = Math.min(width, height) / 1080;
   theme.paint(ctx, width, height, accent);
+  artPaintBase(ctx, width, height, options, theme, accent);
   const backdrop = artAssets.bgImage ? await artImage(artAssets.bgImage) : null;
-  if (backdrop) {
-    const cover = Math.max(width / backdrop.width, height / backdrop.height);
-    ctx.drawImage(backdrop, (width - backdrop.width * cover) / 2, (height - backdrop.height * cover) / 2, backdrop.width * cover, backdrop.height * cover);
-    ctx.fillStyle = `rgba(0,0,0,${Math.max(0, Math.min(90, Number(options.shade) || 0)) / 100})`; ctx.fillRect(0, 0, width, height);
-    ctx.fillStyle = accent; ctx.fillRect(0, 0, width, 14 * u);
-  }
+  if (backdrop) artDrawBackdropImage(ctx, backdrop, width, height, u, options, accent);
+  artPaintPattern(ctx, width, height, u, options, theme, accent);
+  artPaintFinish(ctx, width, height, u, options);
   const images = {};
   await Promise.all(bundle.teams.map(async team => { const image = await artImage(team.logo); if (image) images[team.id] = image; }));
   const g = { ctx, w: width, h: height, u, theme, accent, bundle, options, images, catalog: extras.catalog || [], fontDisplay: fontInfo[1], fontBody: ART_FONTS.roboto[1], sponsorImages: extras.sponsors || [] };
-  const pad = 64 * u;
+  const pad = 64 * u * ((Number(options.padding) || 100) / 100);
   const typeInfo = ART_TYPES.find(([key]) => key === options.type) || ART_TYPES[0];
   const sponsors = options.sponsors ? (extras.sponsors || []).slice(0, 5) : [];
   const footerH = (options.brand ? 120 : 40) * u + (sponsors.length ? 120 * u : 0);
-  const headerH = (width > height * 1.3 ? 190 : 230) * u;
-  artT(g, bundle.championship.name, width / 2, 96 * u, { size: 56, color: accent, spacing: 4, upper: true, max: width - pad * 2, glow: true });
-  artT(g, options.title && options.type !== 'notice' ? options.title : typeInfo[1], width / 2, 164 * u, { size: 38, weight: 500, color: theme.muted, spacing: 7, upper: true, body: true, max: width - pad * 2 });
+  artDrawFrame(g);
   const markUrl = options.brandLogo === 'platform' ? '/brand-logo.png' : options.brandLogo === 'custom' ? artAssets.brandLogo : '';
   const mark = markUrl ? await artImage(markUrl) : null;
-  if (mark) { const size = 92 * u; const scale = Math.min(size / mark.width, size / mark.height); ctx.drawImage(mark, pad, 34 * u + (size - mark.height * scale) / 2, mark.width * scale, mark.height * scale); }
+  const headerH = artDrawHeader(g, pad, mark, options.title && options.type !== 'notice' ? options.title : typeInfo[1]);
   const body = { x: pad, y: headerH, w: width - pad * 2, h: height - headerH - footerH };
   await artPrepare(g, extras);
   (ART_DRAWERS[options.type] || ART_DRAWERS.result)(g, body);
+  artDrawTag(g, pad);
   let footerY = height - footerH;
   if (sponsors.length) {
     const images2 = await Promise.all(sponsors.map(item => artImage(item.wideAsset || item.banner || item.logo)));
@@ -3258,7 +3526,7 @@ async function renderArt(bundle, options, extras = {}) {
   }
   if (options.brand) {
     artT(g, options.brandName || 'JUVENTUDE ESPORTE CLUBE', width / 2, height - 66 * u, { size: 32, color: accent, spacing: 8, upper: true, max: width - pad * 2 });
-    artT(g, location.host, width / 2, height - 26 * u, { size: 22, weight: 500, color: theme.muted, body: true });
+    artT(g, options.footerText || location.host, width / 2, height - 26 * u, { size: 22, weight: 500, color: theme.muted, body: true });
   }
   return canvas;
 }
@@ -3333,6 +3601,37 @@ function artColorField(field, label, fallback) {
   return `<div class="builder-color-field"><label><input type="color" data-art-field="${field}" value="${safeColor(base, fallback)}"><span>${label}${artOptions[field] ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="${field}|" ${artOptions[field] ? '' : 'disabled'}>Padrão</button></div>`;
 }
 
+let artPresetName = '';
+function artChips(field, list) {
+  return `<div class="access-chips">${list.map(([key, label]) => `<button type="button" class="access-chip ${artOptions[field] === key ? 'active' : ''}" data-action="arts-set" data-value="${field}|${key}" aria-pressed="${artOptions[field] === key}">${escapeHtml(label)}</button>`).join('')}</div>`;
+}
+function artRange(field, label, suffix = '') {
+  const [min, max] = ART_NUMBER_RANGES[field];
+  return `<label class="parameter-control"><span>${label} <strong data-art-label="${field}">${artOptions[field]}${suffix}</strong></span><input type="range" min="${min}" max="${max}" value="${artOptions[field]}" data-art-field="${field}" data-suffix="${suffix}"></label>`;
+}
+
+function renderArtStyleExtras() {
+  const style = artOptions.bgStyle;
+  const patterned = Boolean(ART_PATTERNS[style]);
+  const angled = ['gradient', 'stripes', 'diagonals', 'burst', 'waves'].includes(style);
+  const presets = artUserPresets();
+  const models = `<section><h3 class="arts-step"><b>★</b> Modelos</h3><p class="help-text">Combinações prontas de estilo, fundo, layout e moldura. Seus dados e textos não mudam.</p><div class="access-chips">${ART_TEMPLATES.map(([name], index) => `<button type="button" class="access-chip" data-action="art-template" data-value="${index}">${escapeHtml(name)}</button>`).join('')}<button type="button" class="access-chip" data-action="art-random">🎲 Surpreenda-me</button></div>
+    <div class="field"><label for="art-preset-name">Meus modelos</label><div class="art-upload"><input id="art-preset-name" data-art-preset-name maxlength="40" placeholder="Nome do modelo" value="${escapeHtml(artPresetName)}"><button class="button subtle" data-action="art-preset-save">Salvar o estilo atual</button></div></div>
+    ${presets.length ? `<ul class="art-preset-list">${presets.map((item, index) => `<li><button type="button" class="button subtle" data-action="art-preset-apply" data-value="${index}">${escapeHtml(item.name)}</button><button type="button" class="button subtle" data-action="art-preset-delete" data-value="${index}" aria-label="Excluir ${escapeHtml(item.name)}">✕</button></li>`).join('')}</ul>` : '<p class="help-text">Nenhum modelo salvo ainda. Os modelos ficam neste navegador.</p>'}
+    <div class="art-upload"><button class="button subtle" data-action="art-preset-export">Exportar modelos</button><label class="button subtle">Importar modelos<input type="file" accept="application/json,.json" data-art-import hidden></label></div></section>`;
+  const background = `<section><h3 class="arts-step"><b>5</b> Fundo</h3><div class="field"><label>Padrão do fundo</label>${artChips('bgStyle', ART_BACKGROUNDS)}</div>
+    ${['solid', 'gradient'].includes(style) ? `<p class="help-text">Defina as cores na seção “Cores, fonte e marca”${style === 'gradient' ? ' (cor de fundo e segundo tom)' : ''}.</p>` : ''}
+    ${patterned ? `<div class="field"><label>Cor do padrão</label>${artChips('bgPattern', [['accent', 'Destaque'], ['light', 'Claro'], ['dark', 'Escuro']])}</div>${artRange('bgIntensity', 'Intensidade', '%')}${artRange('bgScale', 'Tamanho do padrão', '%')}` : ''}
+    ${angled ? artRange('bgAngle', 'Ângulo', '°') : ''}${artRange('vignette', 'Vinheta (bordas escuras)', '%')}${artRange('grain', 'Textura de granulado', '%')}
+    ${artAssets.bgImage ? `<div class="field"><label>Imagem de fundo</label>${artRange('bgZoom', 'Zoom', '%')}${artRange('bgX', 'Posição horizontal', '%')}${artRange('bgY', 'Posição vertical', '%')}${artRange('bgBlur', 'Desfoque', ' px')}<div class="builder-color-field"><label><input type="color" data-art-field="bgTint" value="${safeColor(artOptions.bgTint || '#000000', '#000000')}"><span>Cor da película${artOptions.bgTint ? '' : ' (preta)'}</span></label><button class="button subtle" data-action="arts-set" data-value="bgTint|" ${artOptions.bgTint ? '' : 'disabled'}>Padrão</button></div></div>` : ''}</section>`;
+  const layout = `<section><h3 class="arts-step"><b>6</b> Layout e molduras</h3><div class="art-types">${ART_LAYOUTS.map(([key, name, caption]) => `<button type="button" class="art-type ${artOptions.layout === key ? 'active' : ''}" data-action="arts-set" data-value="layout|${key}" aria-pressed="${artOptions.layout === key}"><strong>${escapeHtml(name)}</strong><small>${escapeHtml(caption)}</small></button>`).join('')}</div>
+    <div class="field"><label>Moldura</label>${artChips('frame', ART_FRAMES)}</div><div class="field"><label>Estilo dos blocos</label>${artChips('panelStyle', ART_PANELS)}</div>${artRange('padding', 'Margens internas', '%')}${artRange('titleScale', 'Tamanho do título', '%')}</section>`;
+  const extras = `<section><h3 class="arts-step"><b>7</b> Etiqueta e rodapé</h3><div class="field"><label for="art-tag">Etiqueta (ex.: FINAL, AO VIVO, RODADA 5)</label><input id="art-tag" data-art-field="tagText" maxlength="24" value="${escapeHtml(artOptions.tagText)}" placeholder="Sem etiqueta"></div>
+    ${artOptions.tagText ? `<div class="field"><label>Posição</label>${artChips('tagPos', ART_TAG_POSITIONS)}</div><div class="field"><label>Aparência</label>${artChips('tagStyle', ART_TAG_STYLES)}</div>` : ''}
+    <div class="field"><label for="art-footer">Texto do rodapé (ex.: #JuventudeEC · @perfil)</label><input id="art-footer" data-art-field="footerText" maxlength="60" value="${escapeHtml(artOptions.footerText)}" placeholder="${escapeHtml(location.host)}"></div></section>`;
+  return { models, rest: background + layout + extras };
+}
+
 function renderArtsModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
@@ -3358,11 +3657,12 @@ function renderArtsModule() {
     const extraControls = `${kind === 'team' || kind === 'athlete' ? `<div class="field"><label for="art-team">Equipe</label><select id="art-team" data-art-field="teamId">${teamOptions}</select></div>` : ''}${kind === 'athlete' ? `<div class="field"><label for="art-athlete">Atleta</label><select id="art-athlete" data-art-field="athleteId">${roster.length ? roster.map(athlete => `<option value="${escapeHtml(athlete.id)}" ${athlete.id === artOptions.athleteId ? 'selected' : ''}>${escapeHtml(`${athlete.number ? `${athlete.number} · ` : ''}${athlete.name}`)}</option>`).join('') : '<option value="">Sem atletas cadastrados</option>'}</select></div>` : ''}${kind === 'date' ? `<div class="field"><label for="art-date">Data</label><select id="art-date" data-art-field="date">${dates.map(day => `<option value="${day}" ${day === artOptions.date ? 'selected' : ''}>${day.split('-').reverse().join('/')}</option>`).join('')}</select></div>` : ''}${kind === 'post' ? `<div class="field"><label for="art-post">Publicação</label><select id="art-post" data-art-field="postId">${bundle.posts.length ? bundle.posts.map(post => `<option value="${escapeHtml(post.id)}" ${post.id === artOptions.postId ? 'selected' : ''}>${escapeHtml(post.title)}</option>`).join('') : '<option value="">Nenhuma publicação</option>'}</select></div>` : ''}`;
     dataControls = `${extraControls}${kind === 'match' || kind === 'lineup' ? `<div class="field"><label for="art-match">Partida</label><select id="art-match" data-art-field="matchId">${matchOptions}</select></div>` : ''}${kind === 'round' ? `<div class="field"><label for="art-round">Rodada ou fase</label><select id="art-round" data-art-field="round">${rounds.map(round => `<option value="${escapeHtml(round)}" ${round === artOptions.round ? 'selected' : ''}>${escapeHtml(round)}</option>`).join('')}</select></div>` : ''}${kind === 'lineup' && match ? `<div class="field"><label for="art-side">Equipe</label><select id="art-side" data-art-field="side"><option value="home" ${artOptions.side !== 'away' ? 'selected' : ''}>${escapeHtml(match.homeName)}</option><option value="away" ${artOptions.side === 'away' ? 'selected' : ''}>${escapeHtml(match.awayName)}</option></select></div>` : ''}${kind === 'top' ? `<div class="field"><label for="art-top">Quantidade de linhas</label><input id="art-top" type="number" min="3" max="20" data-art-field="topN" value="${artOptions.topN}"></div>` : ''}${kind === 'text' ? '<div class="field"><label for="art-notice-title">Título</label><input id="art-notice-title" data-art-field="title" maxlength="80" value="' + escapeHtml(artOptions.title) + '"></div><div class="field"><label for="art-notice-text">Texto</label><textarea id="art-notice-text" data-art-field="text" maxlength="600" rows="5">' + escapeHtml(artOptions.text) + '</textarea></div>' : kind !== 'text' ? `<div class="field"><label for="art-subtitle">Subtítulo (opcional)</label><input id="art-subtitle" data-art-field="title" maxlength="60" value="${escapeHtml(artOptions.title)}" placeholder="${escapeHtml(typeInfo[1])}"></div>` : ''}`;
   }
+  const styleExtras = renderArtStyleExtras();
   const batch = `${bundle && (artOptions.type === 'result' || artOptions.type === 'matchday') ? '<button class="button" data-action="arts-batch">Gerar de todos os jogos da rodada</button>' : ''}${bundle ? '<button class="button" data-action="arts-formats">Baixar nos 4 formatos</button>' : ''}`;
   const preview = !bundle ? '<div class="art-placeholder">Carregando dados do campeonato…</div>' : artStudio.error ? `<div class="art-placeholder">${escapeHtml(artStudio.error)}</div>` : artStudio.url ? `<img class="art-canvas" src="${escapeHtml(artStudio.url)}" alt="Prévia da arte" style="aspect-ratio:${artStudio.width}/${artStudio.height}">` : '<div class="art-placeholder">Gerando a arte…</div>';
   if (bundle) scheduleArtRender(bundle);
-  return `<div class="arts-layout"><aside class="arts-controls"><section><h3 class="arts-step"><b>1</b> Tipo de arte</h3><div class="art-types">${typeCards}</div></section><section><h3 class="arts-step"><b>2</b> Dados</h3><div class="field"><label for="art-championship">Campeonato</label><select id="art-championship" data-art-field="championshipId">${championshipOptions}</select></div>${dataControls}</section><section><h3 class="arts-step"><b>3</b> Estilo</h3><div class="art-themes">${themeCards}</div><div class="field"><label>Formato</label><div class="access-chips">${formatChips}</div></div><div class="builder-color-field"><label><input type="color" data-art-field="accent" value="${safeColor(artOptions.accent || (ART_THEMES[artOptions.theme] || ART_THEMES.gold).accent, '#d8ad56')}"><span>Cor de destaque${artOptions.accent ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="accent|" ${artOptions.accent ? '' : 'disabled'}>Padrão</button></div><label class="builder-check"><input type="checkbox" data-art-field="logos" ${artOptions.logos ? 'checked' : ''}> Mostrar escudos</label><label class="builder-check"><input type="checkbox" data-art-field="sponsors" ${artOptions.sponsors ? 'checked' : ''}> Patrocinadores no rodapé${artSponsorImages.length ? '' : ' (cadastre na biblioteca)'}</label><label class="builder-check"><input type="checkbox" data-art-field="brand" ${artOptions.brand ? 'checked' : ''}> Assinatura do clube</label></section>
-    <section><h3 class="arts-step"><b>4</b> Cores, fonte e marca</h3>${artColorField('bg', 'Cor de fundo', '#1a1233')}${artOptions.bg ? artColorField('bg2', 'Segundo tom do fundo', '#07080c') : ''}${artColorField('textColor', 'Cor do texto', '#ffffff')}<div class="field"><label for="art-font">Fonte dos títulos</label><select id="art-font" data-art-field="font">${Object.entries(ART_FONTS).map(([key, font]) => `<option value="${key}" ${artOptions.font === key ? 'selected' : ''}>${font[0]}</option>`).join('')}</select></div><label class="parameter-control"><span>Arredondamento dos blocos <strong>${artOptions.radius}px</strong></span><input type="range" min="0" max="40" value="${artOptions.radius}" data-art-field="radius"></label><div class="field"><label>Imagem de fundo</label><div class="art-upload"><label class="button subtle">${artAssets.bgImage ? 'Trocar imagem' : 'Enviar imagem'}<input type="file" accept="image/png,image/jpeg,image/webp" data-art-upload="bgImage" hidden></label>${artAssets.bgImage ? '<button class="button subtle" data-action="art-clear-upload" data-value="bgImage">Remover</button>' : ''}</div>${artAssets.bgImage ? `<label class="parameter-control"><span>Escurecer a imagem <strong>${artOptions.shade}%</strong></span><input type="range" min="0" max="90" value="${artOptions.shade}" data-art-field="shade"></label>` : ''}</div><div class="field"><label>Logo da marca (canto superior)</label><div class="art-upload"><button class="button subtle ${artOptions.brandLogo === 'platform' ? 'active' : ''}" data-action="arts-set" data-value="brandLogo|platform">Logo do clube</button><label class="button subtle ${artOptions.brandLogo === 'custom' ? 'active' : ''}">Enviar logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-art-upload="brandLogo" hidden></label>${artOptions.brandLogo ? '<button class="button subtle" data-action="arts-set" data-value="brandLogo|">Sem logo</button>' : ''}</div></div><div class="field"><label for="art-brand-name">Nome na assinatura</label><input id="art-brand-name" data-art-field="brandName" maxlength="40" value="${escapeHtml(artOptions.brandName)}" placeholder="JUVENTUDE ESPORTE CLUBE"></div><button class="button subtle" data-action="arts-reset-style">Restaurar estilo padrão</button></section></aside>
+  return `<div class="arts-layout"><aside class="arts-controls"><section><h3 class="arts-step"><b>1</b> Tipo de arte</h3><div class="art-types">${typeCards}</div></section><section><h3 class="arts-step"><b>2</b> Dados</h3><div class="field"><label for="art-championship">Campeonato</label><select id="art-championship" data-art-field="championshipId">${championshipOptions}</select></div>${dataControls}</section>${styleExtras.models}<section><h3 class="arts-step"><b>3</b> Estilo</h3><div class="art-themes">${themeCards}</div><div class="field"><label>Formato</label><div class="access-chips">${formatChips}</div></div><div class="builder-color-field"><label><input type="color" data-art-field="accent" value="${safeColor(artOptions.accent || (ART_THEMES[artOptions.theme] || ART_THEMES.gold).accent, '#d8ad56')}"><span>Cor de destaque${artOptions.accent ? '' : ' (do estilo)'}</span></label><button class="button subtle" data-action="arts-set" data-value="accent|" ${artOptions.accent ? '' : 'disabled'}>Padrão</button></div><label class="builder-check"><input type="checkbox" data-art-field="logos" ${artOptions.logos ? 'checked' : ''}> Mostrar escudos</label><label class="builder-check"><input type="checkbox" data-art-field="sponsors" ${artOptions.sponsors ? 'checked' : ''}> Patrocinadores no rodapé${artSponsorImages.length ? '' : ' (cadastre na biblioteca)'}</label><label class="builder-check"><input type="checkbox" data-art-field="brand" ${artOptions.brand ? 'checked' : ''}> Assinatura do clube</label></section>
+    <section><h3 class="arts-step"><b>4</b> Cores, fonte e marca</h3>${artColorField('bg', 'Cor de fundo', '#1a1233')}${artOptions.bg ? artColorField('bg2', 'Segundo tom do fundo', '#07080c') : ''}${artColorField('textColor', 'Cor do texto', '#ffffff')}<div class="field"><label for="art-font">Fonte dos títulos</label><select id="art-font" data-art-field="font">${Object.entries(ART_FONTS).map(([key, font]) => `<option value="${key}" ${artOptions.font === key ? 'selected' : ''}>${font[0]}</option>`).join('')}</select></div><label class="parameter-control"><span>Arredondamento dos blocos <strong data-art-label="radius">${artOptions.radius}px</strong></span><input type="range" min="0" max="40" value="${artOptions.radius}" data-art-field="radius" data-suffix="px"></label><div class="field"><label>Imagem de fundo</label><div class="art-upload"><label class="button subtle">${artAssets.bgImage ? 'Trocar imagem' : 'Enviar imagem'}<input type="file" accept="image/png,image/jpeg,image/webp" data-art-upload="bgImage" hidden></label>${artAssets.bgImage ? '<button class="button subtle" data-action="art-clear-upload" data-value="bgImage">Remover</button>' : ''}</div>${artAssets.bgImage ? `<label class="parameter-control"><span>Escurecer a imagem <strong data-art-label="shade">${artOptions.shade}%</strong></span><input type="range" min="0" max="90" value="${artOptions.shade}" data-art-field="shade" data-suffix="%"></label>` : ''}</div><div class="field"><label>Logo da marca (canto superior)</label><div class="art-upload"><button class="button subtle ${artOptions.brandLogo === 'platform' ? 'active' : ''}" data-action="arts-set" data-value="brandLogo|platform">Logo do clube</button><label class="button subtle ${artOptions.brandLogo === 'custom' ? 'active' : ''}">Enviar logo<input type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" data-art-upload="brandLogo" hidden></label>${artOptions.brandLogo ? '<button class="button subtle" data-action="arts-set" data-value="brandLogo|">Sem logo</button>' : ''}</div></div><div class="field"><label for="art-brand-name">Nome na assinatura</label><input id="art-brand-name" data-art-field="brandName" maxlength="40" value="${escapeHtml(artOptions.brandName)}" placeholder="JUVENTUDE ESPORTE CLUBE"></div><button class="button subtle" data-action="arts-reset-style">Restaurar estilo padrão</button></section>${styleExtras.rest}</aside>
     <section class="arts-stage"><div class="arts-actions"><button class="button primary" data-action="arts-download" ${artStudio.blob ? '' : 'disabled'}>Baixar PNG</button><button class="button" data-action="arts-share" ${artStudio.blob ? '' : 'disabled'}>Compartilhar</button>${artStudio.url ? `<a class="button subtle" href="${escapeHtml(artStudio.url)}" target="_blank" rel="noopener">Abrir no tamanho real</a>` : ''}${batch}<span class="help-text">${artStudio.width ? `${artStudio.width} × ${artStudio.height} px · PNG` : ''}</span></div><div class="arts-preview">${preview}</div></section></div>`;
 }
 
@@ -3388,12 +3688,17 @@ function setArtOption(field, value) {
     font: () => Boolean(ART_FONTS[value]), shade: () => Number.isFinite(Number(value)), radius: () => Number.isFinite(Number(value)), brandName: () => true, brandLogo: () => ['', 'platform', 'custom'].includes(value),
     teamId: () => true, athleteId: () => true, postId: () => true, date: () => true,
     logos: () => true, sponsors: () => true, brand: () => true,
+    bgStyle: () => ART_BACKGROUNDS.some(([key]) => key === value), bgPattern: () => ['accent', 'light', 'dark'].includes(value), layout: () => ART_LAYOUTS.some(([key]) => key === value),
+    frame: () => ART_FRAMES.some(([key]) => key === value), panelStyle: () => ART_PANELS.some(([key]) => key === value), tagPos: () => ART_TAG_POSITIONS.some(([key]) => key === value), tagStyle: () => ART_TAG_STYLES.some(([key]) => key === value),
+    bgTint: () => value === '' || /^#[0-9a-f]{6}$/i.test(value), tagText: () => true, footerText: () => true,
+    ...Object.fromEntries(Object.keys(ART_NUMBER_RANGES).map(key => [key, () => Number.isFinite(Number(value))])),
   };
   if (!allowed[field]?.()) return;
   if (field === 'topN') artOptions.topN = Math.max(3, Math.min(20, Math.round(Number(value))));
   else if (['logos', 'sponsors', 'brand'].includes(field)) artOptions[field] = value === true || value === 'true';
-  else if (field === 'shade') artOptions.shade = Math.max(0, Math.min(90, Math.round(Number(value))));
-  else if (field === 'radius') artOptions.radius = Math.max(0, Math.min(40, Math.round(Number(value))));
+  else if (ART_NUMBER_RANGES[field]) artOptions[field] = Math.max(ART_NUMBER_RANGES[field][0], Math.min(ART_NUMBER_RANGES[field][1], Math.round(Number(value))));
+  else if (field === 'tagText') artOptions.tagText = String(value).slice(0, 24);
+  else if (field === 'footerText') artOptions.footerText = String(value).slice(0, 60);
   else if (field === 'brandName') artOptions.brandName = String(value).slice(0, 40);
   else if (field === 'title') artOptions.title = String(value).slice(0, 80);
   else if (field === 'text') artOptions.text = String(value).slice(0, 600);
@@ -4831,7 +5136,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-obs-field','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-obs-field','data-obs-preset-name','data-art-preset-name','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -5225,6 +5530,21 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'obs-replay') { obsReloadFrame(true); return; }
+  if (action === 'obs-template') { const template = OBS_TEMPLATES[Number(target.dataset.value)]; if (template) { applyObsStyle(template[1]); toast(`Modelo “${template[0]}” aplicado.`); render(); } return; }
+  if (action === 'obs-preset-save') {
+    const name = String(document.querySelector('[data-obs-preset-name]')?.value || obsPresetName).trim().slice(0, 40);
+    if (!name) { toast('Digite um nome para o modelo.'); return; }
+    const list = obsUserPresets().filter(item => item.name !== name);
+    list.unshift({ name, options: obsPresetPayload() });
+    saveObsPresets(list); obsPresetName = ''; toast(`Modelo “${name}” salvo neste navegador.`); render(); return;
+  }
+  if (action === 'obs-preset-apply') { const item = obsUserPresets()[Number(target.dataset.value)]; if (item) { applyObsStyle(item.options); toast(`Modelo “${item.name}” aplicado.`); render(); } return; }
+  if (action === 'obs-preset-delete') { const list = obsUserPresets(); list.splice(Number(target.dataset.value), 1); saveObsPresets(list); render(); return; }
+  if (action === 'obs-preset-export') {
+    const list = obsUserPresets();
+    downloadBlobFile('modelos-de-overlay.json', new Blob([JSON.stringify({ format: 'juventude-obs-models', version: 1, presets: list.length ? list : [{ name: 'Estilo atual', options: obsPresetPayload() }] }, null, 2)], { type: 'application/json' }));
+    return;
+  }
   if (action === 'obs-copy') {
     const link = obsUrl(obsOptions, true);
     (navigator.clipboard?.writeText(link) || Promise.reject()).then(() => toast('Link do OBS copiado.')).catch(() => { document.querySelector('[data-obs-url]')?.select(); toast('Copie o link selecionado (Ctrl+C).'); });
@@ -5232,7 +5552,7 @@ function handleAction(action, target) {
   }
   if (action === 'art-clear-upload') { artAssets[target.dataset.value === 'brandLogo' ? 'brandLogo' : 'bgImage'] = ''; if (target.dataset.value === 'brandLogo') artOptions.brandLogo = ''; saveArtOptions(); render(); return; }
   if (action === 'arts-reset-style') {
-    Object.assign(artOptions, { accent: '', bg: '', bg2: '', textColor: '', font: 'barlow', shade: 45, radius: 14, brandName: '', brandLogo: '' });
+    Object.assign(artOptions, { ...ART_STYLE_DEFAULTS, theme: artOptions.theme, logos: artOptions.logos, sponsors: artOptions.sponsors, brand: artOptions.brand });
     artAssets = { bgImage: '', brandLogo: '' };
     saveArtOptions(); render();
     return;
@@ -5256,6 +5576,22 @@ function handleAction(action, target) {
     const [field, value = ''] = String(target.dataset.value || '').split('|');
     setArtOption(field, value);
     render();
+    return;
+  }
+  if (action === 'art-template') { const template = ART_TEMPLATES[Number(target.dataset.value)]; if (template) { applyArtStyle(template[1]); toast(`Modelo “${template[0]}” aplicado.`); render(); } return; }
+  if (action === 'art-random') { applyArtStyle(artRandomStyle()); render(); return; }
+  if (action === 'art-preset-save') {
+    const name = String(document.querySelector('[data-art-preset-name]')?.value || artPresetName).trim().slice(0, 40);
+    if (!name) { toast('Digite um nome para o modelo.'); return; }
+    const list = artUserPresets().filter(item => item.name !== name);
+    list.unshift({ name, options: artPresetPayload() });
+    saveArtPresets(list); artPresetName = ''; toast(`Modelo “${name}” salvo neste navegador.`); render(); return;
+  }
+  if (action === 'art-preset-apply') { const item = artUserPresets()[Number(target.dataset.value)]; if (item) { applyArtStyle(item.options); toast(`Modelo “${item.name}” aplicado.`); render(); } return; }
+  if (action === 'art-preset-delete') { const list = artUserPresets(); list.splice(Number(target.dataset.value), 1); saveArtPresets(list); render(); return; }
+  if (action === 'art-preset-export') {
+    const list = artUserPresets();
+    downloadBlobFile('modelos-de-arte.json', new Blob([JSON.stringify({ format: 'juventude-art-models', version: 1, presets: list.length ? list : [{ name: 'Estilo atual', options: artPresetPayload() }] }, null, 2)], { type: 'application/json' }));
     return;
   }
   if (action === 'arts-download' || action === 'arts-share') {
@@ -6581,19 +6917,26 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-obs-preset-name]')) { obsPresetName = target.value; return; }
   if (target.matches('[data-obs-field]')) {
     const field = target.dataset.obsField;
     setObsOption(field, target.type === 'checkbox' ? (target.checked ? 1 : 0) : target.type === 'range' ? Number(target.value) : target.value);
     if (field === 'slug') { obsBundle = null; obsBundleFor = ''; obsAutoSlug = ''; render(); return; }
     const label = document.querySelector(`[data-obs-label="${field}"]`);
     if (label) label.textContent = `${obsOptions[field]}${target.dataset.suffix || ''}`;
-    if (['group', 'round', 'match', 'font', 'logos'].includes(field)) obsReloadFrame(true); else obsReloadFrame();
+    if (['group', 'round', 'match', 'font', 'logos', 'head', 'dots'].includes(field)) obsReloadFrame(true); else obsReloadFrame();
     return;
   }
+  if (target.matches('[data-art-preset-name]')) { artPresetName = target.value; return; }
   if (target.matches('[data-art-field]')) {
     const field = target.dataset.artField;
     setArtOption(field, target.type === 'checkbox' ? target.checked : target.value);
     if (field === 'championshipId') loadArtBundle(true);
+    if (ART_NUMBER_RANGES[field] || ['tagText', 'footerText', 'bgTint'].includes(field)) {
+      const label = document.querySelector(`[data-art-label="${field}"]`);
+      if (label) label.textContent = `${artOptions[field]}${target.dataset.suffix || ''}`;
+      clearTimeout(artTimer); scheduleArtRenderSoon(); return;
+    }
     if (['title', 'text', 'topN', 'accent', 'bg', 'bg2', 'textColor', 'radius', 'shade', 'brandName'].includes(field)) {
       const output = target.closest('label')?.querySelector('strong');
       if (output && target.type === 'range') output.textContent = `${artOptions[field]}px`.replace(/px$/, field === 'shade' ? '%' : 'px');
@@ -6957,6 +7300,42 @@ app.addEventListener('change', event => {
     const reader = new FileReader();
     reader.onload = () => { artAssets[field] = String(reader.result); if (field === 'brandLogo') artOptions.brandLogo = 'custom'; saveArtOptions(); render(); };
     reader.readAsDataURL(file);
+    return;
+  }
+  if (target.matches('[data-obs-import]') && target.files?.[0]) {
+    const file = target.files[0];
+    if (file.size > 500_000) { toast('Arquivo grande demais para modelos de overlay.'); return; }
+    file.text().then(text => {
+      const data = JSON.parse(text);
+      if (data?.format !== 'juventude-obs-models' || !Array.isArray(data.presets)) throw new Error('formato');
+      const clean = data.presets.slice(0, 30).map(item => {
+        const options = {};
+        for (const key of OBS_STYLE_KEYS) { const value = item?.options?.[key]; if (['string', 'number', 'boolean'].includes(typeof value)) options[key] = typeof value === 'string' ? value.slice(0, 80) : value; }
+        return { name: String(item?.name || 'Modelo importado').slice(0, 40), options };
+      });
+      const names = new Set(clean.map(item => item.name));
+      saveObsPresets([...clean, ...obsUserPresets().filter(item => !names.has(item.name))]);
+      toast(`${clean.length} modelo(s) importado(s).`); render();
+    }).catch(() => toast('Arquivo de modelos inválido.'));
+    target.value = '';
+    return;
+  }
+  if (target.matches('[data-art-import]') && target.files?.[0]) {
+    const file = target.files[0];
+    if (file.size > 500_000) { toast('Arquivo grande demais para modelos de arte.'); return; }
+    file.text().then(text => {
+      const data = JSON.parse(text);
+      if (data?.format !== 'juventude-art-models' || !Array.isArray(data.presets)) throw new Error('formato');
+      const clean = data.presets.slice(0, 30).map(item => {
+        const options = {};
+        for (const key of ART_STYLE_KEYS) { const value = item?.options?.[key]; if (['string', 'number', 'boolean'].includes(typeof value)) options[key] = typeof value === 'string' ? value.slice(0, 80) : value; }
+        return { name: String(item?.name || 'Modelo importado').slice(0, 40), options };
+      });
+      const names = new Set(clean.map(item => item.name));
+      saveArtPresets([...clean, ...artUserPresets().filter(item => !names.has(item.name))]);
+      toast(`${clean.length} modelo(s) importado(s).`); render();
+    }).catch(() => toast('Arquivo de modelos inválido.'));
+    target.value = '';
     return;
   }
   if (target.matches('[data-builder-import]') && target.files?.[0]) {
