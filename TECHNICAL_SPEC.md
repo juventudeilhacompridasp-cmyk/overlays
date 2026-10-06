@@ -147,7 +147,7 @@ em `build.mjs`). Campeonatos ganham `slug`, `sport`, `format` (`league|groups|kn
 Ações em `POST /api/operations` (administrador/operador): `generate-fixtures` (todos contra todos,
 grupos com sorteio ou mata-mata, ida e volta opcionais, calendário a partir de data e horário),
 `generate-next-round` (grupos para mata-mata e rodadas seguintes; exige a fase anterior finalizada
-e vencedor definido, empates exigem pênaltis; fecha o campeonato com `championId`), `set-result`,
+e vencedor definido, empates exigem pênaltis; fecha o campeonato com `championId`), `set-result`, `reschedule-match` (adiar/adiantar/reagendar/cancelar/reabrir; situação `postponed`, campos `originalKickoffAt`, `rescheduleKind`, `postponeReason`, `rescheduleHistory`), `shift-matches` (deslocar várias partidas em ±dias), módulo `/manage/schedule`,
 `upsert-post` e `delete-post`. Operadores só alteram campeonatos que os listam em `moderators`
 (lista vazia = qualquer operador). O placar de uma partida finalizada vem do próprio registro ou,
 na falta dele, do estado da sala de transmissão.
