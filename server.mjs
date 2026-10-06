@@ -483,6 +483,12 @@ const server = http.createServer(async (request, response) => {
       store = structuredClone(current);
       const action = String(candidate.action || '');
       let actionResult = null;
+      if (action === 'draw-preview') {
+        const preview = competition.previewDraw(store, candidate, admin, { safeId });
+        if (preview.error) { sendJson(response, preview.status || 400, { ok: false, error: preview.error }); return; }
+        sendJson(response, 200, { ok: true, preview });
+        return;
+      }
       if (action === 'upsert-championship') {
         const item = candidate.item || {};
         const id = safeId(item.id || item.name, `campeonato-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`);
@@ -563,7 +569,7 @@ const server = http.createServer(async (request, response) => {
       } else if (action === 'mark-notification-read') {
         const notification = store.notifications.find(entry => entry.id === candidate.id);
         if (notification) notification.read = true;
-      } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches'].includes(action)) {
+      } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches', 'save-draw-config', 'clear-draw'].includes(action)) {
         const context = { safeId, now: () => Date.now(), addAudit };
         let outcome;
         if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
@@ -577,6 +583,8 @@ const server = http.createServer(async (request, response) => {
         } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
         else if (action === 'reschedule-match') outcome = competition.rescheduleMatch(store, candidate, admin, context);
         else if (action === 'shift-matches') outcome = competition.shiftMatches(store, candidate, admin, context);
+        else if (action === 'save-draw-config') outcome = competition.saveDrawConfig(store, candidate, admin, context);
+        else if (action === 'clear-draw') outcome = competition.clearDraw(store, candidate, admin, context);
         else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
         else outcome = competition.deletePost(store, candidate, admin, context);
         if (outcome.error) { sendJson(response, outcome.status || 400, { ok: false, error: outcome.error }); return; }

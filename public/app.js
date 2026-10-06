@@ -23,7 +23,7 @@ const isPublicPage = location.pathname === '/campeonatos' || /^\/(c|o|embed)\//.
 const isObsPage = /^\/obs\//.test(location.pathname);
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal && !isPublicPage && !isObsPage;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts', 'broadcast', 'schedule'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts', 'broadcast', 'schedule', 'draw'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -33,6 +33,7 @@ const app = document.getElementById('app');
 const apiUrl = path => `${path}${path.includes('?') ? '&' : '?'}room=${encodeURIComponent(ROOM_ID)}`;
 
 const icons = {
+  dice: '<svg viewBox="0 0 18 18" fill="none"><rect x="2.5" y="2.5" width="13" height="13" rx="3" stroke="currentColor" stroke-width="1.5"/><circle cx="6.5" cy="6.5" r="1.1" fill="currentColor"/><circle cx="11.5" cy="6.5" r="1.1" fill="currentColor"/><circle cx="9" cy="9" r="1.1" fill="currentColor"/><circle cx="6.5" cy="11.5" r="1.1" fill="currentColor"/><circle cx="11.5" cy="11.5" r="1.1" fill="currentColor"/></svg>',
   calendar: '<svg viewBox="0 0 18 18" fill="none"><rect x="2.5" y="3.5" width="13" height="12" rx="1.8" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h13M6 2v3M12 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   monitor: '<svg viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M6 16h6M9 13v3" stroke="currentColor" stroke-width="1.5"/></svg>',
   users: '<svg viewBox="0 0 18 18" fill="none"><circle cx="7" cy="6" r="2.3" stroke="currentColor" stroke-width="1.4"/><path d="M2.8 14c.3-2.2 1.8-3.5 4.2-3.5s3.9 1.3 4.2 3.5M12.3 4.1a2 2 0 010 3.7M12.5 10.6c1.7.2 2.6 1.3 2.8 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
@@ -65,6 +66,7 @@ const MANAGEMENT_MODULES = [
   { key: 'arts', label: 'Estúdio de artes', caption: 'Artes prontas para redes sociais: resultados, jogos, tabelas, artilharia, escalações e avisos', layer: 'all', icon: icons.layers },
   { key: 'feed', label: 'Notícias e mídia', caption: 'Notícias, fotos e vídeos por campeonato e rodada, exibidos na página pública', layer: 'all', icon: icons.text },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
+  { key: 'draw', label: 'Sorteio', caption: 'Vincule as equipes e sorteie grupos, tabela ou chaveamento com potes, restrições, ajustes e cerimônia', layer: 'all', icon: icons.dice },
   { key: 'schedule', label: 'Calendário e jogos', caption: 'Calendário de cada campeonato, lista com filtros e reagendamento: adiar, adiantar e cancelar', layer: 'all', icon: icons.calendar },
   { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
   { key: 'scoreboard', label: 'Placar', caption: 'Resultado, tempo e formato', layer: 'scoreboard', icon: icons.monitor },
@@ -2187,6 +2189,7 @@ function renderChampionshipsModule() {
     <div class="field-row">${fx('Primeira rodada em', 'startDate', 'date')}${fx('Horário', 'time', 'time')}${fx('Dias entre rodadas', 'intervalDays', 'number', 'min="1" max="60"')}</div>${fx('Local (opcional)', 'venue', 'text', 'maxlength="120"')}
     ${mode !== 'knockout' ? fxCheck('Turno e returno (ida e volta)', 'doubleRound') : fxCheck('Ida e volta nas fases até a semifinal', 'twoLegs')}${mode === 'groups' ? `<div class="field-row">${fx('Número de grupos', 'groups', 'number', 'min="2" max="16"')}${fx('Classificados por grupo', 'advance', 'number', 'min="1" max="4"')}</div>` : ''}
     ${fxCheck('Sortear a ordem das equipes', 'shuffle')}${matchesOf.some(match => match.generated) ? fxCheck('Substituir as partidas geradas anteriormente (só se nenhuma começou)', 'replace') : ''}
+    <p class="help-text">Para sortear com potes, restrições, prévia editável e cerimônia, use o módulo <a href="${escapeHtml(moduleUrl('draw'))}">Sorteio</a>.</p>
     <div class="operations-actions"><button class="button primary" data-action="generate-fixtures">Gerar partidas (${editor.teamIds.length} equipes)</button>${mode !== 'league' ? '<button class="button" data-action="generate-next-round">Gerar próxima fase</button>' : ''}</div><p class="help-text">${matchesOf.length} partida(s) neste campeonato. O mata-mata só avança quando a fase anterior estiver finalizada; empates exigem pênaltis. As salas de overlay de cada jogo são criadas automaticamente.</p>` : '<p class="help-text">Salve o campeonato para gerar as partidas.</p>';
   const moderatorsBody = adminSession.role === 'admin' ? ((accessAdmins.filter(account => account.role === 'operator').map(account => `<label class="announce-team"><input type="checkbox" data-ch-mod="${escapeHtml(account.username)}" ${editor.moderators.includes(account.username) ? 'checked' : ''}> ${escapeHtml(account.username)} <small>(operador)</small></label>`).join('')) || '<p class="help-text">Nenhum operador cadastrado. Crie contas com o papel Operador em Usuários/Acessos.</p>') + '<p class="help-text">Sem moderadores marcados, qualquer operador administra este campeonato. Com moderadores, só eles (e os administradores) podem editar.</p>' : '<p class="help-text">Somente administradores definem moderadores.</p>';
   const publicLink = championshipPublicUrl(selected || editor);
@@ -4016,6 +4019,164 @@ async function submitScheduleShift() {
   }
 }
 
+// ===== Sorteio: vincular equipes, potes, restrições, pré-visualização editável, cerimônia e confirmação =====
+const DRAW_POT_CHOICES = [1, 2, 3, 4, 5, 6];
+let drawState = { championshipId: '', teamIds: null, potsDraft: null, avoidDraft: null, draft: null, locks: {}, ceremony: false, reveal: 0, seedInput: '', search: '', avoidA: '', avoidB: '', busy: false };
+
+function drawChampionship() {
+  return operationsData.championships.find(item => item.id === drawState.championshipId) || operationsData.championships[0] || null;
+}
+const drawLinked = ch => drawState.teamIds || ch?.teamIds || [];
+const drawPots = ch => drawState.potsDraft || ch?.drawConfig?.pots || {};
+const drawAvoid = ch => drawState.avoidDraft || ch?.drawConfig?.avoid || [];
+const drawMode = ch => fixtureOptions.mode || ch?.format || 'league';
+const drawTeamName = id => teamCatalog.find(team => team.id === id)?.name || id;
+const drawDirty = ch => Boolean(drawState.teamIds || drawState.potsDraft || drawState.avoidDraft);
+
+function drawResetDraft(keepChampionship = true) {
+  drawState = { ...drawState, teamIds: null, potsDraft: null, avoidDraft: null, draft: null, locks: {}, reveal: 0, avoidA: '', avoidB: '', championshipId: keepChampionship ? drawState.championshipId : '' };
+}
+
+function drawPayload(ch, extra = {}) {
+  const linked = drawLinked(ch);
+  const pots = Object.fromEntries(Object.entries(drawPots(ch)).filter(([id]) => linked.includes(id)));
+  const seed = Math.round(Number(drawState.seedInput));
+  const payload = {
+    championshipId: ch.id, mode: drawMode(ch), teamIds: linked, groups: Number(fixtureOptions.groups) || 2, advance: Number(fixtureOptions.advance) || 2,
+    doubleRound: Boolean(fixtureOptions.doubleRound), twoLegs: Boolean(fixtureOptions.twoLegs), shuffle: fixtureOptions.shuffle !== false,
+    pots, avoid: drawAvoid(ch).filter(([a, b]) => linked.includes(a) && linked.includes(b)),
+  };
+  if (Number.isFinite(seed) && seed > 0) payload.seed = seed;
+  return { ...payload, ...extra };
+}
+
+async function drawPreviewRequest(extra = {}, { silent = false } = {}) {
+  const ch = drawChampionship();
+  if (!ch) return false;
+  drawState.busy = true; render();
+  let ok = false;
+  try {
+    const response = await fetch('/api/operations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'draw-preview', ...drawPayload(ch, extra) }) });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.preview) { drawState.draft = data.preview; ok = true; if (!silent) drawState.reveal = drawState.ceremony ? 0 : drawSequence(data.preview).length; }
+    else toast(data.error || 'Não foi possível sortear agora.');
+  } catch { toast('Não foi possível sortear agora.'); }
+  drawState.busy = false; render();
+  return ok;
+}
+
+// Ordem em que as equipes são reveladas na cerimônia: uma de cada grupo por vez, ou a ordem do sorteio.
+function drawSequence(draft) {
+  if (!draft) return [];
+  if (draft.mode !== 'groups') return draft.order || [];
+  const letters = Object.keys(draft.groups || {});
+  const longest = Math.max(0, ...letters.map(letter => draft.groups[letter].length));
+  const sequence = [];
+  for (let index = 0; index < longest; index += 1) for (const letter of letters) if (draft.groups[letter][index]) sequence.push(draft.groups[letter][index]);
+  return sequence;
+}
+
+function drawEditRequest(draft) {
+  return draft.mode === 'groups' ? { assignment: draft.groups, seed: draft.seed } : { order: draft.order, seed: draft.seed };
+}
+
+function drawResultText(ch) {
+  const draw = ch.draw;
+  if (!draw) return '';
+  if (draw.mode === 'groups') return Object.entries(ch.groups || {}).map(([letter, members]) => `Grupo ${letter}: ${members.map(drawTeamName).join(', ')}`).join('\n');
+  return (draw.order || []).map((id, index) => `${index + 1}. ${drawTeamName(id)}`).join('\n');
+}
+
+function renderDrawDraft(ch) {
+  const draft = drawState.draft;
+  if (!draft) return '<div class="portal-empty">Ainda não há sorteio em rascunho. Defina as regras e clique em “Sortear”.</div>';
+  const sequence = drawSequence(draft);
+  const shown = new Set(sequence.slice(0, drawState.ceremony ? drawState.reveal : sequence.length));
+  const pots = drawPots(ch);
+  const name = id => shown.has(id) ? escapeHtml(drawTeamName(id)) : '<span class="draw-hidden">• • •</span>';
+  const potBadge = id => pots[id] ? `<i class="draw-pot">P${pots[id]}</i>` : '';
+  let body = '';
+  if (draft.mode === 'groups') {
+    const letters = Object.keys(draft.groups);
+    body = `<div class="draw-groups">${letters.map(letter => `<article class="draw-group"><h4>Grupo ${letter} <small>${draft.groups[letter].length}</small></h4>${draft.groups[letter].map(id => `<div class="draw-team ${shown.has(id) ? '' : 'is-hidden'}">${potBadge(id)}<span>${name(id)}</span>${shown.has(id) ? `<button type="button" class="draw-icon ${drawState.locks[id] === letter ? 'on' : ''}" data-action="draw-lock" data-value="${escapeHtml(id)}|${letter}" title="${drawState.locks[id] === letter ? 'Destravar' : 'Travar neste grupo nos próximos sorteios'}" aria-pressed="${drawState.locks[id] === letter}">🔒</button><select class="draw-move" data-draw-move="${escapeHtml(id)}" aria-label="Mover para outro grupo">${letters.map(other => `<option value="${other}" ${other === letter ? 'selected' : ''}>Grupo ${other}</option>`).join('')}</select>` : ''}</div>`).join('') || '<p class="help-text">Grupo vazio.</p>'}</article>`).join('')}</div>`;
+  } else {
+    const list = (draft.order || []).map((id, index) => `<div class="draw-team ${shown.has(id) ? '' : 'is-hidden'}"><b>${index + 1}º</b>${potBadge(id)}<span>${name(id)}</span>${shown.has(id) ? `<span class="draw-order"><button type="button" class="draw-icon" data-action="draw-up" data-value="${index}" ${index === 0 ? 'disabled' : ''} aria-label="Subir">↑</button><button type="button" class="draw-icon" data-action="draw-down" data-value="${index}" ${index === draft.order.length - 1 ? 'disabled' : ''} aria-label="Descer">↓</button></span>` : ''}</div>`).join('');
+    const pairs = draft.mode === 'knockout' ? `<div class="draw-bracket"><h4>Primeira fase</h4>${draft.pairs.map(([a, b], index) => `<div class="draw-pair"><b>Jogo ${index + 1}</b><span>${name(a)}</span><em>×</em><span>${name(b)}</span></div>`).join('')}${draft.byes.length ? `<p class="help-text">Folga (avançam direto): ${draft.byes.map(id => name(id)).join(', ')}</p>` : ''}</div>` : '';
+    body = `<div class="draw-order-wrap"><div class="draw-list"><h4>${draft.mode === 'knockout' ? 'Cabeças de chave (1º = melhor)' : 'Ordem das equipes na tabela'}</h4>${list}</div>${pairs}</div>`;
+  }
+  const finished = !drawState.ceremony || drawState.reveal >= sequence.length;
+  const ceremony = `<div class="draw-ceremony"><label class="builder-check"><input type="checkbox" data-action="draw-ceremony" ${drawState.ceremony ? 'checked' : ''}> Modo cerimônia (revelar uma equipe por vez, bom para transmitir ao vivo)</label>${drawState.ceremony ? `<div class="operations-actions"><button class="button primary" data-action="draw-reveal" data-value="next" ${finished ? 'disabled' : ''}>Revelar próxima (${Math.min(drawState.reveal, sequence.length)}/${sequence.length})</button><button class="button" data-action="draw-reveal" data-value="all" ${finished ? 'disabled' : ''}>Revelar todas</button><button class="button subtle" data-action="draw-reveal" data-value="reset">Esconder de novo</button></div>` : ''}</div>`;
+  const warnings = draft.warnings?.length ? `<ul class="draw-warnings">${draft.warnings.map(text => `<li>${escapeHtml(text)}</li>`).join('')}</ul>` : '';
+  const blocked = draft.started;
+  const confirm = `<div class="draw-confirm"><div><strong>${draft.matchCount} partida(s)</strong> serão criadas${draft.manual ? ' · com ajustes manuais' : ''} · semente <code>${draft.seed}</code></div>${warnings}${draft.hasGenerated ? `<p class="help-text">${blocked ? 'Há partidas sorteadas já iniciadas ou finalizadas: o sorteio não pode ser substituído.' : 'Este campeonato já tem partidas sorteadas e nenhuma começou: ao confirmar, elas serão substituídas.'}</p>` : ''}<div class="operations-actions"><button class="button primary" data-action="draw-commit" ${blocked || drawState.busy || !finished ? 'disabled' : ''}>Confirmar sorteio e gerar partidas</button><button class="button subtle" data-action="draw-discard">Descartar rascunho</button></div>${!finished ? '<p class="help-text">Revele todas as equipes para confirmar.</p>' : ''}</div>`;
+  return `${ceremony}${body}${confirm}`;
+}
+
+function renderDrawModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  if (!operationsData.championships.length) return '<div class="portal-empty">Crie um campeonato no módulo Campeonatos e volte aqui para vincular as equipes e sortear.</div>';
+  const ch = drawChampionship();
+  drawState.championshipId = ch.id;
+  const linked = drawLinked(ch);
+  const pots = drawPots(ch);
+  const avoid = drawAvoid(ch);
+  const mode = drawMode(ch);
+  const matches = operationsData.matches.filter(match => match.championshipId === ch.id);
+  const generated = matches.filter(match => match.generated).length;
+  const needle = scheduleNorm(drawState.search).trim();
+  const catalog = teamCatalog.filter(team => !needle || scheduleNorm(team.name).includes(needle));
+  const fx = (label, key, type = 'text', attrs = '') => `<div class="field"><label>${label}</label><input data-fx="${key}" type="${type}" value="${escapeHtml(String(fixtureOptions[key] ?? ''))}" ${attrs}></div>`;
+  const fxCheck = (label, key, fallback = false) => `<label class="builder-check"><input type="checkbox" data-fx="${key}" data-fx-bool ${(fixtureOptions[key] ?? fallback) ? 'checked' : ''}> ${label}</label>`;
+  const potSelect = team => `<select class="draw-pot-select" data-draw-pot="${escapeHtml(team.id)}" aria-label="Pote de ${escapeHtml(team.name)}"><option value="">Sem pote</option>${DRAW_POT_CHOICES.map(pot => `<option value="${pot}" ${pots[team.id] === pot ? 'selected' : ''}>Pote ${pot}</option>`).join('')}</select>`;
+  const teamRows = catalog.map(team => `<div class="draw-pick ${linked.includes(team.id) ? 'is-on' : ''}"><label><input type="checkbox" data-draw-team="${escapeHtml(team.id)}" ${linked.includes(team.id) ? 'checked' : ''}> ${escapeHtml(team.name)}</label>${linked.includes(team.id) ? potSelect(team) : ''}</div>`).join('') || '<p class="help-text">Nenhuma equipe encontrada. Cadastre equipes no módulo Times.</p>';
+  const pairOptions = id => `<option value="">Escolher…</option>${linked.map(teamId => `<option value="${escapeHtml(teamId)}" ${teamId === id ? 'selected' : ''}>${escapeHtml(drawTeamName(teamId))}</option>`).join('')}`;
+  const avoidList = avoid.map(([a, b], index) => `<span class="draw-chip">${escapeHtml(drawTeamName(a))} ✕ ${escapeHtml(drawTeamName(b))}<button type="button" data-action="draw-avoid-del" data-value="${index}" aria-label="Remover restrição">×</button></span>`).join('');
+  const state = ch.draw ? `Sorteado em ${escapeHtml(operationDate(new Date(ch.draw.at).toISOString().slice(0, 16), true))} por ${escapeHtml(ch.draw.by || '—')} · semente ${ch.draw.seed}${ch.draw.manual ? ' · ajustado manualmente' : ''}` : 'Ainda não sorteado';
+  const current = ch.draw ? `<section class="draw-card"><h3 class="arts-step"><b>✓</b> Sorteio atual</h3><p class="help-text">${state}</p><pre class="draw-result">${escapeHtml(drawResultText(ch))}</pre><div class="operations-actions"><button class="button" data-action="draw-copy">Copiar resultado</button><button class="button" data-action="draw-edit-current">Ajustar este sorteio</button><a class="button subtle" href="${escapeHtml(moduleUrl('schedule'))}">Abrir calendário e jogos</a><button class="button subtle danger" data-action="draw-clear">Desfazer sorteio</button></div>${(ch.drawHistory || []).length > 1 ? `<div class="sch-history"><strong>Histórico de sorteios</strong><ul>${ch.drawHistory.map(entry => `<li><b>${escapeHtml(new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(entry.at)))}</b> · ${escapeHtml(entry.by || '')} — ${escapeHtml(FORMAT_LABELS[entry.mode]?.split(' (')[0] || entry.mode)}, ${entry.teams} equipes, ${entry.matches} partidas · semente ${entry.seed}${entry.manual ? ' · manual' : ''}</li>`).join('')}</ul></div>` : ''}</section>` : '';
+  return `<div class="draw-layout">
+    <div class="sch-toolbar"><div class="field"><label for="draw-champ">Campeonato</label><select id="draw-champ" data-draw-filter="championshipId">${operationsData.championships.map(item => `<option value="${escapeHtml(item.id)}" ${item.id === ch.id ? 'selected' : ''}>${escapeHtml(item.name)}${item.season ? ` · ${escapeHtml(item.season)}` : ''}</option>`).join('')}</select></div><div class="sch-counts"><span class="sch-badge sch-scheduled">${linked.length} equipe(s) vinculada(s)</span><span class="sch-badge ${generated ? 'sch-finished' : 'sch-cancelled'}">${generated ? `${generated} partida(s) sorteada(s)` : 'sem partidas sorteadas'}</span></div></div>
+    ${current}
+    <section class="draw-card"><h3 class="arts-step"><b>1</b> Equipes vinculadas e potes</h3><p class="help-text">Marque as equipes que disputam este campeonato. Potes são opcionais: no sorteio de grupos cada grupo recebe, sempre que possível, uma equipe de cada pote; no mata-mata o pote 1 forma as cabeças de chave.</p>
+      <div class="draw-picks-head"><input data-draw-filter="search" placeholder="Buscar equipe" value="${escapeHtml(drawState.search)}" aria-label="Buscar equipe"><button class="button subtle" data-action="draw-select-all">Marcar todas</button><button class="button subtle" data-action="draw-select-none">Limpar</button></div>
+      <div class="draw-picks">${teamRows}</div>
+      <div class="operations-actions"><button class="button primary" data-action="draw-save-teams" ${drawDirty(ch) ? '' : 'disabled'}>Salvar equipes, potes e restrições</button>${drawDirty(ch) ? '<span class="help-text">Há alterações não salvas (o sorteio já usa o que está na tela).</span>' : ''}</div></section>
+    <section class="draw-card"><h3 class="arts-step"><b>2</b> Regras do sorteio</h3>
+      <div class="field"><label>Formato</label><select data-fx="mode">${Object.entries(FORMAT_LABELS).map(([key, text]) => `<option value="${key}" ${mode === key ? 'selected' : ''}>${text}</option>`).join('')}</select></div>
+      ${mode !== 'knockout' ? fxCheck('Turno e returno (ida e volta)', 'doubleRound') : fxCheck('Ida e volta nas fases até a semifinal', 'twoLegs')}
+      ${mode === 'groups' ? `<div class="field-row">${fx('Número de grupos', 'groups', 'number', 'min="2" max="16"')}${fx('Classificados por grupo', 'advance', 'number', 'min="1" max="4"')}</div>` : ''}
+      ${mode === 'groups' ? `<div class="field"><label>Equipes que não podem cair no mesmo grupo</label><div class="draw-avoid"><select data-draw-filter="avoidA" aria-label="Primeira equipe">${pairOptions(drawState.avoidA)}</select><span>✕</span><select data-draw-filter="avoidB" aria-label="Segunda equipe">${pairOptions(drawState.avoidB)}</select><button class="button subtle" data-action="draw-avoid-add">Adicionar</button></div>${avoidList ? `<div class="draw-chips">${avoidList}</div>` : ''}</div>` : ''}
+      <div class="field-row">${fx('Primeira rodada em', 'startDate', 'date')}${fx('Horário', 'time', 'time')}${fx('Dias entre rodadas', 'intervalDays', 'number', 'min="1" max="60"')}</div>${fx('Local (opcional)', 'venue', 'text', 'maxlength="120"')}
+      <div class="field"><label for="draw-seed">Semente (opcional — mesma semente e mesmas regras dão o mesmo resultado)</label><input id="draw-seed" data-draw-filter="seedInput" type="number" min="1" placeholder="Em branco = sorteio novo" value="${escapeHtml(drawState.seedInput)}"></div></section>
+    <section class="draw-card"><h3 class="arts-step"><b>3</b> Sorteio</h3>
+      <div class="operations-actions"><button class="button primary" data-action="draw-new" ${drawState.busy || linked.length < 2 ? 'disabled' : ''}>🎲 ${drawState.draft ? 'Sortear novamente' : 'Sortear'}</button>${drawState.draft && Object.keys(drawState.locks).length ? `<span class="help-text">${Object.keys(drawState.locks).length} equipe(s) travada(s) mantêm o grupo.</span>` : ''}${linked.length < 2 ? '<span class="help-text">Vincule ao menos 2 equipes.</span>' : ''}</div>
+      <p class="help-text">O resultado aparece como rascunho: você pode mover equipes entre grupos, reordenar, travar equipes e sortear de novo antes de confirmar. Nada é criado até confirmar.</p>
+      ${renderDrawDraft(ch)}</section>
+  </div>`;
+}
+
+async function drawSaveTeams() {
+  const ch = drawChampionship();
+  if (!ch) return;
+  const teamIds = drawLinked(ch);
+  if (drawState.teamIds && !(await postOperation('upsert-championship', { item: { ...ch, teamIds } }))) return;
+  const config = { championshipId: ch.id, pots: Object.fromEntries(Object.entries(drawPots(ch)).filter(([id]) => teamIds.includes(id))), avoid: drawAvoid(ch).filter(([a, b]) => teamIds.includes(a) && teamIds.includes(b)) };
+  if (await postOperation('save-draw-config', config)) { Object.assign(drawState, { teamIds: null, potsDraft: null, avoidDraft: null }); toast('Equipes, potes e restrições salvos.'); render(); }
+}
+
+async function drawCommit() {
+  const ch = drawChampionship();
+  const draft = drawState.draft;
+  if (!ch || !draft || draft.started) return;
+  const payload = { ...drawPayload(ch), ...drawEditRequest(draft), seed: draft.seed, startDate: fixtureOptions.startDate, time: fixtureOptions.time || '15:00', intervalDays: Number(fixtureOptions.intervalDays) || 7, venue: fixtureOptions.venue, replace: draft.hasGenerated };
+  if (!(await postOperation('generate-fixtures', { ...payload, mode: draft.mode }))) return;
+  const created = lastOperationResult?.created ?? draft.matchCount;
+  await postOperation('save-draw-config', { championshipId: ch.id, pots: payload.pots, avoid: payload.avoid });
+  drawResetDraft();
+  toast(`Sorteio confirmado: ${created} partida(s) criada(s) (semente ${payload.seed}). Veja no Calendário e jogos.`);
+  render();
+}
+
 function renderMatchesModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
@@ -4665,6 +4826,7 @@ function renderModuleControls(key) {
   if (key === 'feed') return renderFeedModule();
   if (key === 'arts') return renderArtsModule();
   if (key === 'schedule') return renderScheduleModule();
+  if (key === 'draw') return renderDrawModule();
   if (key === 'broadcast') return renderBroadcastModule();
   if (key === 'backup') return renderBackupModule();
   let content = '';
@@ -4775,7 +4937,7 @@ function renderModuleHub() {
 
 // Grupos do menu do Super Administrador: separados por função (operar, cadastrar, publicar, comunicar, administrar).
 const PLATFORM_MENU_GROUPS = [
-  ['operation', 'Operação', ['live', 'championships', 'schedule', 'matches', 'standings']],
+  ['operation', 'Operação', ['live', 'championships', 'draw', 'schedule', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
   ['content', 'Conteúdo', ['broadcast', 'arts', 'feed', 'sponsors', 'sponsor-bar', 'builder']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
@@ -4812,7 +4974,7 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts', 'broadcast', 'schedule'].includes(module?.key);
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts', 'broadcast', 'schedule', 'draw'].includes(module?.key);
   return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements','live','standings'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${adminSession.role === 'viewer' ? '<div class="library-banner"><div><strong>Acesso somente leitura</strong><p>Seu papel é Leitor: você pode consultar dados e prévias, mas alterações não são salvas.</p></div></div>' : ''}${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
@@ -5337,7 +5499,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-schedule-filter','data-schedule-field','data-schedule-bulk','data-obs-field','data-obs-preset-name','data-art-preset-name','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-draw-filter','data-schedule-filter','data-schedule-field','data-schedule-bulk','data-obs-field','data-obs-preset-name','data-art-preset-name','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -5724,6 +5886,57 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'art-standings') { if (standingsBundle) buildQuickArt(standingsBundle, { type: 'standings', championshipId: standingsChampionshipId, format: 'portrait' }).then(canvas => openArt(canvas, `classificacao-${standingsBundle.championship.slug || 'campeonato'}`)); return; }
+  if (action === 'draw-new') { const ch = drawChampionship(); drawPreviewRequest(drawMode(ch) === 'groups' ? { locked: drawState.locks } : {}); return; }
+  if (action === 'draw-lock') { const [id, letter] = String(target.dataset.value).split('|'); if (drawState.locks[id] === letter) delete drawState.locks[id]; else drawState.locks[id] = letter; render(); return; }
+  if (action === 'draw-up' || action === 'draw-down') {
+    const draft = drawState.draft;
+    const index = Number(target.dataset.value);
+    const other = action === 'draw-up' ? index - 1 : index + 1;
+    if (!draft || other < 0 || other >= draft.order.length) return;
+    const order = [...draft.order];
+    [order[index], order[other]] = [order[other], order[index]];
+    drawPreviewRequest({ order, seed: draft.seed }, { silent: true });
+    return;
+  }
+  if (action === 'draw-ceremony') { drawState.ceremony = Boolean(target.checked); drawState.reveal = drawState.ceremony ? 0 : drawSequence(drawState.draft).length; render(); return; }
+  if (action === 'draw-reveal') {
+    const total = drawSequence(drawState.draft).length;
+    drawState.reveal = target.dataset.value === 'all' ? total : target.dataset.value === 'reset' ? 0 : Math.min(total, drawState.reveal + 1);
+    render(); return;
+  }
+  if (action === 'draw-discard') { drawState.draft = null; drawState.reveal = 0; render(); return; }
+  if (action === 'draw-commit') { drawCommit(); return; }
+  if (action === 'draw-save-teams') { drawSaveTeams(); return; }
+  if (action === 'draw-select-all') { drawState.teamIds = teamCatalog.map(team => team.id); drawState.draft = null; render(); return; }
+  if (action === 'draw-select-none') { drawState.teamIds = []; drawState.potsDraft = {}; drawState.avoidDraft = []; drawState.draft = null; render(); return; }
+  if (action === 'draw-avoid-add') {
+    const ch = drawChampionship();
+    const { avoidA, avoidB } = drawState;
+    if (!avoidA || !avoidB || avoidA === avoidB) { toast('Escolha duas equipes diferentes.'); return; }
+    const list = drawAvoid(ch);
+    if (!list.some(pair => pair.includes(avoidA) && pair.includes(avoidB))) drawState.avoidDraft = [...list, [avoidA, avoidB]];
+    Object.assign(drawState, { avoidA: '', avoidB: '', draft: null }); render(); return;
+  }
+  if (action === 'draw-avoid-del') { drawState.avoidDraft = drawAvoid(drawChampionship()).filter((_, index) => index !== Number(target.dataset.value)); drawState.draft = null; render(); return; }
+  if (action === 'draw-edit-current') {
+    const ch = drawChampionship();
+    if (!ch?.draw) return;
+    fixtureOptions.mode = ch.draw.mode;
+    drawState.ceremony = false;
+    drawPreviewRequest(ch.draw.mode === 'groups' ? { mode: 'groups', assignment: ch.groups, seed: ch.draw.seed } : { mode: ch.draw.mode, order: ch.draw.order, seed: ch.draw.seed });
+    return;
+  }
+  if (action === 'draw-clear') {
+    const ch = drawChampionship();
+    if (!ch || !confirm('Desfazer o sorteio? As partidas geradas serão removidas (só é possível se nenhuma começou).')) return;
+    postOperation('clear-draw', { championshipId: ch.id }).then(ok => { if (ok) { drawResetDraft(); toast('Sorteio desfeito.'); render(); } });
+    return;
+  }
+  if (action === 'draw-copy') {
+    const text = drawResultText(drawChampionship() || {});
+    (navigator.clipboard?.writeText(text) || Promise.reject()).then(() => toast('Resultado copiado.')).catch(() => toast('Não foi possível copiar.'));
+    return;
+  }
   if (action === 'schedule-view') { scheduleState.view = target.dataset.value === 'list' ? 'list' : 'calendar'; saveScheduleState(); render(); return; }
   if (action === 'schedule-month') {
     const base = scheduleState.month || scheduleInitialMonth(scheduleFiltered());
@@ -7147,6 +7360,41 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-draw-filter]')) {
+    const key = target.dataset.drawFilter;
+    if (key === 'championshipId') { drawResetDraft(false); drawState.championshipId = target.value; drawState.seedInput = ''; fixtureOptions.mode = ''; render(); return; }
+    if (key === 'seedInput') { drawState.seedInput = target.value; return; }
+    drawState[key] = target.value;
+    render();
+    return;
+  }
+  if (target.matches('[data-draw-team]')) {
+    const ch = drawChampionship();
+    const id = target.dataset.drawTeam;
+    const linked = drawLinked(ch);
+    drawState.teamIds = target.checked ? [...new Set([...linked, id])] : linked.filter(item => item !== id);
+    if (!target.checked) { drawState.potsDraft = Object.fromEntries(Object.entries(drawPots(ch)).filter(([key]) => key !== id)); drawState.avoidDraft = drawAvoid(ch).filter(pair => !pair.includes(id)); }
+    drawState.draft = null; drawState.locks = {};
+    render();
+    return;
+  }
+  if (target.matches('[data-draw-pot]')) {
+    const pots = { ...drawPots(drawChampionship()) };
+    if (target.value) pots[target.dataset.drawPot] = Number(target.value); else delete pots[target.dataset.drawPot];
+    drawState.potsDraft = pots; drawState.draft = null;
+    render();
+    return;
+  }
+  if (target.matches('[data-draw-move]')) {
+    const draft = drawState.draft;
+    if (!draft) return;
+    const id = target.dataset.drawMove;
+    const groups = Object.fromEntries(Object.entries(draft.groups).map(([letter, members]) => [letter, members.filter(item => item !== id)]));
+    groups[target.value].push(id);
+    delete drawState.locks[id];
+    drawPreviewRequest({ assignment: groups, seed: draft.seed }, { silent: true });
+    return;
+  }
   if (target.matches('[data-schedule-filter]')) {
     const key = target.dataset.scheduleFilter;
     if (key === 'championshipId') { Object.assign(scheduleState, { championshipId: target.value, filters: { ...SCHEDULE_FILTERS }, picked: [], selected: '', form: null, month: '' }); saveScheduleState(); }

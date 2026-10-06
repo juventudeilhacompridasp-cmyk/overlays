@@ -48,6 +48,10 @@ export function championshipExtras(item, previous = {}, safeId = value => slugif
     groups: previous.groups && typeof previous.groups === 'object' ? previous.groups : {},
     knockout: previous.knockout && typeof previous.knockout === 'object' ? previous.knockout : { byes: [], advance: 0, twoLegs: false },
     championId: String(previous.championId || '').slice(0, 64),
+    // Dados do sorteio: só mudam por generate-fixtures, save-draw-config e clear-draw (o formulário do campeonato os preserva).
+    draw: previous.draw && typeof previous.draw === 'object' ? previous.draw : null,
+    drawHistory: Array.isArray(previous.drawHistory) ? previous.drawHistory.slice(0, 10) : [],
+    drawConfig: previous.drawConfig && typeof previous.drawConfig === 'object' ? previous.drawConfig : { pots: {}, avoid: [] },
   };
 }
 
@@ -404,18 +408,190 @@ export function matchExtras(item, previous = {}) {
   };
 }
 
+
+// ---------- Sorteio: potes, restrições, travas, pré-visualização e confirmação ----------
+
+function lcg(seed) {
+  let value = seed >>> 0 || 1;
+  return () => { value = (value * 1664525 + 1013904223) >>> 0; return value / 4294967296; };
+}
+
+export const DRAW_MAX_POT = 8;
+
+function normalizePots(raw, teamIds) {
+  const pots = {};
+  if (raw && typeof raw === 'object') for (const id of teamIds) { const value = Math.round(Number(raw[id])); if (value >= 1 && value <= DRAW_MAX_POT) pots[id] = value; }
+  return pots;
+}
+
+function normalizeAvoid(raw, teamIds) {
+  const known = new Set(teamIds);
+  const seen = new Set();
+  const pairs = [];
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    const [a, b] = Array.isArray(entry) ? entry : [];
+    if (!known.has(a) || !known.has(b) || a === b) continue;
+    const key = [a, b].sort().join('|');
+    if (seen.has(key)) continue;
+    seen.add(key); pairs.push([a, b]);
+  }
+  return pairs.slice(0, 60);
+}
+
+// Sorteio de grupos por potes (um de cada pote por grupo, sempre que possível), com equipes travadas e pares que não podem se enfrentar.
+// Devolve null se as restrições forem impossíveis. Sem potes, trava ou restrição, o chamador usa drawGroups (comportamento histórico).
+export function drawGroupsConstrained(teamIds, groupCount, random, { pots = {}, avoid = [], locked = {} } = {}) {
+  const letters = Array.from({ length: Math.max(1, Math.min(26, groupCount)) }, (_, index) => String.fromCharCode(65 + index));
+  const sizes = Object.fromEntries(letters.map((letter, index) => [letter, Math.floor(teamIds.length / letters.length) + (index < teamIds.length % letters.length ? 1 : 0)]));
+  const enemies = new Map();
+  for (const [a, b] of avoid) { enemies.set(a, [...(enemies.get(a) || []), b]); enemies.set(b, [...(enemies.get(b) || []), a]); }
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const groups = Object.fromEntries(letters.map(letter => [letter, []]));
+    const where = {};
+    let ok = true;
+    for (const [id, letter] of Object.entries(locked)) {
+      if (!teamIds.includes(id) || !groups[letter] || groups[letter].length >= sizes[letter] || (enemies.get(id) || []).some(other => where[other] === letter)) { ok = false; break; }
+      groups[letter].push(id); where[id] = letter;
+    }
+    if (!ok) return null;
+    const free = teamIds.filter(id => !where[id]);
+    const potValues = [...new Set(free.map(id => pots[id] || 1))].sort((a, b) => a - b);
+    for (const pot of potValues) {
+      for (const id of shuffle(free.filter(team => (pots[team] || 1) === pot), random)) {
+        const open = letters.filter(letter => groups[letter].length < sizes[letter] && !(enemies.get(id) || []).some(other => where[other] === letter));
+        if (!open.length) { ok = false; break; }
+        const samePot = letter => groups[letter].filter(team => (pots[team] || 1) === pot).length;
+        const least = Math.min(...open.map(samePot));
+        const candidates = open.filter(letter => samePot(letter) === least);
+        const letter = candidates[Math.floor(random() * candidates.length)];
+        groups[letter].push(id); where[id] = letter;
+      }
+      if (!ok) break;
+    }
+    if (ok) return groups;
+  }
+  return null;
+}
+
+function drawMatchCount(mode, teamCount, groups, options) {
+  const robin = size => size * (size - 1) / 2 * (options.doubleRound ? 2 : 1);
+  if (mode === 'league') return robin(teamCount);
+  if (mode === 'groups') return Object.values(groups || {}).reduce((total, members) => total + robin(members.length), 0);
+  const size = nextPowerOfTwo(teamCount);
+  const pairs = size === teamCount ? teamCount / 2 : teamCount - size / 2;
+  return pairs * (options.twoLegs && size > 2 ? 2 : 1);
+}
+
+// Decide o sorteio (aleatório com potes/restrições ou explícito vindo do administrador). Não altera o store.
+export function planDraw(championship, candidate, ctx) {
+  const teamIds = [...new Set((Array.isArray(candidate.teamIds) ? candidate.teamIds : championship.teamIds || []).map(value => ctx.safeId(value)).filter(Boolean))];
+  const mode = FORMATS.includes(candidate.mode) ? candidate.mode : championship.format || 'league';
+  if (teamIds.length < 2) return { status: 400, error: 'Vincule ao menos 2 equipes ao campeonato para sortear.' };
+  const config = championship.drawConfig || {};
+  const pots = normalizePots(candidate.pots ?? config.pots, teamIds);
+  const avoid = normalizeAvoid(candidate.avoid ?? config.avoid, teamIds);
+  const seed = Number.isInteger(candidate.seed) && candidate.seed > 0 ? candidate.seed >>> 0 : Math.floor(Math.random() * 2147483646) + 1;
+  const random = lcg(seed);
+  const options = { doubleRound: Boolean(candidate.doubleRound), twoLegs: Boolean(candidate.twoLegs) };
+  const warnings = [];
+  const plan = { mode, teamIds, seed, pots, avoid, groups: {}, order: [], pairs: [], byes: [], advance: 0, manual: false, warnings };
+  const permutation = list => Array.isArray(list) && list.length === teamIds.length && teamIds.every(id => list.includes(id)) && new Set(list).size === list.length;
+  if (mode === 'groups') {
+    const explicit = candidate.assignment && typeof candidate.assignment === 'object' ? candidate.assignment : null;
+    const count = explicit ? Object.keys(explicit).length : Math.max(2, Math.min(teamIds.length >> 1, Math.round(Number(candidate.groups)) || 2));
+    if (explicit) {
+      const letters = Object.keys(explicit);
+      const flat = letters.flatMap(letter => Array.isArray(explicit[letter]) ? explicit[letter].map(value => ctx.safeId(value)) : []);
+      if (letters.length < 2 || letters.length > 26 || !letters.every((letter, index) => letter === String.fromCharCode(65 + index)) || !permutation(flat)) return { status: 400, error: 'A distribuição dos grupos precisa conter cada equipe vinculada exatamente uma vez.' };
+      plan.groups = Object.fromEntries(letters.map(letter => [letter, explicit[letter].map(value => ctx.safeId(value))]));
+      plan.manual = true;
+    } else {
+      const locked = {};
+      for (const [id, letter] of Object.entries(candidate.locked && typeof candidate.locked === 'object' ? candidate.locked : {})) if (teamIds.includes(ctx.safeId(id))) locked[ctx.safeId(id)] = String(letter).toUpperCase().slice(0, 1);
+      const constrained = Object.keys(pots).length || avoid.length || Object.keys(locked).length;
+      if (constrained) {
+        const groups = drawGroupsConstrained(teamIds, count, random, { pots, avoid, locked });
+        if (!groups) return { status: 409, error: 'Não foi possível sortear respeitando as restrições (equipes travadas e pares que não podem se enfrentar). Afrouxe alguma regra.' };
+        plan.groups = groups;
+      } else plan.groups = drawGroups(teamIds, count, random, candidate.shuffle !== false);
+    }
+    plan.advance = Math.max(1, Math.min(4, Math.round(Number(candidate.advance)) || 2));
+    plan.order = Object.values(plan.groups).flat();
+    const sizes = Object.values(plan.groups).map(members => members.length);
+    if (Math.max(...sizes) - Math.min(...sizes) > 1) warnings.push('Os grupos ficaram com tamanhos diferentes.');
+    if (sizes.some(size => size < 2)) warnings.push('Há grupo com menos de 2 equipes: ele não terá partidas.');
+    const biggestPot = Math.max(0, ...Object.values(Object.values(pots).reduce((tally, pot) => ({ ...tally, [pot]: (tally[pot] || 0) + 1 }), {})));
+    if (biggestPot > count) warnings.push('Algum pote tem mais equipes que grupos; duas do mesmo pote cairão juntas.');
+  } else {
+    if (Array.isArray(candidate.order)) {
+      const order = candidate.order.map(value => ctx.safeId(value));
+      if (!permutation(order)) return { status: 400, error: 'A ordem das equipes precisa conter cada equipe vinculada exatamente uma vez.' };
+      plan.order = order; plan.manual = true;
+    } else if (candidate.shuffle === false) plan.order = teamIds;
+    else if (Object.keys(pots).length && mode === 'knockout') {
+      // Cabeças de chave: o pote 1 forma os melhores semeados; dentro de cada pote a ordem é sorteada.
+      const byPot = {};
+      for (const id of teamIds) { const pot = pots[id] || DRAW_MAX_POT + 1; byPot[pot] = [...(byPot[pot] || []), id]; }
+      plan.order = Object.keys(byPot).map(Number).sort((a, b) => a - b).flatMap(pot => shuffle(byPot[pot], random));
+    } else plan.order = shuffle(teamIds, random);
+    if (mode === 'knockout') {
+      const { pairs, byes } = firstKnockoutRound(plan.order);
+      plan.pairs = pairs; plan.byes = byes;
+      if (byes.length) warnings.push(`${byes.length} equipe(s) avançam direto para a segunda fase (folga).`);
+    }
+  }
+  plan.matchCount = drawMatchCount(mode, teamIds.length, plan.groups, options);
+  return plan;
+}
+
+// Pré-visualização: calcula o sorteio sem gravar nada.
+export function previewDraw(store, candidate, admin, ctx) {
+  const championship = store.championships.find(item => item.id === ctx.safeId(candidate.championshipId));
+  if (!championship) return { status: 404, error: 'Campeonato não encontrado.' };
+  if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
+  const plan = planDraw(championship, candidate, ctx);
+  if (plan.error) return plan;
+  const existing = store.matches.filter(match => match.championshipId === championship.id);
+  return { mode: plan.mode, seed: plan.seed, groups: plan.groups, order: plan.order, pairs: plan.pairs, byes: plan.byes, advance: plan.advance, matchCount: plan.matchCount, warnings: plan.warnings, manual: plan.manual, hasGenerated: existing.some(match => match.generated), started: existing.some(match => match.generated && ['live', 'finished'].includes(match.status)) };
+}
+
+// Guarda potes e pares que não podem se enfrentar, para o sorteio poder ser configurado antes de ser feito.
+export function saveDrawConfig(store, candidate, admin, ctx) {
+  const championship = store.championships.find(item => item.id === ctx.safeId(candidate.championshipId));
+  if (!championship) return { status: 404, error: 'Campeonato não encontrado.' };
+  if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
+  const teamIds = championship.teamIds || [];
+  championship.drawConfig = { pots: normalizePots(candidate.pots, teamIds), avoid: normalizeAvoid(candidate.avoid, teamIds) };
+  championship.updatedAt = ctx.now();
+  ctx.addAudit(store, 'draw.configured', admin.username, championship.name, `${Object.keys(championship.drawConfig.pots).length} equipe(s) em potes · ${championship.drawConfig.avoid.length} restrição(ões)`);
+  return {};
+}
+
+// Desfaz o sorteio: remove as partidas geradas (se nenhuma começou) e limpa grupos, chaveamento e campeão.
+export function clearDraw(store, candidate, admin, ctx) {
+  const championship = store.championships.find(item => item.id === ctx.safeId(candidate.championshipId));
+  if (!championship) return { status: 404, error: 'Campeonato não encontrado.' };
+  if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
+  const generated = store.matches.filter(match => match.championshipId === championship.id && match.generated);
+  if (generated.some(match => ['live', 'finished'].includes(match.status))) return { status: 409, error: 'Há partidas sorteadas já iniciadas ou finalizadas; não é possível desfazer o sorteio.' };
+  store.matches = store.matches.filter(match => !(match.championshipId === championship.id && match.generated));
+  championship.groups = {}; championship.knockout = { byes: [], advance: 0, twoLegs: false }; championship.championId = ''; championship.draw = null;
+  championship.updatedAt = ctx.now();
+  ctx.addAudit(store, 'draw.cleared', admin.username, championship.name, `${generated.length} partida(s) removida(s)`);
+  return { removed: generated.length };
+}
+
 export function generateFixtures(store, candidate, admin, ctx) {
   const championship = store.championships.find(item => item.id === ctx.safeId(candidate.championshipId));
   if (!championship) return { status: 404, error: 'Campeonato não encontrado.' };
   if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
-  const teamIds = [...new Set((Array.isArray(candidate.teamIds) ? candidate.teamIds : championship.teamIds || []).map(value => ctx.safeId(value)).filter(Boolean))];
-  const mode = FORMATS.includes(candidate.mode) ? candidate.mode : championship.format || 'league';
-  if (teamIds.length < 2) return { status: 400, error: 'Selecione ao menos 2 equipes para gerar as partidas.' };
+  const plan = planDraw(championship, candidate, ctx);
+  if (plan.error) return plan;
+  const { teamIds, mode } = plan;
   const existing = store.matches.filter(match => match.championshipId === championship.id);
   const playedGenerated = existing.some(match => match.generated && (match.status === 'finished' || match.status === 'live'));
   if (existing.some(match => match.generated) && !candidate.replace) return { status: 409, error: 'Este campeonato já tem partidas geradas. Marque "substituir" para gerar de novo.' };
   if (candidate.replace && playedGenerated) return { status: 409, error: 'Há partidas geradas já iniciadas ou finalizadas; elas não podem ser substituídas.' };
-  const random = typeof candidate.seed === 'number' ? (() => { let value = candidate.seed >>> 0 || 1; return () => { value = (value * 1664525 + 1013904223) >>> 0; return value / 4294967296; }; })() : Math.random;
   const schedule = scheduleSlots({ startDate: String(candidate.startDate || ''), time: String(candidate.time || '15:00'), intervalDays: clamp(candidate.intervalDays, 1, 60, 7), slotMinutes: clamp(candidate.slotMinutes, 30, 600, 90) });
   const venue = candidate.venue;
   if (candidate.replace) store.matches = store.matches.filter(match => !(match.championshipId === championship.id && match.generated));
@@ -428,21 +604,19 @@ export function generateFixtures(store, candidate, admin, ctx) {
   const prefix = (championship.slug || championship.id).slice(0, 20);
   let created = [];
   if (mode === 'league') {
-    const rounds = roundRobinRounds(candidate.shuffle === false ? teamIds : shuffle(teamIds, random), { doubleRound: Boolean(candidate.doubleRound) });
+    const rounds = roundRobinRounds(plan.order, { doubleRound: Boolean(candidate.doubleRound) });
     created = buildMatches(store, championship, rounds.map((pairs, index) => ({ pairs, label: `Rodada ${index + 1}` })), { stage: 'league', schedule, venue, now, idPrefix: prefix });
   } else if (mode === 'groups') {
-    const groupCount = Math.max(2, Math.min(teamIds.length >> 1, Math.round(Number(candidate.groups)) || 2));
-    championship.groups = drawGroups(teamIds, groupCount, random, candidate.shuffle !== false);
-    championship.knockout.advance = Math.max(1, Math.min(4, Math.round(Number(candidate.advance)) || 2));
+    championship.groups = plan.groups;
+    championship.knockout.advance = plan.advance;
     for (const [letter, members] of Object.entries(championship.groups)) {
       const rounds = roundRobinRounds(members, { doubleRound: Boolean(candidate.doubleRound) });
       created.push(...buildMatches(store, championship, rounds.map((pairs, index) => ({ pairs, label: `Grupo ${letter} · Rodada ${index + 1}` })), { stage: 'group', group: letter, schedule, venue, now, idPrefix: prefix }));
     }
   } else {
-    const seeds = candidate.shuffle === false ? teamIds : shuffle(teamIds, random);
-    const { pairs, byes } = firstKnockoutRound(seeds);
+    const { pairs, byes } = { pairs: plan.pairs, byes: plan.byes };
     championship.knockout.byes = byes;
-    const teamsInRound = nextPowerOfTwo(seeds.length);
+    const teamsInRound = nextPowerOfTwo(plan.order.length);
     created = buildMatches(store, championship, [{ pairs, label: knockoutRoundName(teamsInRound) }], { stage: 'knockout', schedule, venue, now, idPrefix: prefix });
     if (championship.knockout.twoLegs && teamsInRound > 2) {
       const legTwo = buildMatches(store, championship, [{ pairs: pairs.map(([home, away]) => [away, home]), label: `${knockoutRoundName(teamsInRound)} · volta`, leg: 2 }], { stage: 'knockout', schedule: (roundIndex, slotIndex) => schedule(roundIndex + 1, slotIndex), venue, now, idPrefix: prefix });
@@ -451,8 +625,10 @@ export function generateFixtures(store, candidate, admin, ctx) {
     }
   }
   championship.updatedAt = now;
-  ctx.addAudit(store, 'fixtures.generated', admin.username, championship.name, `${created.length} partidas · ${mode}`);
-  return { created: created.length };
+  championship.draw = { seed: plan.seed, mode, at: now, by: String(admin.username || '').slice(0, 80), manual: plan.manual, groups: plan.groups, order: plan.order };
+  championship.drawHistory = [{ at: now, by: String(admin.username || '').slice(0, 80), seed: plan.seed, mode, teams: teamIds.length, matches: created.length, manual: plan.manual }, ...(championship.drawHistory || [])].slice(0, 10);
+  ctx.addAudit(store, 'fixtures.generated', admin.username, championship.name, `${created.length} partidas · ${mode} · semente ${plan.seed}`);
+  return { created: created.length, seed: plan.seed };
 }
 
 function tieWinner(legs, resultsByMatch) {

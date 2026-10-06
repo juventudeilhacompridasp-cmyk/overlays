@@ -33,7 +33,7 @@ const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
 const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const worker = `${authModule}
 ${competitionModule}
-const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, rescheduleMatch, shiftMatches, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
+const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, rescheduleMatch, shiftMatches, previewDraw, saveDrawConfig, clearDraw, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
 const assets = ${JSON.stringify(assetMap)};
 const APP_VERSION = ${JSON.stringify(appVersion)};
 const fallbackStates = new Map();
@@ -559,6 +559,11 @@ export default {
           store = structuredClone(current);
           const action = String(candidate.action || '');
           let actionResult = null;
+          if (action === 'draw-preview') {
+            const preview = competition.previewDraw(store, candidate, admin, { safeId });
+            if (preview.error) return Response.json({ ok: false, error: preview.error }, { status: preview.status || 400 });
+            return Response.json({ ok: true, preview }, { headers: { 'cache-control': 'no-store' } });
+          }
           const workerCatalog = (await readState(env, 'team-catalog')) || { teams: [] };
           if (action === 'upsert-championship') {
             const item = candidate.item || {};
@@ -641,7 +646,7 @@ export default {
           } else if (action === 'mark-notification-read') {
             const notification = store.notifications.find(entry => entry.id === candidate.id);
             if (notification) notification.read = true;
-          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches'].includes(action)) {
+          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches', 'save-draw-config', 'clear-draw'].includes(action)) {
             const context = { safeId, now: () => Date.now(), addAudit };
             let outcome;
             if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
@@ -655,6 +660,8 @@ export default {
             } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
             else if (action === 'reschedule-match') outcome = competition.rescheduleMatch(store, candidate, admin, context);
             else if (action === 'shift-matches') outcome = competition.shiftMatches(store, candidate, admin, context);
+            else if (action === 'save-draw-config') outcome = competition.saveDrawConfig(store, candidate, admin, context);
+            else if (action === 'clear-draw') outcome = competition.clearDraw(store, candidate, admin, context);
             else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
             else outcome = competition.deletePost(store, candidate, admin, context);
             if (outcome.error) return Response.json({ ok: false, error: outcome.error }, { status: outcome.status || 400 });
