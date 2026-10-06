@@ -174,6 +174,11 @@ try {
   adminCookie = (adminSetup.headers.get('set-cookie') || '').split(';')[0];
   verify('The local server creates the first administrator and starts a session', adminSetup.status === 200 && adminCookie.startsWith('joa_admin='));
   const pairKey = (a, b) => [a, b].sort().join('|');
+  const slugStore = { championships: [{ id: 'x1', name: 'Copa Ilha' }, { id: 'x2', name: 'Copa Ilha' }, { id: 'x3', name: 'Outro', slug: 'fixo' }] };
+  competition.ensureSlugs(slugStore);
+  const adjusted = competition.computeStandings([], {}, { teamIds: ['a', 'b'], names: { a: 'A', b: 'B' }, adjust: { a: { points: 7, played: 3, won: 2, drawn: 1, gf: 5, ga: 2 }, zzz: { points: 99 } } });
+  const adjustedStats = competition.aggregateStats([], {}, undefined, { a: 'A' }, [{ name: 'Zé', teamId: 'a', goals: 4, yellow: 1, red: 0 }]);
+  verify('Legacy championships get unique slugs and manual adjustments are added to standings and scorers (unknown teams ignored)', slugStore.championships[0].slug === 'copa-ilha' && slugStore.championships[1].slug === 'copa-ilha-2' && slugStore.championships[2].slug === 'fixo' && adjusted[0].teamId === 'a' && adjusted[0].points === 7 && adjusted[0].played === 3 && adjusted[0].gd === 3 && adjusted.length === 2 && adjustedStats.scorers[0].goals === 4 && adjustedStats.players[0].yellow === 1 && adjustedStats.cardsByTeam.a === 1);
   const rr4 = competition.roundRobinRounds(['a', 'b', 'c', 'd']);
   const rr5 = competition.roundRobinRounds(['a', 'b', 'c', 'd', 'e']);
   const rr4Double = competition.roundRobinRounds(['a', 'b', 'c', 'd'], { doubleRound: true });
@@ -245,6 +250,7 @@ try {
   const drawConfigChamp = drawConfigSaved.body.operations.championships.find(item => item.id === drawCupId);
   const drawCleared = await nodeOps('clear-draw', { championshipId: drawCupId });
   verify('Draw (Node): previews are reproducible by seed, respect pots and restrictions, report impossible rules, validate manual input and never persist; confirming stores groups, seed and history; config and clear-draw work', drawA.status === 200 && JSON.stringify(drawA.body.preview.groups) === JSON.stringify(drawB.body.preview.groups) && groupOf(drawA.body.preview, 't1') !== groupOf(drawA.body.preview, 't2') && groupOf(drawA.body.preview, 't3') !== groupOf(drawA.body.preview, 't4') && groupOf(drawA.body.preview, 't5') !== groupOf(drawA.body.preview, 't6') && drawA.body.preview.matchCount === 6 && drawLocked.status === 409 && drawBadAssignment.status === 400 && drawKnockout.body.preview.pairs.length === 2 && drawKnockout.body.preview.byes.length === 2 && opsAfterPreview.matches.filter(item => item.championshipId === drawCupId).length === 0 && !opsAfterPreview.championships.find(item => item.id === drawCupId).draw && drawManual.status === 200 && drawManual.body.result.created === 6 && drawManual.body.result.seed === 99 && JSON.stringify(drawChamp.groups) === JSON.stringify({ A: ['t1', 't3', 't5'], B: ['t2', 't4', 't6'] }) && drawChamp.draw.manual === true && drawChamp.drawHistory.length === 1 && JSON.stringify(drawConfigChamp.drawConfig.pots) === JSON.stringify({ t1: 1, t2: 1 }) && drawConfigChamp.drawConfig.avoid.length === 1 && drawCleared.status === 200 && drawCleared.body.result.removed === 6 && !drawCleared.body.operations.championships.find(item => item.id === drawCupId).draw && Object.keys(drawCleared.body.operations.championships.find(item => item.id === drawCupId).groups).length === 0);
+  const importRows = [{ round: 'Rodada 1', kickoffAt: '2026-03-07T15:00', home: 'Time Retro A', away: 'Time Retro B', homeScore: '3', awayScore: '1', venue: 'Campo 1' }, { round: 'Rodada 2', kickoffAt: '2026-03-14T15:00', home: 'Time Retro B', away: 'Time Retro A', homeScore: '', awayScore: '' }];
   const nodePublic = await (await fetch(`${baseURL}/api/public/championship?slug=copa-node`)).json();
   const nodeHidden = await fetch(`${baseURL}/api/public/championship?slug=nao-existe`);
   verify('Fixtures, results and the public championship API also work on the local Node server', nodeFixtures.body.result.created === 6 && nodePublic.standings.filter(row => row.points === 1).length === 2 && nodePublic.matches.length === 6 && nodeHidden.status === 404 && (await fetch(`${baseURL}/c/copa-node`)).status === 200);
@@ -317,7 +323,7 @@ try {
   const moduleHub = makeRuntime('/manage?room=module-hub', { broadcast: false });
   verify('Dashboard exposes a persistent sidebar with every dedicated overlay route', dashboard.app.innerHTML.includes('aria-label="Navegação dos overlays"') && (dashboard.app.innerHTML.match(/\/manage\//g) || []).length >= 6);
   verify('Sidebar groups modules and scrolls when the list exceeds the viewport', ['Organização', 'Overlays', 'Partida', 'Configuração'].every(label => dashboard.app.innerHTML.includes(`>${label}<`)) && dashboard.app.innerHTML.includes('/manage/access') && /\.module-sidebar \{[^}]*overflow-y: auto/.test(stylesheet));
-  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 26);
+  verify('Management hub exposes one dedicated route for every operational module', moduleHub.app.innerHTML.includes('Uma tela para cada operação') && (moduleHub.app.innerHTML.match(/class="module-hub-card"/g) || []).length === 28);
   const artsModule = makeRuntime('/manage/arts?room=module-arts', { broadcast: false });
   verify('Art studio and OBS championship overlays are dedicated modules in the sidebar and hub', artsModule.app.innerHTML.includes('Estúdio de artes') && moduleHub.app.innerHTML.includes('/manage/arts') && moduleHub.app.innerHTML.includes('/manage/broadcast'));
   const artApi = artsModule.sandbox;
@@ -902,6 +908,9 @@ try {
   const workerDrawClearStarted = await opsCall(workerAdminCookie, 'clear-draw', { championshipId: workerDrawCupId });
   const workerDrawAfter = await opsCall(workerAdminCookie, 'draw-preview', { championshipId: workerDrawCupId, mode: 'league' });
   verify('Draw (Worker): preview returns seed and order without persisting, confirming with the previewed order is reproducible, and a draw with finished matches cannot be undone', workerDrawPreview.status === 200 && workerDrawPreview.body.preview.order.length === 4 && workerDrawPreview.body.preview.matchCount === 6 && workerDrawPreview.body.preview.hasGenerated === false && workerDrawConfirm.status === 200 && workerDrawConfirm.body.result.seed === 5 && workerDrawClearStarted.status === 409 && workerDrawAfter.body.preview.started === true);
+  const workerLink = await opsCall(workerAdminCookie, 'set-team-championships', { teamId: 'team-test', championshipIds: [workerDrawCupId] });
+  const workerSquadBundle = await (await worker.fetch(new Request('https://example.test/api/public/championship?id=' + workerDrawCupId, { headers: { cookie: workerAdminCookie } }), {})).json();
+  verify('Team-championship link (Worker): linking a catalog team exposes its squad (name, number, position, stats) in the public bundle', workerLink.status === 200 && workerLink.body.result.linked.length === 1 && workerSquadBundle.teams.some(item => item.id === 'team-test') && workerSquadBundle.squads['team-test'].athletes[0].name === 'Ana Souza' && workerSquadBundle.squads['team-test'].athletes[0].number.length > 0 && workerSquadBundle.squads['team-test'].athletes[0].goals === 0);
   const resultSaved = await opsCall(workerAdminCookie, 'set-result', { matchId: firstMatch.id, homeScore: 3, awayScore: 1 });
   const invalidResult = await opsCall(workerAdminCookie, 'set-result', { matchId: firstMatch.id, homeScore: 'x', awayScore: 1 });
   const leaguePublic = await publicGet('/api/public/championship?slug=liga-publica');
@@ -1077,6 +1086,24 @@ try {
   verify('The deployed site requests a durable D1 database binding', hostingConfig.d1 === 'DB');
   verify('The deployed site requests R2 storage for team badges and sponsor artwork', hostingConfig.r2 === 'BUCKET');
 
+  const catalogBeforeImport = await (await fetch(`${baseURL}/api/teams`)).json();
+  const importNoCreate = await nodeOps('import-matches', { championshipId: drawCupId, rows: importRows });
+  const importOk = await nodeOps('import-matches', { championshipId: drawCupId, rows: importRows, createTeams: true });
+  const importAgain = await nodeOps('import-matches', { championshipId: drawCupId, rows: importRows, createTeams: true });
+  const catalogAfterImport = await (await fetch(`${baseURL}/api/teams`)).json();
+  const retroA = catalogAfterImport.teams.find(item => item.name === 'Time Retro A');
+  const retroB = catalogAfterImport.teams.find(item => item.name === 'Time Retro B');
+  const adjustSaved = await nodeOps('set-adjustments', { championshipId: drawCupId, standings: { [retroA.id]: { points: 5, played: 2 }, nobody: { points: 50 } }, players: [{ teamId: retroA.id, name: 'Artilheiro Retro', goals: 6, yellow: 2 }, { teamId: 'nobody', name: 'X', goals: 1 }] });
+  const retroBundle = await (await fetch(`${baseURL}/api/public/championship?slug=copa-sorteio-node`, { headers: { cookie: adminCookie } })).json();
+  const retroRow = retroBundle.standings.find(item => item.teamId === retroA.id);
+  const linkNone = await nodeOps('set-team-championships', { teamId: retroB.id, championshipIds: [] });
+  const linkMany = await nodeOps('set-team-championships', { teamId: retroB.id, championshipIds: [drawCupId, nodeCupId] });
+  const linkedNow = linkMany.body.operations.championships;
+  const unlinkClean = await nodeOps('set-team-championships', { teamId: retroB.id, championshipIds: [drawCupId] });
+  const catalogNow = await (await fetch(`${baseURL}/api/teams`)).json();
+  await fetch(`${baseURL}/api/teams`, { method: 'PUT', headers: { 'content-type': 'application/json', cookie: adminCookie }, body: JSON.stringify({ ...catalogBeforeImport, baseUpdatedAt: catalogNow.updatedAt, updatedAt: Number(catalogNow.updatedAt) + 1 }) });
+  const publicHomeApi = await (await fetch(`${baseURL}/api/public/championships`)).json();
+  verify('Championships in progress (Node): matches import with new teams, duplicates are skipped, adjustments add to table and scorers, team-championship links respect existing matches, and the public bundle exposes squads', importNoCreate.status === 409 && String(importNoCreate.body.error).includes('Equipes não cadastradas') && importOk.status === 200 && importOk.body.result.created === 2 && importOk.body.result.createdTeams === 2 && importAgain.status === 409 && Boolean(retroA) && Boolean(retroB) && adjustSaved.status === 200 && adjustSaved.body.result.teams === 1 && adjustSaved.body.result.players === 1 && retroRow.points === 8 && retroRow.played === 3 && retroBundle.scorers[0].name === 'Artilheiro Retro' && retroBundle.scorers[0].goals === 6 && Array.isArray(retroBundle.squads[retroA.id].athletes) && linkNone.status === 409 && linkedNow.find(item => item.id === nodeCupId).teamIds.includes(retroB.id) && unlinkClean.status === 200 && !unlinkClean.body.operations.championships.find(item => item.id === nodeCupId).teamIds.includes(retroB.id) && Array.isArray(publicHomeApi.championships));
   process.stdout.write(`PASS · ${checks.length} verified checks covering dashboard interactions, football graphics, real-time isolated-client synchronization, transparent output, OBS URLs, production worker routes, and responsive styles.\n`);
 } finally {
   for (const timer of activeTimers) { clearTimeout(timer); clearInterval(timer); }

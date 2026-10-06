@@ -33,7 +33,7 @@ const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
 const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const worker = `${authModule}
 ${competitionModule}
-const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, rescheduleMatch, shiftMatches, previewDraw, saveDrawConfig, clearDraw, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
+const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, rescheduleMatch, shiftMatches, previewDraw, saveDrawConfig, clearDraw, ensureSlugs, setTeamChampionships, setAdjustments, importMatches, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
 const assets = ${JSON.stringify(assetMap)};
 const APP_VERSION = ${JSON.stringify(appVersion)};
 const fallbackStates = new Map();
@@ -133,6 +133,7 @@ function normalizeOperations(candidate) {
   store.teamHistory = store.teamHistory && typeof store.teamHistory === 'object' ? store.teamHistory : {};
   store.announcements = Array.isArray(store.announcements) ? store.announcements : [];
   store.posts = Array.isArray(store.posts) ? store.posts : [];
+  competition.ensureSlugs(store);
   return store;
 }
 
@@ -167,7 +168,7 @@ function sanitizeTeamPlanning(team, candidate, operations) {
   const registrations = {};
   for (const [rawId, entry] of Object.entries(registrationSource).slice(0, 20)) {
     const championshipId = cleanId(rawId);
-    if (!championshipId || !operations.championships.some(item => item.id === championshipId)) continue;
+    if (!championshipId || !operations.championships.some(item => item.id === championshipId && ((item.teamIds || []).includes(team.id) || operations.matches.some(match => match.championshipId === item.id && (match.homeTeamId === team.id || match.awayTeamId === team.id))))) continue;
     const ids = [...new Set((Array.isArray(entry && entry.athleteIds) ? entry.athleteIds : []).map(String))].filter(id => athleteIds.has(id)).slice(0, 100);
     const numbers = {};
     for (const [athleteId, number] of Object.entries(entry && entry.numbers && typeof entry.numbers === 'object' ? entry.numbers : {})) {
@@ -201,7 +202,7 @@ function teamContext(operations, catalog, teamId) {
   const teams = (catalog && catalog.teams) || [];
   const nameOf = id => (teams.find(item => item.id === id) || {}).name || id;
   return {
-    championships: operations.championships.map(item => ({ id: item.id, name: item.name, season: item.season, status: item.status, startDate: item.startDate, endDate: item.endDate })),
+    championships: operations.championships.filter(item => (item.teamIds || []).includes(teamId) || operations.matches.some(match => match.championshipId === item.id && (match.homeTeamId === teamId || match.awayTeamId === teamId))).map(item => ({ id: item.id, name: item.name, season: item.season, status: item.status, startDate: item.startDate, endDate: item.endDate })),
     announcements: (operations.announcements || []).filter(item => !item.teamIds || !item.teamIds.length || item.teamIds.includes(teamId)).slice(0, 30).map(item => ({ id: item.id, title: item.title, body: item.body, pinned: Boolean(item.pinned), createdAt: item.createdAt })),
     matches: operations.matches.filter(match => match.homeTeamId === teamId || match.awayTeamId === teamId).map(match => ({ id: match.id, championshipId: match.championshipId, homeTeamId: match.homeTeamId, awayTeamId: match.awayTeamId, homeName: nameOf(match.homeTeamId), awayName: nameOf(match.awayTeamId), kickoffAt: match.kickoffAt, venue: match.venue, round: match.round, status: match.status, registrationDeadline: match.registrationDeadline || '' })),
   };
@@ -646,7 +647,7 @@ export default {
           } else if (action === 'mark-notification-read') {
             const notification = store.notifications.find(entry => entry.id === candidate.id);
             if (notification) notification.read = true;
-          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches', 'save-draw-config', 'clear-draw'].includes(action)) {
+          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches', 'save-draw-config', 'clear-draw', 'set-team-championships', 'set-adjustments', 'import-matches'].includes(action)) {
             const context = { safeId, now: () => Date.now(), addAudit };
             let outcome;
             if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
@@ -662,6 +663,9 @@ export default {
             else if (action === 'shift-matches') outcome = competition.shiftMatches(store, candidate, admin, context);
             else if (action === 'save-draw-config') outcome = competition.saveDrawConfig(store, candidate, admin, context);
             else if (action === 'clear-draw') outcome = competition.clearDraw(store, candidate, admin, context);
+            else if (action === 'set-team-championships') outcome = competition.setTeamChampionships(store, candidate, admin, context);
+            else if (action === 'set-adjustments') outcome = competition.setAdjustments(store, candidate, admin, context);
+            else if (action === 'import-matches') { outcome = competition.importMatches(store, candidate, admin, { ...context, catalog: workerCatalog }); if (outcome.catalogChanged) await persistState(env, 'team-catalog', workerCatalog); }
             else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
             else outcome = competition.deletePost(store, candidate, admin, context);
             if (outcome.error) return Response.json({ ok: false, error: outcome.error }, { status: outcome.status || 400 });

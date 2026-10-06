@@ -2519,3 +2519,28 @@ body.obs-page #app { position: fixed; inset: 0; overflow: hidden; }
 .draw-result { margin: 0; padding: 12px; border-radius: 8px; background: rgba(0,0,0,.3); font-size: 12px; line-height: 1.6; white-space: pre-wrap; font-family: inherit; }
 @keyframes draw-pop { from { opacity: 0; transform: scale(.94) translateY(6px); } to { opacity: 1; transform: none; } }
 @media (max-width: 700px) { .draw-avoid { grid-template-columns: 1fr; } .draw-pair { grid-template-columns: auto 1fr; } }
+
+/* Vínculos, campeonato em andamento e páginas públicas de equipe */
+.links-layout { display: grid; gap: 14px; }
+.links-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.links-table th, .links-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; vertical-align: middle; }
+.links-table thead th { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; vertical-align: bottom; }
+.links-table tbody th { text-align: left; font-weight: 600; min-width: 170px; }
+.links-table th small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.links-champ { display: block; max-width: 160px; margin: 0 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.links-warn { color: #f0cf85 !important; }
+.links-cell { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; }
+.links-cell input { width: 20px; height: 20px; accent-color: var(--gold); cursor: pointer; } .links-cell small { color: var(--muted); font-size: 10px; }
+.catchup-text { width: 100%; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: #0e1016; color: var(--text); font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; resize: vertical; }
+.catchup-adj input { width: 64px; height: 34px; text-align: center; padding: 0 4px; border: 1px solid var(--line-strong); border-radius: 6px; background: #0e1016; color: var(--text); font-size: 13px; }
+.catchup-players { display: grid; gap: 6px; }
+.catchup-player { display: grid; grid-template-columns: minmax(130px, 1fr) minmax(140px, 1.4fr) repeat(3, 84px) auto; gap: 6px; align-items: center; }
+.catchup-player input, .catchup-player select { height: 36px; min-width: 0; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px; background: #0e1016; color: var(--text); font-size: 13px; box-sizing: border-box; width: 100%; }
+@media (max-width: 800px) { .catchup-player { grid-template-columns: 1fr 1fr; } }
+.portal-champ-notice { display: grid; gap: 8px; } .portal-champ-notice.is-warning { border-color: rgba(216,173,86,.5); }
+.public-team-link { color: inherit; text-decoration: none; border-bottom: 1px dotted rgba(255,255,255,.35); } .public-team-link:hover { color: var(--gold); border-bottom-color: var(--gold); }
+.public-team-crest { display: inline-grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; background: var(--team-color, #8253cd); color: #fff; font-weight: 800; overflow: hidden; flex: none; } .public-team-crest img { width: 100%; height: 100%; object-fit: contain; background: #fff; } .public-team-crest.is-large { width: 92px; height: 92px; font-size: 26px; }
+.public-team-card { display: grid; gap: 8px; justify-items: start; }
+.public-team-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.public-team-hero { border-bottom: 3px solid var(--team-color, var(--gold)); }
+.public-team-stats { grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); } .public-form { margin: 10px 0 0; color: var(--muted); font-size: 13px; }

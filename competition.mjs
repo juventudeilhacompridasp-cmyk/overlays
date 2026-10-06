@@ -52,6 +52,7 @@ export function championshipExtras(item, previous = {}, safeId = value => slugif
     draw: previous.draw && typeof previous.draw === 'object' ? previous.draw : null,
     drawHistory: Array.isArray(previous.drawHistory) ? previous.drawHistory.slice(0, 10) : [],
     drawConfig: previous.drawConfig && typeof previous.drawConfig === 'object' ? previous.drawConfig : { pots: {}, avoid: [] },
+    adjustments: previous.adjustments && typeof previous.adjustments === 'object' ? previous.adjustments : { standings: {}, players: [] },
   };
 }
 
@@ -199,7 +200,7 @@ export function matchWinner(match, result) {
   return '';
 }
 
-export function computeStandings(matches, resultsByMatch, { rules = DEFAULT_RULES, teamIds = [], names = {}, cards = {} } = {}) {
+export function computeStandings(matches, resultsByMatch, { rules = DEFAULT_RULES, teamIds = [], names = {}, cards = {}, adjust = {} } = {}) {
   const config = normalizeRules(rules);
   const rows = new Map();
   const row = id => {
@@ -220,6 +221,12 @@ export function computeStandings(matches, resultsByMatch, { rules = DEFAULT_RULE
     else if (result.home < result.away) { away.won += 1; home.lost += 1; away.points += config.pointsWin; home.points += config.pointsLoss; away.form.push('V'); home.form.push('D'); }
     else { home.drawn += 1; away.drawn += 1; home.points += config.pointsDraw; away.points += config.pointsDraw; home.form.push('E'); away.form.push('E'); }
     played.push({ match, result });
+  }
+  // Ajustes manuais (campeonato já em andamento ou punições): somados ao que as partidas cadastradas geraram.
+  for (const [id, delta] of Object.entries(adjust || {})) {
+    const target = rows.get(id);
+    if (!target || !delta) continue;
+    for (const key of ['played', 'won', 'drawn', 'lost', 'gf', 'ga', 'points']) target[key] += Number(delta[key]) || 0;
   }
   for (const entry of rows.values()) { entry.gd = entry.gf - entry.ga; entry.form = entry.form.slice(-5); }
 
@@ -281,7 +288,7 @@ export function roomScore(roomState) {
   return Number.isFinite(home) && Number.isFinite(away) && roomState?.updatedAt ? { home, away } : null;
 }
 
-export function aggregateStats(matches, eventsByMatch, rules = DEFAULT_RULES, names = {}) {
+export function aggregateStats(matches, eventsByMatch, rules = DEFAULT_RULES, names = {}, adjustments = []) {
   const config = normalizeRules(rules);
   const scorers = new Map();
   const discipline = new Map();
@@ -302,6 +309,12 @@ export function aggregateStats(matches, eventsByMatch, rules = DEFAULT_RULES, na
       else if (event.kind === 'yellow') entry(discipline, event.name, teamId).yellow += 1;
       else if (event.kind === 'red') entry(discipline, event.name, teamId).red += 1;
     }
+  }
+  for (const adj of Array.isArray(adjustments) ? adjustments : []) {
+    if (!adj || !adj.name || !adj.teamId) continue;
+    if (adj.goals) entry(scorers, adj.name, adj.teamId).goals += adj.goals;
+    if (adj.yellow) { entry(discipline, adj.name, adj.teamId).yellow += adj.yellow; cardsByTeam[adj.teamId] = (cardsByTeam[adj.teamId] || 0) + adj.yellow; }
+    if (adj.red) { entry(discipline, adj.name, adj.teamId).red += adj.red; cardsByTeam[adj.teamId] = (cardsByTeam[adj.teamId] || 0) + adj.red * 3; }
   }
   // Suspensão: cartão vermelho = redGames jogos; cada yellowLimit amarelos = 1 jogo. Cumpre-se nos jogos
   // finalizados seguintes da própria equipe; o que ainda sobra vale para a próxima partida.
@@ -327,6 +340,7 @@ export function aggregateStats(matches, eventsByMatch, rules = DEFAULT_RULES, na
   return {
     scorers: [...scorers.values()].sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name, 'pt-BR')).slice(0, 30).map(({ name, teamId, teamName, goals }) => ({ name, teamId, teamName, goals })),
     cards: [...discipline.values()].sort((a, b) => (b.red * 3 + b.yellow) - (a.red * 3 + a.yellow) || a.name.localeCompare(b.name, 'pt-BR')).slice(0, 40).map(({ name, teamId, teamName, yellow, red }) => ({ name, teamId, teamName, yellow, red })),
+    players: [...new Set([...scorers.keys(), ...discipline.keys()])].map(key => ({ name: (scorers.get(key) || discipline.get(key)).name, teamId: (scorers.get(key) || discipline.get(key)).teamId, goals: scorers.get(key)?.goals || 0, yellow: discipline.get(key)?.yellow || 0, red: discipline.get(key)?.red || 0 })),
     suspended: [...owed].filter(([, games]) => games > 0).map(([key, games]) => ({ ...roster.get(key), teamName: names[roster.get(key).teamId] || roster.get(key).teamId, games })),
     cardsByTeam,
   };
@@ -858,6 +872,129 @@ export function shiftMatches(store, candidate, admin, ctx) {
   return { changed, skipped, conflicts: [...new Set(touched.flatMap(match => kickoffConflicts(store, match)))] };
 }
 
+// ---------- Equipes × campeonatos, campeonatos em andamento (lançamentos retroativos) ----------
+
+// Cadastros antigos sem slug ganham um (só em memória até a próxima gravação), para a página pública abrir.
+export function ensureSlugs(store) {
+  for (const championship of store.championships || []) {
+    if (championship.slug) continue;
+    const base = (slugify(championship.name, championship.id || 'campeonato') || 'campeonato').slice(0, 44);
+    let slug = base; let counter = 2;
+    while (store.championships.some(other => other !== championship && other.slug === slug)) { slug = `${base}-${counter}`; counter += 1; }
+    championship.slug = slug;
+  }
+}
+
+// Vincula/desvincula uma equipe de vários campeonatos de uma vez. Não desvincula quem já tem partidas no campeonato.
+export function setTeamChampionships(store, candidate, admin, ctx) {
+  const teamId = ctx.safeId(candidate.teamId);
+  if (!teamId) return { status: 400, error: 'Equipe inválida.' };
+  const wanted = new Set((Array.isArray(candidate.championshipIds) ? candidate.championshipIds : []).map(value => ctx.safeId(value)));
+  const result = { linked: [], unlinked: [], blocked: [], skipped: [] };
+  for (const championship of store.championships) {
+    const has = (championship.teamIds || []).includes(teamId);
+    const should = wanted.has(championship.id);
+    if (has === should) continue;
+    if (!canManageChampionship(admin, championship)) { result.skipped.push(championship.id); continue; }
+    if (!should && store.matches.some(match => match.championshipId === championship.id && (match.homeTeamId === teamId || match.awayTeamId === teamId))) { result.blocked.push(championship.id); continue; }
+    championship.teamIds = should ? [...(championship.teamIds || []), teamId].slice(0, 128) : championship.teamIds.filter(id => id !== teamId);
+    if (!should && championship.drawConfig) {
+      championship.drawConfig = { pots: Object.fromEntries(Object.entries(championship.drawConfig.pots || {}).filter(([id]) => id !== teamId)), avoid: (championship.drawConfig.avoid || []).filter(pair => !pair.includes(teamId)) };
+    }
+    championship.updatedAt = ctx.now();
+    (should ? result.linked : result.unlinked).push(championship.id);
+    ctx.addAudit(store, should ? 'team.linked' : 'team.unlinked', admin.username, teamId, championship.name);
+  }
+  if (!result.linked.length && !result.unlinked.length && (result.blocked.length || result.skipped.length)) {
+    return { status: 409, error: result.blocked.length ? 'A equipe já tem partidas nesse campeonato; remova as partidas antes de desvincular.' : 'Você não administra esse campeonato.', ...result };
+  }
+  return result;
+}
+
+const intIn = (value, min, max) => Math.max(min, Math.min(max, Math.round(Number(value)) || 0));
+
+// Pontos e estatísticas de quem entrou com o campeonato em andamento: somados ao calculado pelas partidas cadastradas.
+export function setAdjustments(store, candidate, admin, ctx) {
+  const championship = store.championships.find(item => item.id === ctx.safeId(candidate.championshipId));
+  if (!championship) return { status: 404, error: 'Campeonato não encontrado.' };
+  if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
+  const members = new Set(championship.teamIds || []);
+  const standings = {};
+  for (const [rawId, delta] of Object.entries(candidate.standings && typeof candidate.standings === 'object' ? candidate.standings : {})) {
+    const id = ctx.safeId(rawId);
+    if (!members.has(id) || !delta || typeof delta !== 'object') continue;
+    const clean = { played: intIn(delta.played, -999, 999), won: intIn(delta.won, -999, 999), drawn: intIn(delta.drawn, -999, 999), lost: intIn(delta.lost, -999, 999), gf: intIn(delta.gf, -9999, 9999), ga: intIn(delta.ga, -9999, 9999), points: intIn(delta.points, -9999, 9999) };
+    if (Object.values(clean).some(Boolean)) standings[id] = clean;
+  }
+  const players = [];
+  for (const entry of (Array.isArray(candidate.players) ? candidate.players : []).slice(0, 200)) {
+    const teamId = ctx.safeId(entry?.teamId);
+    const name = String(entry?.name || '').trim().slice(0, 60);
+    if (!members.has(teamId) || !name) continue;
+    const clean = { teamId, name, goals: intIn(entry.goals, 0, 999), yellow: intIn(entry.yellow, 0, 99), red: intIn(entry.red, 0, 99) };
+    if (clean.goals || clean.yellow || clean.red) players.push(clean);
+  }
+  championship.adjustments = { standings, players };
+  championship.updatedAt = ctx.now();
+  ctx.addAudit(store, 'championship.adjusted', admin.username, championship.name, `${Object.keys(standings).length} equipe(s) · ${players.length} atleta(s)`);
+  return { teams: Object.keys(standings).length, players: players.length };
+}
+
+// Lançamento em massa de jogos de um campeonato em andamento. Equipes são encontradas pelo nome (sem acento/caixa);
+// com createTeams as que faltam entram no cadastro da plataforma e no campeonato.
+export function importMatches(store, candidate, admin, ctx) {
+  const championship = store.championships.find(item => item.id === ctx.safeId(candidate.championshipId));
+  if (!championship) return { status: 404, error: 'Campeonato não encontrado.' };
+  if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
+  const rows = (Array.isArray(candidate.rows) ? candidate.rows : []).slice(0, 500);
+  const teamNames = [...new Set((Array.isArray(candidate.teamNames) ? candidate.teamNames : []).map(value => String(value || '').trim().slice(0, 80)).filter(Boolean))].slice(0, 128);
+  if (!rows.length && !teamNames.length) return { status: 400, error: 'Nenhuma linha ou equipe para importar.' };
+  const fold = value => String(value || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+  const catalog = ctx.catalog && Array.isArray(ctx.catalog.teams) ? ctx.catalog : { teams: [] };
+  const byName = new Map(catalog.teams.map(team => [fold(team.name), team]));
+  const missing = [...new Map(rows.flatMap(row => [row?.home, row?.away]).concat(teamNames).map(value => String(value || '').trim()).filter(name => name && !byName.has(fold(name))).map(name => [fold(name), name])).values()];
+  const unknownInRows = missing.filter(name => !teamNames.some(entry => fold(entry) === fold(name)));
+  if (unknownInRows.length && !candidate.createTeams) return { status: 409, error: `Equipes não cadastradas: ${unknownInRows.slice(0, 8).join(', ')}${unknownInRows.length > 8 ? '…' : ''}. Cadastre antes ou marque "criar equipes que faltam".`, missing: unknownInRows };
+  const palette = ['#8253cd', '#4588b5', '#d8ad56', '#38d996', '#fa626e', '#2f7df6', '#e0742c', '#9aa0b4'];
+  const createdTeams = [];
+  for (const name of missing) {
+    const cleanName = name.slice(0, 80);
+    let id = ctx.safeId(cleanName, 'time'); let counter = 2;
+    while (catalog.teams.some(team => team.id === id)) { id = `${ctx.safeId(cleanName, 'time').slice(0, 56)}-${counter}`; counter += 1; }
+    const team = { id, name: cleanName, short: fold(cleanName).replace(/[^a-z]/g, '').slice(0, 3).toUpperCase() || 'TIM', color: palette[catalog.teams.length % palette.length], logo: '', roster: '', formation: '4-3-3', athletes: [], staff: [] };
+    catalog.teams.push(team); byName.set(fold(cleanName), team); createdTeams.push(id);
+  }
+  let linkedNames = 0;
+  for (const name of teamNames) {
+    const team = byName.get(fold(name));
+    if (team && !(championship.teamIds || []).includes(team.id)) { championship.teamIds = [...(championship.teamIds || []), team.id].slice(0, 128); linkedNames += 1; }
+  }
+  if (createdTeams.length) catalog.updatedAt = Math.max(ctx.now(), Number(catalog.updatedAt || 0) + 1);
+  const prefix = (championship.slug || championship.id).slice(0, 20);
+  const now = ctx.now();
+  let created = 0, skipped = 0;
+  const problems = [];
+  rows.forEach((row, index) => {
+    const home = byName.get(fold(row?.home)); const away = byName.get(fold(row?.away));
+    const kickoff = validKickoff(row?.kickoffAt) || '';
+    if (!home || !away || home.id === away.id) { problems.push(`Linha ${index + 1}: confronto inválido.`); skipped += 1; return; }
+    const homeScore = numberOrNull(row.homeScore); const awayScore = numberOrNull(row.awayScore);
+    const finished = homeScore !== null && awayScore !== null;
+    const round = String(row.round || '').trim().slice(0, 60);
+    const duplicate = store.matches.some(match => match.championshipId === championship.id && match.homeTeamId === home.id && match.awayTeamId === away.id && (match.round || '') === round && (match.kickoffAt || '').slice(0, 10) === kickoff.slice(0, 10));
+    if (duplicate) { skipped += 1; return; }
+    const id = `${prefix}-imp${index + 1}-${Math.random().toString(36).slice(2, 6)}`;
+    store.matches.push({ id, championshipId: championship.id, homeTeamId: home.id, awayTeamId: away.id, kickoffAt: kickoff, venue: String(row.venue || '').trim().slice(0, 120), registrationDeadline: '', round, status: finished ? 'finished' : 'scheduled', room: id.slice(0, 48), updatedAt: now, stage: 'league', group: '', roundNumber: Math.round(clamp(row.roundNumber ?? String(round).match(/\d+/)?.[0], 0, 200, 0)), leg: 0, generated: false, homeScore: finished ? homeScore : null, awayScore: finished ? awayScore : null, homePenalties: null, awayPenalties: null, originalKickoffAt: '', rescheduleKind: '', postponeReason: '', rescheduleHistory: [] });
+    for (const team of [home, away]) if (!(championship.teamIds || []).includes(team.id)) championship.teamIds = [...(championship.teamIds || []), team.id].slice(0, 128);
+    created += 1;
+  });
+  if (!created && !createdTeams.length && !linkedNames) return { status: 409, error: problems[0] || 'Nenhuma partida nova (todas já existiam).', skipped, problems };
+  championship.updatedAt = now;
+  ctx.addAudit(store, 'matches.imported', admin.username, championship.name, `${created} partida(s) · ${createdTeams.length} equipe(s) criada(s)`);
+  return { created, skipped, createdTeams: createdTeams.length, linkedTeams: linkedNames, problems: problems.slice(0, 10), catalogChanged: createdTeams.length > 0 };
+}
+
+
 export function upsertPost(store, candidate, admin, ctx) {
   const item = candidate.item || {};
   const championship = store.championships.find(entry => entry.id === ctx.safeId(item.championshipId));
@@ -894,15 +1031,38 @@ export function deletePost(store, candidate, admin, ctx) {
 
 const publicTeam = team => ({ id: team.id, name: team.name, short: team.short, color: team.color, logo: team.logo || '' });
 
+
+// Elenco público de cada equipe no campeonato: só nome, número, posição e estatísticas (sem fotos nem contatos).
+// Se a equipe fez a inscrição neste campeonato, valem os atletas e números inscritos; senão, o elenco cadastrado.
+function buildPublicSquads(catalog, championship, teams, players = []) {
+  const stat = new Map(players.map(item => [`${item.name}|${item.teamId}`, item]));
+  const squads = {};
+  for (const team of teams) {
+    const source = (catalog?.teams || []).find(item => item.id === team.id) || {};
+    const registration = source.registrations?.[championship.id];
+    const athletes = Array.isArray(source.athletes) ? source.athletes : [];
+    const chosen = registration?.athleteIds?.length ? athletes.filter(athlete => registration.athleteIds.includes(athlete.id)) : athletes;
+    squads[team.id] = {
+      coach: String((source.coach && typeof source.coach === 'object' ? source.coach.name : source.coach) || '').slice(0, 60),
+      athletes: chosen.slice(0, 80).map(athlete => {
+        const name = String(athlete.name || '').slice(0, 60);
+        const found = stat.get(`${name}|${team.id}`) || {};
+        return { id: athlete.id, name, number: String(registration?.numbers?.[athlete.id] || athlete.number || '').slice(0, 3), position: String(athlete.position || '').slice(0, 30), goals: found.goals || 0, yellow: found.yellow || 0, red: found.red || 0 };
+      }),
+    };
+  }
+  return squads;
+}
+
 export async function buildChampionshipBundle(store, championship, catalog, getRoomState) {
   const teams = (catalog?.teams || []).filter(team => (championship.teamIds || []).includes(team.id) || store.matches.some(match => match.championshipId === championship.id && (match.homeTeamId === team.id || match.awayTeamId === team.id)));
   const names = Object.fromEntries((catalog?.teams || []).map(team => [team.id, team.name]));
   const matches = store.matches.filter(match => match.championshipId === championship.id).sort((a, b) => String(a.kickoffAt || '9999').localeCompare(String(b.kickoffAt || '9999')) || (a.roundNumber || 0) - (b.roundNumber || 0));
   const { resultsByMatch, eventsByMatch } = await collectResults(matches, getRoomState);
-  const stats = aggregateStats(matches, eventsByMatch, championship.rules, names);
+  const stats = aggregateStats(matches, eventsByMatch, championship.rules, names, championship.adjustments?.players);
   const rules = normalizeRules(championship.rules);
   const teamIds = [...new Set([...(championship.teamIds || []), ...matches.flatMap(match => [match.homeTeamId, match.awayTeamId])])];
-  const tableFor = (list, ids) => computeStandings(list, resultsByMatch, { rules, teamIds: ids, names, cards: stats.cardsByTeam });
+  const tableFor = (list, ids) => computeStandings(list, resultsByMatch, { rules, teamIds: ids, names, cards: stats.cardsByTeam, adjust: championship.adjustments?.standings });
   const groups = Object.keys(championship.groups || {}).length
     ? Object.entries(championship.groups).map(([letter, members]) => ({ group: letter, table: tableFor(matches.filter(match => match.group === letter), members) }))
     : [];
@@ -924,6 +1084,7 @@ export async function buildChampionshipBundle(store, championship, catalog, getR
     standings, groups,
     matches: matches.map(decorate),
     scorers: stats.scorers, cards: stats.cards, suspended: stats.suspended,
+    squads: buildPublicSquads(catalog, championship, teams, stats.players),
     posts: store.posts.filter(post => post.championshipId === championship.id).slice(0, 50).map(post => ({ id: post.id, kind: post.kind, title: post.title, body: post.body, media: post.media, link: post.link, round: post.round, createdAt: post.createdAt })),
     generatedAt: Date.now(),
   };
