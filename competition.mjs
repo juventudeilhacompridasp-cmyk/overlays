@@ -396,6 +396,11 @@ export function matchExtras(item, previous = {}) {
     generated: Boolean(previous.generated),
     homeScore: numberOrNull(pick('homeScore')), awayScore: numberOrNull(pick('awayScore')),
     homePenalties: numberOrNull(pick('homePenalties')), awayPenalties: numberOrNull(pick('awayPenalties')),
+    // Controle de reagendamento: só muda por reschedule-match/shift-matches; o formulário de partida apenas preserva.
+    originalKickoffAt: String(previous.originalKickoffAt || '').slice(0, 24),
+    rescheduleKind: ['postponed', 'advanced'].includes(previous.rescheduleKind) ? previous.rescheduleKind : '',
+    postponeReason: String(previous.postponeReason || '').slice(0, 200),
+    rescheduleHistory: Array.isArray(previous.rescheduleHistory) ? previous.rescheduleHistory.slice(0, 20) : [],
   };
 }
 
@@ -566,6 +571,117 @@ export function setResult(store, candidate, admin, ctx) {
   return {};
 }
 
+// ---------- Reagendamento: adiar, adiantar, reagendar, cancelar, reabrir e deslocar várias partidas ----------
+
+const KICKOFF_SHAPE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+
+function validKickoff(value) {
+  const text = String(value || '').slice(0, 24);
+  const parts = text.match(KICKOFF_SHAPE);
+  if (!parts) return '';
+  const date = new Date(Date.UTC(+parts[1], +parts[2] - 1, +parts[3], +parts[4], +parts[5]));
+  return Number.isNaN(date.getTime()) || date.getUTCMonth() !== +parts[2] - 1 ? '' : text;
+}
+
+function kickoffMinutes(text) {
+  const parts = String(text || '').match(KICKOFF_SHAPE);
+  return parts ? Date.UTC(+parts[1], +parts[2] - 1, +parts[3], +parts[4], +parts[5]) / 60000 : null;
+}
+
+function shiftKickoff(text, days) {
+  const parts = String(text || '').match(KICKOFF_SHAPE);
+  return new Date(Date.UTC(+parts[1], +parts[2] - 1, +parts[3] + days, +parts[4], +parts[5])).toISOString().slice(0, 16);
+}
+
+// Choques não bloqueiam: o administrador decide. Mesma equipe com menos de 2 h de diferença ou mesmo local com menos de 1 h.
+function kickoffConflicts(store, match) {
+  const start = kickoffMinutes(match.kickoffAt);
+  if (start === null) return [];
+  return store.matches.filter(other => {
+    if (other.id === match.id || ['finished', 'cancelled', 'postponed'].includes(other.status)) return false;
+    const otherStart = kickoffMinutes(other.kickoffAt);
+    if (otherStart === null) return false;
+    const gap = Math.abs(otherStart - start);
+    const sharesTeam = [other.homeTeamId, other.awayTeamId].some(id => id === match.homeTeamId || id === match.awayTeamId);
+    const sharesVenue = Boolean(match.venue) && other.venue === match.venue;
+    return (sharesTeam && gap < 120) || (sharesVenue && gap < 60);
+  }).map(other => other.id);
+}
+
+function pushRescheduleHistory(match, entry) {
+  match.rescheduleHistory = [entry, ...(Array.isArray(match.rescheduleHistory) ? match.rescheduleHistory : [])].slice(0, 20);
+}
+
+// Aplica uma nova data mantendo a data original e marcando se foi adiada ou adiantada.
+function applyNewKickoff(match, at, reason) {
+  const previous = match.kickoffAt || '';
+  if (previous && !match.originalKickoffAt) match.originalKickoffAt = previous;
+  const base = match.originalKickoffAt || previous;
+  match.kickoffAt = at;
+  match.status = 'scheduled';
+  if (base && at === base) { match.rescheduleKind = ''; match.originalKickoffAt = ''; match.postponeReason = ''; }
+  else { match.rescheduleKind = previous && at < previous ? 'advanced' : 'postponed'; match.postponeReason = reason; }
+}
+
+export function rescheduleMatch(store, candidate, admin, ctx) {
+  const match = store.matches.find(item => item.id === ctx.safeId(candidate.matchId));
+  if (!match) return { status: 404, error: 'Partida não encontrada.' };
+  const championship = store.championships.find(item => item.id === match.championshipId);
+  if (!canManageChampionship(admin, championship)) return { status: 403, error: 'Você não administra este campeonato.' };
+  const kind = ['postpone', 'reschedule', 'cancel', 'reopen'].includes(candidate.kind) ? candidate.kind : '';
+  if (!kind) return { status: 400, error: 'Ação de reagendamento inválida.' };
+  if (['live', 'finished'].includes(match.status) && kind !== 'reopen') return { status: 409, error: 'Partidas em andamento ou encerradas não podem ser reagendadas.' };
+  if (kind === 'reopen' && ['scheduled', 'live'].includes(match.status)) return { status: 409, error: 'A partida já está agendada.' };
+  const reason = String(candidate.reason || '').trim().slice(0, 200);
+  const at = validKickoff(candidate.kickoffAt);
+  if (candidate.kickoffAt && !at) return { status: 400, error: 'Data e hora inválidas.' };
+  if (kind === 'reschedule' && !at) return { status: 400, error: 'Informe a nova data e hora.' };
+  if (at && at === match.kickoffAt && match.status === 'scheduled') return { status: 400, error: 'A nova data é igual à atual.' };
+  const from = match.kickoffAt || '';
+  if (kind === 'reschedule' || kind === 'postpone') {
+    if (candidate.venue !== undefined) match.venue = String(candidate.venue || '').trim().slice(0, 120);
+    if (at) applyNewKickoff(match, at, reason);
+    else {
+      if (from && !match.originalKickoffAt) match.originalKickoffAt = from;
+      match.kickoffAt = ''; match.status = 'postponed'; match.rescheduleKind = 'postponed'; match.postponeReason = reason;
+    }
+  } else if (kind === 'cancel') {
+    match.status = 'cancelled'; match.postponeReason = reason;
+  } else {
+    const restored = at || match.kickoffAt || match.originalKickoffAt;
+    if (!restored) return { status: 400, error: 'Informe a data e hora para reabrir a partida.' };
+    applyNewKickoff(match, restored, reason);
+  }
+  match.updatedAt = ctx.now();
+  pushRescheduleHistory(match, { at: ctx.now(), by: String(admin.username || '').slice(0, 80), kind, from, to: match.kickoffAt || '', reason });
+  const auditAction = { postpone: 'match.postponed', reschedule: 'match.rescheduled', cancel: 'match.cancelled', reopen: 'match.reopened' }[kind];
+  ctx.addAudit(store, auditAction, admin.username, match.room, `${from || 'sem data'} → ${match.kickoffAt || 'a definir'}${reason ? ` · ${reason}` : ''}`);
+  return { conflicts: match.status === 'scheduled' ? kickoffConflicts(store, match) : [] };
+}
+
+// Desloca em N dias todas as partidas agendadas escolhidas (ex.: rodada inteira ou o resultado de um filtro).
+export function shiftMatches(store, candidate, admin, ctx) {
+  const days = Math.round(Number(candidate.days));
+  if (!Number.isFinite(days) || days === 0 || Math.abs(days) > 90) return { status: 400, error: 'Informe um deslocamento entre -90 e 90 dias (diferente de zero).' };
+  const ids = new Set((Array.isArray(candidate.matchIds) ? candidate.matchIds : []).slice(0, 300).map(value => ctx.safeId(value)));
+  const reason = String(candidate.reason || '').trim().slice(0, 200);
+  let changed = 0, skipped = 0;
+  const touched = [];
+  for (const match of store.matches) {
+    if (!ids.has(match.id)) continue;
+    const championship = store.championships.find(item => item.id === match.championshipId);
+    if (!canManageChampionship(admin, championship) || match.status !== 'scheduled' || !validKickoff(match.kickoffAt)) { skipped += 1; continue; }
+    const from = match.kickoffAt;
+    applyNewKickoff(match, shiftKickoff(from, days), reason);
+    match.updatedAt = ctx.now();
+    pushRescheduleHistory(match, { at: ctx.now(), by: String(admin.username || '').slice(0, 80), kind: 'shift', from, to: match.kickoffAt, reason });
+    touched.push(match); changed += 1;
+  }
+  if (!changed) return { status: 409, error: 'Nenhuma partida agendada foi deslocada.', skipped };
+  ctx.addAudit(store, 'match.shifted', admin.username, `${changed} partida(s)`, `${days > 0 ? '+' : ''}${days} dia(s)${reason ? ` · ${reason}` : ''}`);
+  return { changed, skipped, conflicts: [...new Set(touched.flatMap(match => kickoffConflicts(store, match)))] };
+}
+
 export function upsertPost(store, candidate, admin, ctx) {
   const item = candidate.item || {};
   const championship = store.championships.find(entry => entry.id === ctx.safeId(item.championshipId));
@@ -622,6 +738,7 @@ export async function buildChampionshipBundle(store, championship, catalog, getR
       id: match.id, round: match.round, stage: match.stage || 'league', group: match.group || '', roundNumber: match.roundNumber || 0, leg: match.leg || 0,
       homeTeamId: match.homeTeamId, awayTeamId: match.awayTeamId, homeName: names[match.homeTeamId] || match.homeTeamId, awayName: names[match.awayTeamId] || match.awayTeamId,
       kickoffAt: match.kickoffAt, venue: match.venue, status: match.status, room: match.room,
+      rescheduleKind: match.rescheduleKind || '', originalKickoffAt: match.originalKickoffAt || '', postponeReason: match.postponeReason || '',
       homeScore: result ? result.home : null, awayScore: result ? result.away : null, homePenalties: match.homePenalties ?? null, awayPenalties: match.awayPenalties ?? null,
     };
   };

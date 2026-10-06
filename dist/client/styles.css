@@ -2426,3 +2426,60 @@ body.obs-page #app { position: fixed; inset: 0; overflow: hidden; }
 .art-preset-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .art-preset-list li { display: inline-flex; gap: 2px; }
 .art-upload input[data-art-preset-name] { flex: 1 1 140px; min-width: 0; }
+
+/* Preview fixo ao rolar a configuração (artes e overlays de OBS) */
+@media (min-width: 901px) { .arts-layout > .arts-stage { position: sticky; top: 88px; max-height: calc(100vh - 104px); overflow: auto; } }
+
+/* Calendário e jogos */
+.sch-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 18px; align-items: start; }
+.sch-main { min-width: 0; display: grid; gap: 12px; }
+.sch-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 14px; }
+.sch-toolbar .field { min-width: 220px; flex: 1 1 220px; }
+.sch-counts, .sch-badges, .sch-legend { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sch-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
+.sch-date { display: grid; gap: 4px; font-size: 11px; color: var(--muted); }
+.sch-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; border: 1px solid transparent; }
+.sch-scheduled { background: rgba(69,136,181,.18); color: #8cc4ee; border-color: rgba(69,136,181,.4); }
+.sch-live { background: rgba(250,98,110,.2); color: #ff9aa2; border-color: rgba(250,98,110,.5); }
+.sch-finished { background: rgba(56,217,150,.14); color: #6fe6b6; border-color: rgba(56,217,150,.35); }
+.sch-postponed { background: rgba(216,173,86,.2); color: #f0cf85; border-color: rgba(216,173,86,.5); }
+.sch-cancelled { background: rgba(160,160,170,.15); color: #b6b8c2; border-color: rgba(160,160,170,.35); }
+.sch-moved { background: rgba(216,173,86,.14); color: #f0cf85; border-color: rgba(216,173,86,.4); }
+.sch-clash { background: rgba(250,98,110,.14); color: #ffb3b9; border-color: rgba(250,98,110,.45); }
+.sch-cal-head { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.sch-cal-head strong { min-width: 180px; text-align: center; font-size: 16px; }
+.sch-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.sch-weekday { text-align: center; padding: 6px 0; font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.sch-day { min-height: 104px; padding: 6px; display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255,255,255,.02); min-width: 0; }
+.sch-day.is-empty { border-color: transparent; background: none; }
+.sch-day.is-today { border-color: var(--gold); box-shadow: inset 0 0 0 1px rgba(216,173,86,.35); }
+.sch-num { font-size: 11px; font-weight: 700; color: var(--muted); }
+.sch-chip { display: block; width: 100%; padding: 3px 6px; border-radius: 5px; font-size: 11px; font-weight: 600; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid transparent; font-family: inherit; }
+.sch-chip.active { outline: 2px solid var(--gold); outline-offset: 1px; }
+.sch-more { padding: 2px 6px; border: 0; background: none; color: var(--gold); font-size: 11px; text-align: left; cursor: pointer; font-family: inherit; }
+.sch-undated { display: grid; gap: 6px; padding: 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.sch-undated .sch-chip { width: auto; max-width: 100%; }
+.sch-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255,255,255,.02); }
+.sch-row.active { border-color: rgba(216,173,86,.55); background: rgba(216,173,86,.07); }
+.sch-row-main { min-width: 0; display: grid; gap: 3px; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer; font-family: inherit; padding: 0; }
+.sch-row-main strong { font-size: 14px; } .sch-row-main strong b { color: var(--gold); padding: 0 4px; }
+.sch-row-main small { color: var(--muted); font-size: 11px; }
+.sch-when { font-size: 12px; font-weight: 700; color: var(--gold); text-transform: capitalize; }
+.sch-when s, .sch-facts s { margin-left: 8px; color: var(--muted); font-weight: 400; }
+.sch-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid rgba(216,173,86,.45); border-radius: 8px; background: rgba(216,173,86,.07); }
+.sch-bulk input[type="number"] { width: 70px; }
+.sch-bulk input[data-schedule-bulk="reason"] { flex: 1 1 180px; min-width: 0; }
+.sch-detail { position: sticky; top: 88px; display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.03); max-height: calc(100vh - 104px); overflow: auto; }
+.sch-detail-head h3 { margin: 4px 0 8px; font-size: 18px; } .sch-detail-head h3 b { color: var(--gold); padding: 0 4px; } .sch-detail-head small { color: var(--muted); }
+.sch-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; } .sch-facts dt { color: var(--muted); } .sch-facts dd { margin: 0; }
+.sch-actions, .sch-form-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sch-form { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(216,173,86,.4); border-radius: 8px; } .sch-form h4 { margin: 0; }
+.sch-history ul { margin: 6px 0 0; padding-left: 16px; display: grid; gap: 4px; font-size: 12px; color: var(--muted); } .sch-history b { color: var(--text); }
+@media (max-width: 1100px) { .sch-layout { grid-template-columns: 1fr; } .sch-detail { position: static; max-height: none; } }
+@media (max-width: 700px) { .sch-day { min-height: 70px; padding: 3px; } .sch-chip { font-size: 10px; padding: 2px 3px; } .sch-row { grid-template-columns: auto minmax(0, 1fr); } .sch-row .sch-badges { grid-column: 2; } }
+
+.sch-filters input, .sch-filters select, .sch-bulk input, .sch-form input { width: 100%; min-width: 0; height: 40px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); outline: none; background: #0e1016; color: var(--text); font-size: 13px; font-family: inherit; box-sizing: border-box; }
+.sch-bulk input[type="number"] { width: 76px; }
+.sch-filters input:focus, .sch-filters select:focus, .sch-bulk input:focus, .sch-form input:focus { border-color: var(--gold); }
+/* overflow: clip mantém o corte das bordas sem criar contêiner de rolagem, que quebraria o position: sticky dos previews */
+.panel.builder-panel { overflow: clip; }

@@ -33,7 +33,7 @@ const authModule = (await fs.readFile(path.join(root, 'auth.mjs'), 'utf8'))
 const appVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const worker = `${authModule}
 ${competitionModule}
-const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
+const competition = { canManageChampionship, championshipExtras, slugify, matchExtras, generateFixtures, generateNextRound, setResult, rescheduleMatch, shiftMatches, upsertPost, deletePost, collectResults, aggregateStats, buildChampionshipBundle, searchPublic, roomTable };
 const assets = ${JSON.stringify(assetMap)};
 const APP_VERSION = ${JSON.stringify(appVersion)};
 const fallbackStates = new Map();
@@ -590,7 +590,7 @@ export default {
             const previous = store.matches.find(entry => entry.id === id);
             const roomId = safeId(previous?.room || item.room || id, id).slice(0, 48);
             if (store.matches.some(entry => entry.room === roomId && entry.id !== id)) return Response.json({ ok: false, error: 'Já existe uma partida usando esta sala.' }, { status: 409 });
-            const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled'].includes(item.status) ? item.status : 'scheduled', room: roomId, updatedAt: Date.now() };
+            const match = { id, championshipId: safeId(item.championshipId), homeTeamId: safeId(item.homeTeamId), awayTeamId: safeId(item.awayTeamId), kickoffAt: String(item.kickoffAt || '').slice(0, 24), venue: String(item.venue || '').trim().slice(0, 120), registrationDeadline: String(item.registrationDeadline || '').slice(0, 10), round: String(item.round || '').trim().slice(0, 60), status: ['scheduled', 'live', 'finished', 'cancelled', 'postponed'].includes(item.status) ? item.status : 'scheduled', room: roomId, updatedAt: Date.now() };
             if (!match.championshipId || !match.homeTeamId || !match.awayTeamId || match.homeTeamId === match.awayTeamId) return Response.json({ ok: false, error: 'Selecione campeonato, mandante e visitante diferentes.' }, { status: 400 });
             const index = store.matches.findIndex(entry => entry.id === id);
             if (!competition.canManageChampionship(admin, store.championships.find(entry => entry.id === match.championshipId))) return Response.json({ ok: false, error: 'Você não administra este campeonato.' }, { status: 403 });
@@ -641,7 +641,7 @@ export default {
           } else if (action === 'mark-notification-read') {
             const notification = store.notifications.find(entry => entry.id === candidate.id);
             if (notification) notification.read = true;
-          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post'].includes(action)) {
+          } else if (['generate-fixtures', 'generate-next-round', 'set-result', 'upsert-post', 'delete-post', 'reschedule-match', 'shift-matches'].includes(action)) {
             const context = { safeId, now: () => Date.now(), addAudit };
             let outcome;
             if (action === 'generate-fixtures') outcome = competition.generateFixtures(store, candidate, admin, context);
@@ -653,6 +653,8 @@ export default {
               const stats = competition.aggregateStats(list, eventsByMatch, target && target.rules, names);
               outcome = competition.generateNextRound(store, candidate, admin, { ...context, resultsByMatch, names, cardsByTeam: stats.cardsByTeam });
             } else if (action === 'set-result') outcome = competition.setResult(store, candidate, admin, context);
+            else if (action === 'reschedule-match') outcome = competition.rescheduleMatch(store, candidate, admin, context);
+            else if (action === 'shift-matches') outcome = competition.shiftMatches(store, candidate, admin, context);
             else if (action === 'upsert-post') outcome = competition.upsertPost(store, candidate, admin, context);
             else outcome = competition.deletePost(store, candidate, admin, context);
             if (outcome.error) return Response.json({ ok: false, error: outcome.error }, { status: outcome.status || 400 });

@@ -23,7 +23,7 @@ const isPublicPage = location.pathname === '/campeonatos' || /^\/(c|o|embed)\//.
 const isObsPage = /^\/obs\//.test(location.pathname);
 const isAdminPanel = !isOutput && !isPreview && !isTeamPortal && !isPublicPage && !isObsPage;
 const platformMode = isAdminPanel && !requestedRoom;
-const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts', 'broadcast'];
+const PLATFORM_MODULE_KEYS = ['dashboard', 'championships', 'matches', 'teams', 'delegations', 'audit', 'access', 'sponsors', 'sponsor-bar', 'announcements', 'live', 'backup', 'standings', 'builder', 'feed', 'arts', 'broadcast', 'schedule'];
 const requestedModule = isManagement ? (location.pathname.split('/').filter(Boolean)[1] || 'hub') : '';
 const managementModule = platformMode ? (PLATFORM_MODULE_KEYS.includes(requestedModule) ? requestedModule : 'dashboard') : requestedModule;
 let appVersion = '';
@@ -33,6 +33,7 @@ const app = document.getElementById('app');
 const apiUrl = path => `${path}${path.includes('?') ? '&' : '?'}room=${encodeURIComponent(ROOM_ID)}`;
 
 const icons = {
+  calendar: '<svg viewBox="0 0 18 18" fill="none"><rect x="2.5" y="3.5" width="13" height="12" rx="1.8" stroke="currentColor" stroke-width="1.5"/><path d="M2.5 7.5h13M6 2v3M12 2v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   monitor: '<svg viewBox="0 0 18 18" fill="none"><rect x="2" y="3" width="14" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M6 16h6M9 13v3" stroke="currentColor" stroke-width="1.5"/></svg>',
   users: '<svg viewBox="0 0 18 18" fill="none"><circle cx="7" cy="6" r="2.3" stroke="currentColor" stroke-width="1.4"/><path d="M2.8 14c.3-2.2 1.8-3.5 4.2-3.5s3.9 1.3 4.2 3.5M12.3 4.1a2 2 0 010 3.7M12.5 10.6c1.7.2 2.6 1.3 2.8 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   list: '<svg viewBox="0 0 18 18" fill="none"><path d="M6.2 5h9M6.2 9h9M6.2 13h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="3.2" cy="5" r="1" fill="currentColor"/><circle cx="3.2" cy="9" r="1" fill="currentColor"/><circle cx="3.2" cy="13" r="1" fill="currentColor"/></svg>',
@@ -64,6 +65,7 @@ const MANAGEMENT_MODULES = [
   { key: 'arts', label: 'Estúdio de artes', caption: 'Artes prontas para redes sociais: resultados, jogos, tabelas, artilharia, escalações e avisos', layer: 'all', icon: icons.layers },
   { key: 'feed', label: 'Notícias e mídia', caption: 'Notícias, fotos e vídeos por campeonato e rodada, exibidos na página pública', layer: 'all', icon: icons.text },
   { key: 'championships', label: 'Campeonatos', caption: 'Temporadas e organização das competições', layer: 'all', icon: icons.layers },
+  { key: 'schedule', label: 'Calendário e jogos', caption: 'Calendário de cada campeonato, lista com filtros e reagendamento: adiar, adiantar e cancelar', layer: 'all', icon: icons.calendar },
   { key: 'matches', label: 'Partidas', caption: 'Agenda e salas específicas de transmissão', layer: 'all', icon: icons.monitor },
   { key: 'scoreboard', label: 'Placar', caption: 'Resultado, tempo e formato', layer: 'scoreboard', icon: icons.monitor },
   { key: 'events', label: 'Eventos', caption: 'Gols, cartões, substituições e GC', layer: 'event', icon: icons.card },
@@ -1731,6 +1733,7 @@ async function loadDashboardStats() {
   render();
 }
 
+let lastOperationResult = null;
 async function postOperation(action, payload = {}) {
   try {
     const response = await fetch('/api/operations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action, baseUpdatedAt: Number(operationsData.updatedAt || 0), ...payload }) });
@@ -1745,6 +1748,7 @@ async function postOperation(action, payload = {}) {
     if (!response.ok) { toast(data.error || 'Não foi possível concluir a ação.'); return false; }
     operationsData = data.operations || operationsData;
     operationsStatus = 'ready';
+    lastOperationResult = data.result || null;
     render();
     return true;
   } catch {
@@ -3772,7 +3776,7 @@ function exportRows(kind) {
     return { name: 'times-e-atletas', rows };
   }
   if (kind === 'matches') {
-    const status = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', cancelled: 'Cancelada' };
+    const status = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', postponed: 'Adiada', cancelled: 'Cancelada' };
     const rows = [['Campeonato', 'Rodada', 'Mandante', 'Visitante', 'Data e hora', 'Local', 'Status', 'Sala']];
     for (const match of operationsData.matches) rows.push([operationChampionshipName(match.championshipId), match.round, operationTeamName(match.homeTeamId), operationTeamName(match.awayTeamId), match.kickoffAt, match.venue, status[match.status] || match.status, match.room]);
     return { name: 'partidas', rows };
@@ -3816,6 +3820,202 @@ function renderAnnouncementsModule() {
     <div class="operations-actions"><button class="button primary" data-action="save-announcement" data-value="${escapeHtml(selected?.id || '')}">${selected ? 'Salvar alterações' : 'Publicar comunicado'}</button>${selected ? `<button class="button subtle danger" data-action="delete-announcement" data-value="${escapeHtml(selected.id)}">Excluir</button>` : ''}</div></section></div>`;
 }
 
+// ===== Calendário e jogos: visão mensal, lista com filtros e reagendamento (adiar, adiantar, cancelar, reabrir) =====
+const SCHEDULE_STATUS = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Encerrada', postponed: 'Adiada', cancelled: 'Cancelada' };
+const SCHEDULE_STATE_KEY = 'juventude.agenda.v1';
+const SCHEDULE_FILTERS = { q: '', round: '', status: '', team: '', from: '', to: '' };
+const SCHEDULE_WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+
+function loadScheduleState() {
+  const state = { championshipId: '', view: 'calendar', month: '', filters: { ...SCHEDULE_FILTERS }, selected: '', form: null, picked: [], bulk: { days: 7, reason: '' } };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCHEDULE_STATE_KEY));
+    if (saved?.view === 'list') state.view = 'list';
+    if (typeof saved?.championshipId === 'string') state.championshipId = saved.championshipId.slice(0, 80);
+  } catch {}
+  return state;
+}
+let scheduleState = loadScheduleState();
+function saveScheduleState() { try { localStorage.setItem(SCHEDULE_STATE_KEY, JSON.stringify({ view: scheduleState.view, championshipId: scheduleState.championshipId })); } catch {} }
+
+const scheduleNorm = value => String(value || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const scheduleDay = match => String(match.kickoffAt || '').slice(0, 10);
+const scheduleTime = match => String(match.kickoffAt || '').slice(11, 16);
+function scheduleShort(id) {
+  const team = teamCatalog.find(item => item.id === id);
+  return String(team?.short || team?.name || id || '?').slice(0, 4).toUpperCase();
+}
+function scheduleToday() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+function scheduleFormatDate(value, withTime = true) {
+  const parts = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+  if (!parts) return 'A definir';
+  const date = new Date(+parts[1], +parts[2] - 1, +parts[3], +(parts[4] || 12), +(parts[5] || 0));
+  const day = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' }).format(date).replace('.', '');
+  return withTime && parts[4] ? `${day} · ${parts[4]}:${parts[5]}` : day;
+}
+
+function scheduleScoped() {
+  return operationsData.matches.filter(match => !scheduleState.championshipId || match.championshipId === scheduleState.championshipId);
+}
+
+function scheduleFiltered() {
+  const { q, round, status, team, from, to } = scheduleState.filters;
+  const needle = scheduleNorm(q).trim();
+  return scheduleScoped().filter(match => {
+    if (round && match.round !== round) return false;
+    if (team && match.homeTeamId !== team && match.awayTeamId !== team) return false;
+    if (status === 'changed' ? !match.rescheduleKind : status && match.status !== status) return false;
+    const day = scheduleDay(match);
+    if ((from || to) && !day) return false;
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    if (needle && !scheduleNorm([operationTeamName(match.homeTeamId), operationTeamName(match.awayTeamId), match.venue, match.round, match.room].join(' ')).includes(needle)) return false;
+    return true;
+  }).sort((a, b) => String(a.kickoffAt || '9999').localeCompare(String(b.kickoffAt || '9999')) || (a.roundNumber || 0) - (b.roundNumber || 0));
+}
+
+// Mesma regra do servidor: mesma equipe com menos de 2 h de diferença ou mesmo local com menos de 1 h.
+function scheduleConflicts() {
+  const open = operationsData.matches.filter(match => match.kickoffAt && !['finished', 'cancelled', 'postponed'].includes(match.status));
+  const byDay = new Map();
+  for (const match of open) { const day = scheduleDay(match); byDay.set(day, [...(byDay.get(day) || []), match]); }
+  const minutes = match => { const [, y, mo, d, h, mi] = String(match.kickoffAt).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/) || []; return y ? Date.UTC(+y, +mo - 1, +d, +h, +mi) / 60000 : null; };
+  const result = new Map();
+  for (const group of byDay.values()) {
+    for (const a of group) for (const b of group) {
+      if (a.id >= b.id) continue;
+      const ma = minutes(a), mb = minutes(b);
+      if (ma === null || mb === null) continue;
+      const sameTeam = [b.homeTeamId, b.awayTeamId].some(id => id === a.homeTeamId || id === a.awayTeamId);
+      if (!(sameTeam && Math.abs(ma - mb) < 120) && !(a.venue && a.venue === b.venue && Math.abs(ma - mb) < 60)) continue;
+      result.set(a.id, [...(result.get(a.id) || []), b.id]); result.set(b.id, [...(result.get(b.id) || []), a.id]);
+    }
+  }
+  return result;
+}
+
+function scheduleBadges(match, conflicts) {
+  const out = [`<span class="sch-badge sch-${match.status}">${SCHEDULE_STATUS[match.status] || match.status}</span>`];
+  if (match.status === 'scheduled' && match.rescheduleKind === 'postponed') out.push('<span class="sch-badge sch-moved">Adiada · nova data</span>');
+  if (match.status === 'scheduled' && match.rescheduleKind === 'advanced') out.push('<span class="sch-badge sch-moved">Adiantada</span>');
+  if (conflicts.has(match.id)) out.push('<span class="sch-badge sch-clash" title="Mesma equipe em menos de 2 h ou mesmo local em menos de 1 h">⚠ Choque de horário</span>');
+  return out.join('');
+}
+
+function scheduleInitialMonth(matches) {
+  const today = scheduleToday();
+  const dated = matches.filter(match => scheduleDay(match));
+  const next = dated.find(match => scheduleDay(match) >= today && ['scheduled', 'live'].includes(match.status)) || dated[dated.length - 1];
+  return (next ? scheduleDay(next) : today).slice(0, 7);
+}
+
+function renderScheduleCalendar(matches, conflicts) {
+  const month = scheduleState.month || scheduleInitialMonth(matches);
+  const [year, monthIndex] = month.split('-').map(Number);
+  const first = new Date(year, monthIndex - 1, 1);
+  const daysInMonth = new Date(year, monthIndex, 0).getDate();
+  const rawLabel = new Intl.DateTimeFormat('pt-BR', { month: 'long', year: 'numeric' }).format(first);
+  const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+  const today = scheduleToday();
+  const byDay = new Map();
+  for (const match of matches) { const day = scheduleDay(match); if (day) byDay.set(day, [...(byDay.get(day) || []), match]); }
+  const cells = [];
+  for (let i = 0; i < first.getDay(); i += 1) cells.push('<div class="sch-day is-empty"></div>');
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = `${month}-${String(day).padStart(2, '0')}`;
+    const list = byDay.get(key) || [];
+    const chips = list.slice(0, 3).map(match => `<button type="button" class="sch-chip sch-${match.status} ${scheduleState.selected === match.id ? 'active' : ''}" data-action="schedule-select" data-value="${escapeHtml(match.id)}" title="${escapeHtml(`${operationTeamName(match.homeTeamId)} × ${operationTeamName(match.awayTeamId)}`)}">${escapeHtml(scheduleTime(match))} ${escapeHtml(scheduleShort(match.homeTeamId))} × ${escapeHtml(scheduleShort(match.awayTeamId))}${match.rescheduleKind && match.status === 'scheduled' ? ' ↻' : ''}${conflicts.has(match.id) ? ' ⚠' : ''}</button>`).join('');
+    cells.push(`<div class="sch-day ${key === today ? 'is-today' : ''}"><span class="sch-num">${day}</span>${chips}${list.length > 3 ? `<button type="button" class="sch-more" data-action="schedule-day" data-value="${key}">+${list.length - 3} jogos</button>` : ''}</div>`);
+  }
+  const undated = matches.filter(match => !scheduleDay(match));
+  return `<div class="sch-cal-head"><button class="button subtle" data-action="schedule-month" data-value="prev" aria-label="Mês anterior">‹</button><strong>${escapeHtml(label)}</strong><button class="button subtle" data-action="schedule-month" data-value="next" aria-label="Próximo mês">›</button><button class="button subtle" data-action="schedule-month" data-value="today">Hoje</button></div>
+    <div class="sch-grid">${SCHEDULE_WEEKDAYS.map(name => `<div class="sch-weekday">${name}</div>`).join('')}${cells.join('')}</div>
+    ${undated.length ? `<div class="sch-undated"><strong>Sem data definida (${undated.length})</strong>${undated.map(match => `<button type="button" class="sch-chip sch-${match.status}" data-action="schedule-select" data-value="${escapeHtml(match.id)}">${escapeHtml(operationTeamName(match.homeTeamId))} × ${escapeHtml(operationTeamName(match.awayTeamId))}${match.round ? ` · ${escapeHtml(match.round)}` : ''}</button>`).join('')}</div>` : ''}
+    <div class="sch-legend"><span class="sch-badge sch-scheduled">Agendada</span><span class="sch-badge sch-live">Ao vivo</span><span class="sch-badge sch-finished">Encerrada</span><span class="sch-badge sch-postponed">Adiada</span><span class="sch-badge sch-cancelled">Cancelada</span><span class="help-text">↻ = data alterada · ⚠ = choque de horário</span></div>`;
+}
+
+function renderScheduleList(matches, conflicts) {
+  const picked = new Set(scheduleState.picked);
+  const allPicked = matches.length > 0 && matches.every(match => picked.has(match.id));
+  const bulk = picked.size ? `<div class="sch-bulk"><strong>${picked.size} selecionada(s)</strong><label>Deslocar em <input type="number" min="-90" max="90" step="1" value="${escapeHtml(scheduleState.bulk.days)}" data-schedule-bulk="days"> dia(s)</label><input data-schedule-bulk="reason" maxlength="200" placeholder="Motivo (opcional)" value="${escapeHtml(scheduleState.bulk.reason)}"><button class="button primary" data-action="schedule-shift">Aplicar</button><button class="button subtle" data-action="schedule-clear-pick">Limpar seleção</button><small class="help-text">Valores negativos adiantam; positivos adiam. Só partidas agendadas e com data são deslocadas.</small></div>` : '';
+  const rows = matches.map(match => `<article class="sch-row ${scheduleState.selected === match.id ? 'active' : ''}"><input type="checkbox" data-action="schedule-pick" data-value="${escapeHtml(match.id)}" ${picked.has(match.id) ? 'checked' : ''} aria-label="Selecionar partida"><button type="button" class="sch-row-main" data-action="schedule-select" data-value="${escapeHtml(match.id)}"><span class="sch-when">${escapeHtml(scheduleFormatDate(match.kickoffAt))}${match.rescheduleKind && match.originalKickoffAt && match.status === 'scheduled' ? `<s>${escapeHtml(scheduleFormatDate(match.originalKickoffAt))}</s>` : ''}</span><strong>${escapeHtml(operationTeamName(match.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(match.awayTeamId))}</strong><small>${escapeHtml([operationChampionshipName(match.championshipId), match.round, match.venue].filter(Boolean).join(' · '))}</small></button><div class="sch-badges">${scheduleBadges(match, conflicts)}</div></article>`).join('');
+  return `${bulk}<div class="sch-list-head"><label class="builder-check"><input type="checkbox" data-action="schedule-pick-all" ${allPicked ? 'checked' : ''}> Selecionar todas (${matches.length})</label></div>${rows || '<div class="portal-empty">Nenhuma partida encontrada com esses filtros.</div>'}`;
+}
+
+function renderScheduleDetail(conflicts) {
+  const match = operationsData.matches.find(item => item.id === scheduleState.selected);
+  if (!match) return '<aside class="sch-detail"><div class="portal-empty">Escolha uma partida no calendário ou na lista para ver detalhes e reagendar.</div></aside>';
+  const form = scheduleState.form?.matchId === match.id ? scheduleState.form : null;
+  const locked = ['live', 'finished'].includes(match.status);
+  const history = (match.rescheduleHistory || []).map(entry => `<li><b>${escapeHtml(new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(entry.at)))}</b> · ${escapeHtml(entry.by || '')} — ${escapeHtml({ postpone: 'Adiada', reschedule: 'Reagendada', cancel: 'Cancelada', reopen: 'Reaberta', shift: 'Deslocada' }[entry.kind] || entry.kind)}: ${escapeHtml(scheduleFormatDate(entry.from))} → ${escapeHtml(scheduleFormatDate(entry.to))}${entry.reason ? ` · ${escapeHtml(entry.reason)}` : ''}</li>`).join('');
+  const actions = locked ? `<p class="help-text">${match.status === 'live' ? 'Partida em andamento' : 'Partida encerrada'}: não pode ser reagendada.</p>`
+    : match.status === 'cancelled' ? `<button class="button primary" data-action="schedule-open-form" data-value="reschedule" data-match="${escapeHtml(match.id)}">Reabrir e marcar data</button>`
+    : `<button class="button primary" data-action="schedule-open-form" data-value="reschedule" data-match="${escapeHtml(match.id)}">${match.status === 'postponed' ? 'Definir nova data' : 'Reagendar / adiantar'}</button>${match.status === 'scheduled' ? `<button class="button" data-action="schedule-open-form" data-value="postpone" data-match="${escapeHtml(match.id)}">Adiar sem data</button>` : ''}<button class="button subtle" data-action="schedule-open-form" data-value="cancel" data-match="${escapeHtml(match.id)}">Cancelar partida</button>`;
+  const field = (name, label, control) => `<div class="field"><label>${label}</label>${control}</div>`;
+  const formHtml = form ? `<div class="sch-form">
+    <h4>${{ reschedule: 'Nova data e hora', postpone: 'Adiar a partida', cancel: 'Cancelar a partida' }[form.mode]}</h4>
+    ${form.mode !== 'cancel' ? field('kickoffAt', form.mode === 'postpone' ? 'Nova data (opcional — vazio = a definir)' : 'Data e hora', `<input type="datetime-local" data-schedule-field="kickoffAt" value="${escapeHtml(form.kickoffAt)}">`) : ''}
+    ${form.mode !== 'cancel' ? field('venue', 'Local', `<input data-schedule-field="venue" maxlength="120" value="${escapeHtml(form.venue)}">`) : ''}
+    ${field('reason', 'Motivo (aparece no histórico)', `<input data-schedule-field="reason" maxlength="200" value="${escapeHtml(form.reason)}" placeholder="Ex.: chuva, campo indisponível, pedido das equipes">`)}
+    <div class="sch-form-actions"><button type="button" class="button primary" data-action="schedule-submit">Confirmar</button><button type="button" class="button subtle" data-action="schedule-close-form">Voltar</button></div>
+    ${form.mode === 'reschedule' ? '<p class="help-text">Data anterior à atual = partida adiantada; posterior = adiada com nova data. A data original fica registrada.</p>' : ''}</div>` : '';
+  return `<aside class="sch-detail"><div class="sch-detail-head"><small>${escapeHtml([operationChampionshipName(match.championshipId), match.round].filter(Boolean).join(' · '))}</small><h3>${escapeHtml(operationTeamName(match.homeTeamId))} <b>×</b> ${escapeHtml(operationTeamName(match.awayTeamId))}</h3><div class="sch-badges">${scheduleBadges(match, conflicts)}</div></div>
+    <dl class="sch-facts"><dt>Data</dt><dd>${escapeHtml(scheduleFormatDate(match.kickoffAt))}${match.originalKickoffAt && match.originalKickoffAt !== match.kickoffAt ? ` <s>${escapeHtml(scheduleFormatDate(match.originalKickoffAt))}</s>` : ''}</dd><dt>Local</dt><dd>${escapeHtml(match.venue || 'Não informado')}</dd>${match.postponeReason ? `<dt>Motivo</dt><dd>${escapeHtml(match.postponeReason)}</dd>` : ''}<dt>Sala</dt><dd>${escapeHtml(match.room)}</dd></dl>
+    <div class="sch-actions">${actions}</div>${formHtml}
+    <a class="button subtle" href="/?room=${encodeURIComponent(match.room)}">Abrir painel da partida</a>
+    ${history ? `<div class="sch-history"><strong>Histórico de alterações</strong><ul>${history}</ul></div>` : ''}</aside>`;
+}
+
+function renderScheduleModule() {
+  const pending = renderOperationsState();
+  if (pending) return pending;
+  if (!operationsData.championships.length) return '<div class="portal-empty">Cadastre um campeonato e suas partidas para usar o calendário.</div>';
+  if (scheduleState.championshipId && !operationsData.championships.some(item => item.id === scheduleState.championshipId)) scheduleState.championshipId = '';
+  const scoped = scheduleScoped();
+  const matches = scheduleFiltered();
+  const conflicts = scheduleConflicts();
+  const filters = scheduleState.filters;
+  const rounds = [...new Set(scoped.map(match => match.round).filter(Boolean))];
+  const teamIds = [...new Set(scoped.flatMap(match => [match.homeTeamId, match.awayTeamId]))].sort((a, b) => operationTeamName(a).localeCompare(operationTeamName(b), 'pt-BR'));
+  const option = (value, label, current) => `<option value="${escapeHtml(value)}" ${value === current ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  const counts = Object.keys(SCHEDULE_STATUS).map(status => [status, scoped.filter(match => match.status === status).length]).filter(([, count]) => count);
+  const toolbar = `<div class="sch-toolbar"><div class="field"><label for="sch-champ">Campeonato</label><select id="sch-champ" data-schedule-filter="championshipId">${option('', 'Todos os campeonatos', scheduleState.championshipId)}${operationsData.championships.map(item => option(item.id, `${item.name}${item.season ? ` · ${item.season}` : ''}`, scheduleState.championshipId)).join('')}</select></div>
+    <div class="access-chips"><button type="button" class="access-chip ${scheduleState.view === 'calendar' ? 'active' : ''}" data-action="schedule-view" data-value="calendar" aria-pressed="${scheduleState.view === 'calendar'}">Calendário</button><button type="button" class="access-chip ${scheduleState.view === 'list' ? 'active' : ''}" data-action="schedule-view" data-value="list" aria-pressed="${scheduleState.view === 'list'}">Lista de jogos</button></div>
+    <div class="sch-counts">${counts.map(([status, count]) => `<span class="sch-badge sch-${status}">${count} ${SCHEDULE_STATUS[status].toLowerCase()}${count === 1 ? '' : 's'}</span>`).join('')}</div></div>
+    <div class="sch-filters"><input data-schedule-filter="q" placeholder="Buscar time, local ou rodada" value="${escapeHtml(filters.q)}" aria-label="Buscar"><select data-schedule-filter="round" aria-label="Rodada">${option('', 'Todas as rodadas', filters.round)}${rounds.map(round => option(round, round, filters.round)).join('')}</select><select data-schedule-filter="team" aria-label="Time">${option('', 'Todos os times', filters.team)}${teamIds.map(id => option(id, operationTeamName(id), filters.team)).join('')}</select><select data-schedule-filter="status" aria-label="Situação">${option('', 'Todas as situações', filters.status)}${Object.entries(SCHEDULE_STATUS).map(([key, label]) => option(key, label, filters.status)).join('')}${option('changed', 'Com data alterada', filters.status)}</select><label class="sch-date">De <input type="date" data-schedule-filter="from" value="${escapeHtml(filters.from)}"></label><label class="sch-date">Até <input type="date" data-schedule-filter="to" value="${escapeHtml(filters.to)}"></label><button class="button subtle" data-action="schedule-reset-filters">Limpar filtros</button></div>
+    <p class="help-text">${matches.length} de ${scoped.length} partida(s)${conflicts.size ? ` · ${conflicts.size} com choque de horário` : ''}.</p>`;
+  return `<div class="sch-layout"><section class="sch-main">${toolbar}${scheduleState.view === 'list' ? renderScheduleList(matches, conflicts) : renderScheduleCalendar(matches, conflicts)}</section>${renderScheduleDetail(conflicts)}</div>`;
+}
+
+async function submitScheduleForm() {
+  const form = scheduleState.form;
+  if (!form) return;
+  if (form.mode === 'reschedule' && !form.kickoffAt) { toast('Informe a nova data e hora.'); return; }
+  const kind = form.mode === 'cancel' ? 'cancel' : form.mode === 'postpone' ? 'postpone' : (operationsData.matches.find(item => item.id === form.matchId)?.status === 'cancelled' ? 'reopen' : 'reschedule');
+  const payload = { matchId: form.matchId, kind, reason: form.reason };
+  if (form.mode !== 'cancel') { payload.kickoffAt = form.kickoffAt; payload.venue = form.venue; }
+  if (await postOperation('reschedule-match', payload)) {
+    scheduleState.form = null;
+    const clashes = lastOperationResult?.conflicts?.length || 0;
+    toast(clashes ? `Partida atualizada. Atenção: choque de horário com ${clashes} partida(s).` : 'Partida atualizada.');
+    render();
+  }
+}
+
+async function submitScheduleShift() {
+  const days = Math.round(Number(scheduleState.bulk.days));
+  if (!Number.isFinite(days) || days === 0) { toast('Informe quantos dias deslocar (negativo adianta, positivo adia).'); return; }
+  if (await postOperation('shift-matches', { matchIds: scheduleState.picked, days, reason: scheduleState.bulk.reason })) {
+    const result = lastOperationResult || {};
+    scheduleState.picked = [];
+    toast(`${result.changed || 0} partida(s) deslocada(s)${result.skipped ? `, ${result.skipped} ignorada(s)` : ''}${result.conflicts?.length ? `. Atenção: ${result.conflicts.length} com choque de horário.` : '.'}`);
+    render();
+  }
+}
+
 function renderMatchesModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
@@ -3834,7 +4034,7 @@ function renderDashboardModule() {
   const pending = renderOperationsState();
   if (pending) return pending;
   const matches = operationsData.matches;
-  const statusLabel = { scheduled: 'Agendadas', live: 'Ao vivo', finished: 'Finalizadas', cancelled: 'Canceladas' };
+  const statusLabel = { scheduled: 'Agendadas', live: 'Ao vivo', finished: 'Finalizadas', postponed: 'Adiadas', cancelled: 'Canceladas' };
   const statusCounts = Object.keys(statusLabel).map(status => [status, matches.filter(item => item.status === status).length]);
   const liveNow = matches.filter(item => item.status === 'live');
   const upcoming = matches.filter(item => item.status === 'scheduled').sort((a, b) => String(a.kickoffAt || '').localeCompare(String(b.kickoffAt || ''))).slice(0, 5);
@@ -3848,7 +4048,7 @@ function renderDashboardModule() {
   }, {});
   const aggregatedTiles = Object.entries(aggregated);
   return `<div class="dashboard-grid">
-    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Agenda e status de partidas</h3><p class="help-text">${matches.length} partida${matches.length === 1 ? '' : 's'} cadastrada${matches.length === 1 ? '' : 's'} no total.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('matches'))}">Ver agenda completa</a></div>
+    <section class="dashboard-section"><div class="section-header"><div><h3 class="section-title">Agenda e status de partidas</h3><p class="help-text">${matches.length} partida${matches.length === 1 ? '' : 's'} cadastrada${matches.length === 1 ? '' : 's'} no total.</p></div><a class="button subtle" href="${escapeHtml(moduleUrl('schedule'))}">Ver agenda completa</a></div>
       <div class="dashboard-stats">${statusCounts.map(([status, count]) => `<article class="stat-${status}"><strong>${count}</strong><span>${statusLabel[status]}</span></article>`).join('')}</div>
       ${liveNow.length ? `<div class="dashboard-list"><strong>Ao vivo agora</strong>${liveNow.map(matchRow).join('')}</div>` : ''}
       ${upcoming.length ? `<div class="dashboard-list"><strong>Próximas partidas</strong>${upcoming.map(matchRow).join('')}</div>` : '<div class="portal-empty">Nenhuma partida agendada.</div>'}
@@ -4464,6 +4664,7 @@ function renderModuleControls(key) {
   if (key === 'standings') return renderStandingsModule();
   if (key === 'feed') return renderFeedModule();
   if (key === 'arts') return renderArtsModule();
+  if (key === 'schedule') return renderScheduleModule();
   if (key === 'broadcast') return renderBroadcastModule();
   if (key === 'backup') return renderBackupModule();
   let content = '';
@@ -4574,7 +4775,7 @@ function renderModuleHub() {
 
 // Grupos do menu do Super Administrador: separados por função (operar, cadastrar, publicar, comunicar, administrar).
 const PLATFORM_MENU_GROUPS = [
-  ['operation', 'Operação', ['live', 'championships', 'matches', 'standings']],
+  ['operation', 'Operação', ['live', 'championships', 'schedule', 'matches', 'standings']],
   ['registry', 'Cadastros', ['teams', 'delegations']],
   ['content', 'Conteúdo', ['broadcast', 'arts', 'feed', 'sponsors', 'sponsor-bar', 'builder']],
   ['communication', 'Comunicação', ['announcements', 'audit']],
@@ -4611,7 +4812,7 @@ function renderManagementSidebar(activeKey = 'overview') {
 function renderModuleApp() {
   const module = MANAGEMENT_MODULES.find(item => item.key === managementModule);
   const unread = operationsData.notifications.filter(item => !item.read).length;
-  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts', 'broadcast'].includes(module?.key);
+  const isOperational = ['dashboard', 'championships', 'matches', 'delegations', 'audit', 'builder', 'access', 'announcements', 'live', 'backup', 'standings', 'feed', 'arts', 'broadcast', 'schedule'].includes(module?.key);
   return `<div class="studio module-studio"><header class="topbar"><a class="brand" href="${platformMode ? escapeHtml(platformUrl('dashboard')) : `/?room=${encodeURIComponent(ROOM_ID)}`}">${brandMark()}<span class="brand-copy"><strong class="brand-name">Juventude</strong><span class="brand-caption">Esporte Clube</span></span></a><div class="top-actions">${platformMode ? (libraryMode ? '<span class="room-badge">Biblioteca · sem partida</span>' : '') : `<span class="room-badge">Sala · ${escapeHtml(ROOM_ID)}</span>`}<a class="button notification-button ${unread ? 'has-unread' : ''}" href="${escapeHtml(moduleUrl('audit'))}">${icons.list} Avisos${unread ? `<b>${unread}</b>` : ''}</a>${platformMode ? (libraryMode ? `<button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>` : '') : `<a class="button" href="/?room=${encodeURIComponent(ROOM_ID)}">Visão geral da partida</a><button class="button primary" data-action="open-obs">${icons.external} Saídas OBS</button>`}<button class="button subtle" data-action="admin-logout">Sair</button></div></header><main class="module-workspace">${renderManagementSidebar(module?.key || 'hub')}<div class="module-main">${module ? `<header class="module-page-head"><div><span>${module.key === 'builder' ? 'Criação sem desenvolvimento' : ['championships','matches','delegations','audit','announcements','live','standings'].includes(module.key) ? 'Gestão da transmissão' : libraryMode ? 'Biblioteca da plataforma' : platformMode ? 'Plataforma' : `${escapeHtml(currentSport().label)} · módulo dedicado`}</span><h1>${escapeHtml(module.key === 'dashboard' && platformMode ? 'Visão geral da plataforma' : module.label)}</h1><p>${escapeHtml(module.caption)}</p></div>${platformMode ? '' : `<a class="button subtle" href="${escapeHtml(moduleUrl())}">Todos os módulos</a>`}</header>${adminSession.role === 'viewer' ? '<div class="library-banner"><div><strong>Acesso somente leitura</strong><p>Seu papel é Leitor: você pode consultar dados e prévias, mas alterações não são salvas.</p></div></div>' : ''}${isOperational ? `<section class="panel builder-panel">${renderModuleControls(module.key)}</section>` : `${libraryMode ? '' : renderSportSwitcher()}<div class="module-grid"><section class="panel module-controls">${renderModuleControls(module.key)}</section>${renderModuleMonitor(module)}</div>`}` : renderModuleHub()}</div></main></div>${drawer ? renderDrawer() : ''}`;
 }
 
@@ -4789,7 +4990,7 @@ function renderDelegationsModule() {
   return `<div class="module-section"><div class="dashboard-stats">${tiles.map(([value, label]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('')}</div><div class="delegation-list">${cards}</div><p class="help-text">O prazo vem do campo "Prazo do cadastro das equipes" de cada partida. Os alertas aparecem aqui e no portal da equipe; não há envio automático de e-mail ou mensagem.</p></div>`;
 }
 
-const MATCH_STATUS_LABELS = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', cancelled: 'Cancelada' };
+const MATCH_STATUS_LABELS = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', postponed: 'Adiada', cancelled: 'Cancelada' };
 
 function portalStatusLabel() {
   return teamPortalStatus === 'saving' ? 'Salvando…' : teamPortalStatus === 'saved' ? 'Dados salvos' : teamPortalStatus === 'error' ? 'Erro ao salvar' : 'Alterações salvas manualmente';
@@ -4912,7 +5113,7 @@ ${portalAnnouncements().length ? `<section class="portal-panel"><div class="sect
 function renderPortalCalendar() {
   const matches = [...(teamPortalContext.matches || [])].sort((a, b) => String(a.kickoffAt || '9').localeCompare(String(b.kickoffAt || '9')));
   if (!matches.length) return '<div class="portal-empty">Nenhum jogo agendado para a sua equipe.</div>';
-  const statusLabel = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', cancelled: 'Cancelada' };
+  const statusLabel = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Finalizada', postponed: 'Adiada', cancelled: 'Cancelada' };
   const groups = new Map();
   for (const match of matches) {
     const date = match.kickoffAt ? new Date(match.kickoffAt) : null;
@@ -5136,7 +5337,7 @@ function renderIsolatedOutput() {
 function rememberFocusedField() {
   const focused = document.activeElement;
   if (!focused?.matches?.('input:not([type="file"]), textarea, [contenteditable="true"]')) return null;
-  const attributes = ['data-obs-field','data-obs-preset-name','data-art-preset-name','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
+  const attributes = ['data-schedule-filter','data-schedule-field','data-schedule-bulk','data-obs-field','data-obs-preset-name','data-art-preset-name','data-art-field','data-public-search','data-public-team','data-field','data-custom-field','data-el-field','data-size-preset','data-ch-field','data-fx','data-team-field','data-team','data-appearance','data-sponsor-name','data-catalog-field','data-catalog-id','data-lineup-coach-name','data-lineup-athlete-position','data-lineup-team-id','data-portal-athlete-field','data-athlete-id','data-portal-staff-name','data-portal-coach-name','data-portal-team-field','data-championship-field','data-theme-override','data-access-search','data-sidebar-search','data-stats-player'];
   let selector = focused.id ? `#${focused.id}` : '';
   if (!selector) selector = attributes.filter(name => focused.hasAttribute?.(name)).map(name => `[${name}="${String(focused.getAttribute(name)).replace(/"/g, '\\"')}"]`).join('');
   return selector ? { selector, start: focused.selectionStart, end: focused.selectionEnd } : null;
@@ -5226,7 +5427,7 @@ function publicFavorites() {
   try { return JSON.parse(localStorage.getItem(FAVORITES_KEY)) || []; } catch { return []; }
 }
 
-const PUBLIC_STATUS = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Encerrada', cancelled: 'Cancelada' };
+const PUBLIC_STATUS = { scheduled: 'Agendada', live: 'Ao vivo', finished: 'Encerrada', postponed: 'Adiada', cancelled: 'Cancelada' };
 const PUBLIC_TABS = [['classificacao', 'Classificação'], ['jogos', 'Jogos'], ['artilharia', 'Artilharia'], ['disciplina', 'Disciplina'], ['noticias', 'Notícias e fotos']];
 
 function publicHeader(extra = '') {
@@ -5523,6 +5724,35 @@ function handleAction(action, target) {
     return;
   }
   if (action === 'art-standings') { if (standingsBundle) buildQuickArt(standingsBundle, { type: 'standings', championshipId: standingsChampionshipId, format: 'portrait' }).then(canvas => openArt(canvas, `classificacao-${standingsBundle.championship.slug || 'campeonato'}`)); return; }
+  if (action === 'schedule-view') { scheduleState.view = target.dataset.value === 'list' ? 'list' : 'calendar'; saveScheduleState(); render(); return; }
+  if (action === 'schedule-month') {
+    const base = scheduleState.month || scheduleInitialMonth(scheduleFiltered());
+    let [year, month] = base.split('-').map(Number);
+    if (target.dataset.value === 'today') scheduleState.month = scheduleToday().slice(0, 7);
+    else { month += target.dataset.value === 'next' ? 1 : -1; if (month < 1) { month = 12; year -= 1; } if (month > 12) { month = 1; year += 1; } scheduleState.month = `${year}-${String(month).padStart(2, '0')}`; }
+    render(); return;
+  }
+  if (action === 'schedule-select') { scheduleState.selected = target.dataset.value; scheduleState.form = null; render(); return; }
+  if (action === 'schedule-day') { scheduleState.filters.from = target.dataset.value; scheduleState.filters.to = target.dataset.value; scheduleState.view = 'list'; saveScheduleState(); render(); return; }
+  if (action === 'schedule-reset-filters') { scheduleState.filters = { ...SCHEDULE_FILTERS }; render(); return; }
+  if (action === 'schedule-open-form') {
+    const match = operationsData.matches.find(item => item.id === target.dataset.match);
+    if (!match) return;
+    const mode = ['reschedule', 'postpone', 'cancel'].includes(target.dataset.value) ? target.dataset.value : 'reschedule';
+    scheduleState.selected = match.id;
+    scheduleState.form = { matchId: match.id, mode, kickoffAt: mode === 'postpone' ? '' : match.kickoffAt || match.originalKickoffAt || '', venue: match.venue || '', reason: '' };
+    render(); return;
+  }
+  if (action === 'schedule-close-form') { scheduleState.form = null; render(); return; }
+  if (action === 'schedule-submit') { submitScheduleForm(); return; }
+  if (action === 'schedule-pick') { const id = target.dataset.value; scheduleState.picked = scheduleState.picked.includes(id) ? scheduleState.picked.filter(item => item !== id) : [...scheduleState.picked, id]; render(); return; }
+  if (action === 'schedule-pick-all') {
+    const ids = scheduleFiltered().map(match => match.id);
+    scheduleState.picked = ids.every(id => scheduleState.picked.includes(id)) ? scheduleState.picked.filter(id => !ids.includes(id)) : [...new Set([...scheduleState.picked, ...ids])];
+    render(); return;
+  }
+  if (action === 'schedule-clear-pick') { scheduleState.picked = []; render(); return; }
+  if (action === 'schedule-shift') { submitScheduleShift(); return; }
   if (action === 'obs-set') {
     const [field, ...rest] = String(target.dataset.value || '').split('|');
     setObsOption(field, rest.join('|'));
@@ -6917,6 +7147,15 @@ app.addEventListener('click', event => {
 
 app.addEventListener('input', event => {
   const target = event.target;
+  if (target.matches('[data-schedule-filter]')) {
+    const key = target.dataset.scheduleFilter;
+    if (key === 'championshipId') { Object.assign(scheduleState, { championshipId: target.value, filters: { ...SCHEDULE_FILTERS }, picked: [], selected: '', form: null, month: '' }); saveScheduleState(); }
+    else if (key in SCHEDULE_FILTERS) scheduleState.filters[key] = String(target.value).slice(0, 80);
+    render();
+    return;
+  }
+  if (target.matches('[data-schedule-field]') && scheduleState.form) { scheduleState.form[target.dataset.scheduleField] = String(target.value).slice(0, 200); return; }
+  if (target.matches('[data-schedule-bulk]')) { scheduleState.bulk[target.dataset.scheduleBulk] = target.value; return; }
   if (target.matches('[data-obs-preset-name]')) { obsPresetName = target.value; return; }
   if (target.matches('[data-obs-field]')) {
     const field = target.dataset.obsField;
