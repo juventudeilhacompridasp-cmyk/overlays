@@ -1558,7 +1558,7 @@ async function pollTeamCatalog() {
     teamCatalog = teamCatalogState.teams;
     if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
     writeTeamCatalogLocal();
-    if (isOutput || isPreview) { render(); return; }
+    if (isOutput || isPreview) { softRender(); return; }
     commit(draft => {
       for (const side of ['home', 'away']) {
         const team = teamCatalog.find(item => item.id === draft.selectedTeams?.[side]);
@@ -1673,7 +1673,7 @@ async function loadAccessData() {
 async function loadOperationsData() {
   if (!isAdminPanel || adminSession.status !== 'authenticated') return;
   operationsStatus = operationsData.updatedAt ? 'ready' : 'loading';
-  if (!operationsData.updatedAt) render();
+  if (!operationsData.updatedAt) softRender();
   try {
     const response = await fetch(`/api/operations?ts=${Date.now()}`, { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1712,15 +1712,15 @@ async function loadOperationsData() {
   } catch {
     operationsStatus = 'error';
   }
-  render();
+  softRender();
 }
 
 async function loadDashboardStats() {
   if (managementModule !== 'dashboard') return;
   const rooms = [...new Set(operationsData.matches.map(item => item.room).filter(Boolean))];
-  if (!rooms.length) { dashboardStats = { status: 'ready', byRoom: {} }; render(); return; }
+  if (!rooms.length) { dashboardStats = { status: 'ready', byRoom: {} }; softRender(); return; }
   dashboardStats = { status: 'loading', byRoom: dashboardStats.byRoom };
-  render();
+  softRender();
   try {
     const results = await Promise.all(rooms.map(async room => {
       try {
@@ -1734,7 +1734,7 @@ async function loadDashboardStats() {
   } catch {
     dashboardStats = { status: 'error', byRoom: dashboardStats.byRoom };
   }
-  render();
+  softRender();
 }
 
 let lastOperationResult = null;
@@ -1855,6 +1855,7 @@ function applySponsorLibrary(target = state) {
   return true;
 }
 
+let sponsorLibraryRenderedAt = 0;
 async function pollSponsorLibrary() {
   if (libraryMode || isTeamPortal) return;
   try {
@@ -1864,7 +1865,9 @@ async function pollSponsorLibrary() {
     if (!remote?.updatedAt) return;
     const normalized = normalizeState(remote);
     sponsorLibrary = { updatedAt: Number(remote.updatedAt), fields: Object.fromEntries(SPONSOR_LIBRARY_FIELDS.map(field => [field, normalized[field]])) };
-    if (applySponsorLibrary()) { writeLocal(); render(); } else if (isManagement) render();
+    const remoteChanged = Number(remote.updatedAt) !== sponsorLibraryRenderedAt;
+    sponsorLibraryRenderedAt = Number(remote.updatedAt);
+    if (applySponsorLibrary()) { writeLocal(); softRender(); } else if (isManagement && remoteChanged) softRender();
   } catch {}
 }
 
@@ -1874,7 +1877,7 @@ function receiveState(incoming) {
   if (teamCatalogState.globalAppearance) applyGlobalAppearance(state, teamCatalogState.globalAppearance);
   applySponsorLibrary(state);
   writeLocal();
-  render();
+  softRender();
 }
 
 channel?.addEventListener('message', event => {
@@ -2225,7 +2228,7 @@ async function loadStandingsRooms(force = false) {
     const summary = standingsBundle?.matches.find(match => match.id === standingsSummaryId);
     if (summary) { const room = await fetch(`/api/state?room=${encodeURIComponent(summary.room)}&ts=${Date.now()}`, { cache: 'no-store' }); if (room.ok) standingsRooms[summary.room] = await room.json(); }
   } catch {}
-  if (managementModule === 'standings') render();
+  if (managementModule === 'standings') softRender();
 }
 
 function eventKind(title) {
@@ -2602,14 +2605,14 @@ async function loadObsBundle() {
     obsAutoSlug = championship.id;
     setObsOption('slug', wantedSlug);
     if (!wantedSlug) setObsOption('id', championship.id);
-    render();
+    softRender();
     return;
   }
   if (obsBundleFor === championship.id) return;
   obsBundleFor = championship.id;
   try {
     const response = await fetch(`/api/public/championship?id=${encodeURIComponent(championship.id)}&ts=${Date.now()}`, { cache: 'no-store' });
-    if (response.ok) { obsBundle = await response.json(); if (managementModule === 'broadcast') render(); }
+    if (response.ok) { obsBundle = await response.json(); if (managementModule === 'broadcast') softRender(); }
   } catch {}
 }
 
@@ -3561,7 +3564,7 @@ async function loadArtBundle(force = false) {
     const response = await fetch(`/api/public/championship?id=${encodeURIComponent(artOptions.championshipId)}&ts=${Date.now()}`, { cache: 'no-store' });
     if (response.ok) { artBundle = await response.json(); artBundleFor = artOptions.championshipId; }
   } catch {}
-  if (managementModule === 'arts') render();
+  if (managementModule === 'arts') softRender();
 }
 
 async function loadArtSponsors() {
@@ -3751,7 +3754,7 @@ async function loadLiveRooms() {
       if (response.ok) liveRooms[room] = await response.json();
     } catch {}
   }));
-  if (managementModule === 'live') render();
+  if (managementModule === 'live') softRender();
 }
 
 function liveClockText(remote) {
@@ -4848,7 +4851,7 @@ async function loadPlatformOverlays(force = false) {
     if (!response.ok) return;
     const remote = await response.json();
     const next = remote?.updatedAt ? normalizeState(remote).customOverlays : [];
-    if (JSON.stringify(next) !== JSON.stringify(platformOverlays)) { platformOverlays = next; render(); }
+    if (JSON.stringify(next) !== JSON.stringify(platformOverlays)) { platformOverlays = next; softRender(); }
   } catch {}
 }
 
@@ -5808,6 +5811,58 @@ function renderPublicApp() {
     <nav class="public-tabs" aria-label="Seções">${PUBLIC_TABS.map(([key, label]) => `<a class="${tab === key ? 'active' : ''}" href="#${key}">${label}</a>`).join('')}</nav>
     <section class="public-content">${publicChampionshipTab(bundle, tab)}</section>${publicFooter()}</div>`;
 }
+
+// Atualizações vindas de consultas periódicas não podem apagar o que a pessoa está digitando:
+// com um campo em foco a atualização espera; sem foco, os campos já alterados mantêm o valor digitado.
+let renderDeferred = false;
+const FIELD_SELECTOR = 'input:not([type="file"]):not([type="button"]):not([type="submit"]), textarea, select';
+
+function userIsEditing() {
+  const element = document.activeElement;
+  if (typeof element?.matches !== 'function' || typeof app.contains !== 'function') return false;
+  return Boolean(element && element !== document.body && app.contains(element) && element.matches('input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="button"]):not([type="file"]), textarea, select, [contenteditable="true"]'));
+}
+
+function fieldKey(element) {
+  if (element.id) return `#${String(element.id).replace(/([^a-zA-Z0-9_-])/g, '\\$1')}`;
+  const parts = element.getAttributeNames().filter(name => name.startsWith('data-') && name !== 'data-action').map(name => `[${name}="${String(element.getAttribute(name)).replace(/["\\]/g, '\\$&')}"]`);
+  return parts.length ? `${element.tagName.toLowerCase()}${parts.join('')}` : '';
+}
+
+function snapshotDirtyFields() {
+  const saved = [];
+  if (typeof app.querySelectorAll !== 'function') return saved;
+  for (const element of app.querySelectorAll(FIELD_SELECTOR)) {
+    const key = fieldKey(element);
+    if (!key) continue;
+    if (element.matches('input[type="checkbox"], input[type="radio"]')) { if (element.checked !== element.defaultChecked) saved.push({ key, checked: element.checked, base: element.defaultChecked }); }
+    else if (element.tagName === 'SELECT') { const base = [...element.options].findIndex(option => option.defaultSelected); if (element.selectedIndex !== Math.max(0, base)) saved.push({ key, index: element.selectedIndex, base: Math.max(0, base), value: element.value }); }
+    else if (element.value !== element.defaultValue) saved.push({ key, value: element.value, base: element.defaultValue });
+  }
+  return saved;
+}
+
+function restoreDirtyFields(saved) {
+  for (const item of saved) {
+    let element = null;
+    try { element = app.querySelector(item.key); } catch {}
+    if (!element) continue;
+    if ('checked' in item) { if (element.defaultChecked === item.base) element.checked = item.checked; }
+    else if (element.tagName === 'SELECT') { if (Math.max(0, [...element.options].findIndex(option => option.defaultSelected)) === item.base) element.value = item.value; }
+    else if (element.defaultValue === item.base) element.value = item.value;
+  }
+}
+
+function softRender() {
+  if (userIsEditing()) { renderDeferred = true; return; }
+  const saved = snapshotDirtyFields();
+  render();
+  restoreDirtyFields(saved);
+}
+
+app.addEventListener('focusout', () => {
+  setTimeout(() => { if (renderDeferred && !userIsEditing()) { renderDeferred = false; softRender(); } }, 200);
+});
 
 function render() {
   if (isObsPage) return;
